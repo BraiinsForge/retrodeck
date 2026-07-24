@@ -1227,6 +1227,23 @@ production lines, including the existing catalog compiler, and 18,573 lines with
 focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
 compressed or generated first-party source.
 
+## Focused Lisp fixture consolidation checkpoint
+
+The policy suite now declares its 98 native fixture parameters through one
+initializer-group macro and registers all 49 native test doubles through one
+explicit definition macro. Macro-expansion comparison found every initializer,
+lambda list, and function body identical to the prior forms. No fixture or later
+observable assertion was removed.
+
+Fresh SBCL, the complete host suite, targeted and complete ARM verification,
+`nix flake check`, and independent review passed. Commit `7eadd5c` was pushed
+immediately.
+
+At this checkpoint the physical Rust and Common Lisp footprint remains 11,562
+production lines, including the existing catalog compiler, and falls to 18,478
+lines with focused Rust and Lisp tests. This leaves 106 lines below the
+15,909/18,584 budgets without compressed or generated first-party source.
+
 ## Validation baseline
 
 Updated on 2026-07-24:
