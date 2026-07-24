@@ -291,6 +291,7 @@
            #:wifi-touch-transition
            #:wifi-valid-text-p
            #:stroke-canvas-rect
+           #:uploader-palette-save-plan
            #:uploader-policy-section
            #:uploader-policy-snapshot
            #:uploader-system-policy

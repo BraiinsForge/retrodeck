@@ -2152,10 +2152,82 @@ secret!9
  "uploader/palette.go"
  '("[]string{store.fallbackPath, store.activePath}"
    "parsePaletteOverride(contents); parseErr == nil"
+   "builder.WriteString(\"(:version 2\\n :palette\\n  (\")"
+   "fmt.Fprintf(&builder, \":%s \\\"%s\\\"\""
+   "builder.WriteString(\"))\\n\")"
    "atomicWrite(store.overridePath"))
 (assert-source-fragments
  "uploader/password.go"
  '("os.Rename(temporaryName, path)" "directoryHandle.Sync()"))
+(let* ((fields
+         (loop for spec in (getf retrodeck:*uploader-policy* :palette-fields)
+               for color in retrodeck:*dashboard-palette*
+               collect (cons (car spec)
+                             (string-downcase
+                              (format nil "#~6,'0X" (cdr color))))))
+       (plan (retrodeck:uploader-palette-save-plan (reverse fields)))
+       (write (getf plan :write))
+       (restart (getf plan :restart)))
+  (assert (equal (list (getf plan :accepted-p) (getf plan :status)
+                       (getf plan :notice) (getf plan :failure-status))
+                 '(t 200 "Dashboard appearance was saved and applied." 422)))
+  (assert (equal (list (getf write :path) (getf write :mode)
+                       (getf write :error-prefix))
+                 '("/mnt/data/nes-deck/state/dashboard-palette.sexp" #o600
+                   "save dashboard appearance: ")))
+  (assert (string=
+           (getf write :contents)
+           "(:version 2
+ :palette
+  (:background \"#000000\"
+   :text-dark \"#121212\"
+   :field \"#121212\"
+   :surface \"#1C1C1C\"
+   :inactive-border \"#5F5F5F\"
+   :control-border \"#6C6C6C\"
+   :footer \"#BCBCBC\"
+   :inactive-text \"#DADADA\"
+   :text \"#EEEEEE\"
+   :white \"#FFFFFF\"
+   :title \"#FFFFAF\"
+   :volume-off \"#AF8787\"
+   :volume-on \"#87AF87\"
+   :selected \"#ECB6E7\"
+   :wifi-active \"#5F87AF\"
+   :wifi-focus \"#87AFFF\"
+   :wifi-active-border \"#AFAFFF\"
+   :field-label \"#AFAFAF\"
+   :accent \"#FE6C27\"
+   :active \"#503311\"
+   :control-surface \"#303030\"
+   :muted \"#949494\"))
+"))
+  (assert (equal restart
+                 '(:executable "/etc/init.d/nes-deck"
+                   :arguments ("restart") :timeout-ms 20000
+                   :error-prefix
+                   "appearance was saved, but the dashboard could not reload: ")))
+  (flet ((rejects (candidate status message)
+           (assert (equal (retrodeck:uploader-palette-save-plan candidate)
+                          (list :accepted-p nil :status status
+                                :error message)))))
+    (rejects (butlast fields) 422
+             "palette must contain every dashboard color exactly once")
+    (rejects (cons (first fields) fields) 400
+             "The appearance form contains an unknown or repeated field.")
+    (rejects (cons '("bogus" . "#000000") (rest fields)) 400
+             "The appearance form contains an unknown or repeated field.")
+    (rejects (cons '("background" . "#12345g") (rest fields)) 400
+             "Every color must be a full RGB value like #12ABEF."))
+  (assert (signals-type-error-p
+           (lambda () (retrodeck:uploader-palette-save-plan :invalid))))
+  (setf (char (getf write :path) 1) #\X
+        (char (first (getf restart :arguments)) 0) #\X)
+  (let ((fresh (retrodeck:uploader-palette-save-plan fields)))
+    (assert (string= (getf (getf fresh :write) :path)
+                     "/mnt/data/nes-deck/state/dashboard-palette.sexp"))
+    (assert (string= (first (getf (getf fresh :restart) :arguments))
+                     "restart"))))
 (assert (= (retrodeck:dashboard-color :accent) #xfe6c27))
 (assert (equal retrodeck:*dashboard-executables*
                '((:nes . "/mnt/data/nes-deck/nes-deck")

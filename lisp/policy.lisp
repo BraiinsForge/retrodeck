@@ -267,6 +267,62 @@
                       :test #'string=)))
     (and system (copy-dashboard-policy-value system))))
 
+(defun encode-uploader-palette-override (values)
+  (with-output-to-string (output)
+    (format output "(:version 2~% :palette~%  (")
+    (loop for (name . color) in values
+          for first = t then nil
+          do (unless first (format output "~%   "))
+             (format output ":~A \"~A\"" name color))
+    (format output "))~%")))
+
+(defun uploader-palette-error (status message)
+  (list :accepted-p nil :status status :error (copy-seq message)))
+
+(defun uploader-palette-save-plan (fields)
+  "Validate one decoded palette form and return its non-authoritative save plan."
+  (check-type fields list)
+  (let ((specs (getf *uploader-policy* :palette-fields))
+        (values (make-hash-table :test #'equal)))
+    (dolist (field fields)
+      (unless (and (consp field) (stringp (car field)) (stringp (cdr field))
+                   (assoc (car field) specs :test #'string=)
+                   (not (nth-value 1 (gethash (car field) values))))
+        (return-from uploader-palette-save-plan
+          (uploader-palette-error
+           400 "The appearance form contains an unknown or repeated field.")))
+      (handler-case
+          (setf (gethash (car field) values)
+                (format nil "#~6,'0X"
+                        (dashboard-rgb-color (cdr field) "appearance form")))
+        (error ()
+          (return-from uploader-palette-save-plan
+            (uploader-palette-error
+             400 "Every color must be a full RGB value like #12ABEF.")))))
+    (unless (= (hash-table-count values) (length specs))
+      (return-from uploader-palette-save-plan
+        (uploader-palette-error
+         422 "palette must contain every dashboard color exactly once")))
+    (let* ((ordered (loop for spec in specs
+                          for name = (car spec)
+                          collect (cons name (gethash name values))))
+           (paths (getf *uploader-policy* :paths))
+           (dashboard (getf *uploader-policy* :dashboard)))
+      (copy-dashboard-policy-value
+       (list :accepted-p t :status 200
+             :notice "Dashboard appearance was saved and applied."
+             :failure-status 422
+             :write (list :path (getf paths :palette-override)
+                          :mode (getf (getf *uploader-policy* :storage)
+                                     :private-file-mode)
+                          :contents (encode-uploader-palette-override ordered)
+                          :error-prefix "save dashboard appearance: ")
+             :restart (list :executable (getf dashboard :restart-executable)
+                            :arguments (getf dashboard :restart-arguments)
+                            :timeout-ms (getf dashboard :restart-timeout-ms)
+                            :error-prefix
+                            "appearance was saved, but the dashboard could not reload: "))))))
+
 (defun dashboard-tsv-lines (text)
   (loop with start = 0
         while (< start (length text))
