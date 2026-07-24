@@ -53,63 +53,13 @@
   ('(0 0 -1 nil) *helper-result*)
   ('(1 0 0 -1 nil 0) *terminal-result* *child-result*))
 
-(defpackage #:retrodeck.native
-  (:use)
-  (:export #:abi-version
-           #:audio-active-p
-           #:canvas-clear
-           #:canvas-configure-projection
-           #:canvas-draw-glyph
-           #:canvas-draw-projected-text
-           #:canvas-draw-raster
-           #:canvas-fill-rect
-           #:canvas-rgb565-hash-words
-           #:evdev-controls-close
-           #:evdev-controls-dispatch
-           #:evdev-controls-scan
-           #:evdev-next-control
-           #:evdev-next-touch
-           #:evdev-touch-close
-           #:evdev-touch-dispatch
-           #:evdev-touch-open
-           #:fbdev-close
-           #:fbdev-open
-           #:fbdev-present-canvas
-           #:fbdev-present-solid
-           #:fbdev-size
-           #:finish-audio
-           #:input-poll
-           #:network-status
-           #:play-tones
-           #:raster-clear
-           #:raster-load-cover
-           #:raster-load-png
-           #:read-control-file
-           #:read-regular-file
-           #:read-state-file
-           #:run-child
-           #:run-helper
-           #:run-terminal
-           #:stop-audio
-           #:write-control-file
-           #:write-state-file
-           #:text-mask-clear
-           #:text-mask-load
-           #:wayland-close
-           #:wayland-dispatch
-           #:wayland-next-touch
-           #:wayland-open-widget
-           #:wayland-open-widget-at
-           #:wayland-present-canvas
-           #:wayland-present-solid
-           #:wayland-shutdown-p
-           #:wayland-size))
+(defpackage #:retrodeck.native (:use))
 
 (defmacro define-native-test-functions (&body definitions)
   `(progn
      ,@(loop for (name parameters . body) in definitions
              collect `(setf (symbol-function
-                             (find-symbol ,(string name) "RETRODECK.NATIVE"))
+                             (intern ,(string name) "RETRODECK.NATIVE"))
                             (lambda ,parameters ,@body)))))
 
 (define-native-test-functions
@@ -281,6 +231,27 @@
   (assert (= (length text) 16))
   (parse-integer text :radix 16))
 
+(defun assert-unary-table (test parser fixtures &rest fixed-arguments)
+  (dolist (fixture fixtures)
+    (assert (funcall test (apply parser (first fixture) fixed-arguments)
+                     (second fixture)))))
+
+(defun assert-binary-table (test parser fixtures)
+  (dolist (fixture fixtures)
+    (assert (funcall test (funcall parser (first fixture) (second fixture))
+                     (third fixture)))))
+
+(defmacro assert-signaled-table (condition function values)
+  `(dolist (value ,values)
+     (assert-signals ,condition (funcall ,function value))))
+
+(defun assert-rect-target-boundaries (finder layout target)
+  (destructuring-bind (x y width height) (getf layout target)
+    (assert (eq (funcall finder layout x y) target))
+    (assert (eq (funcall finder layout (+ x width -1) (+ y height -1)) target))
+    (assert (not (eq (funcall finder layout (+ x width) y) target)))
+    (assert (not (eq (funcall finder layout x (+ y height)) target)))))
+
 (assert (equal (retrodeck:menu-sound-notes :volume)
                '((660 60) (880 60))))
 (assert (equal (retrodeck:menu-sound-notes :previous) '((523 35))))
@@ -421,25 +392,22 @@
 (setf *state-file-write-status* 0)
 (assert (not (retrodeck:write-native-state-file "/tmp/volume.state" "0")))
 (assert-signals type-error (retrodeck:write-native-state-file "/tmp/x" 4))
-(dolist (fixture (list (list (format nil "0~%") 0)
-                       (list (format nil "5~%") 5)
-                       (list (format nil "42~%") 42)
-                       (list (format nil "100~%") 100)))
-  (assert (= (retrodeck:parse-dashboard-volume-state (first fixture))
-             (second fixture))))
-(dolist (invalid (list "" (format nil "~%") (format nil "00~%")
-                       (format nil "042~%") (format nil "101~%") "42"
-                       (format nil "42~%0") (format nil "42~%~%")
-                       (format nil "-1~%") (format nil "on~%")))
-  (assert-signals error (retrodeck:parse-dashboard-volume-state invalid)))
+(assert-unary-table #'= #'retrodeck:parse-dashboard-volume-state
+                    (list (list (format nil "0~%") 0)
+                          (list (format nil "5~%") 5)
+                          (list (format nil "42~%") 42)
+                          (list (format nil "100~%") 100)))
+(assert-signaled-table error #'retrodeck:parse-dashboard-volume-state
+                       (list "" (format nil "~%") (format nil "00~%")
+                             (format nil "042~%") (format nil "101~%") "42"
+                             (format nil "42~%0") (format nil "42~%~%")
+                             (format nil "-1~%") (format nil "on~%")))
 (assert-signals type-error (retrodeck:parse-dashboard-volume-state 42))
 (assert (= (retrodeck:parse-dashboard-inherited-volume nil) 42))
-(dolist (fixture '(("0" 0) ("00" 0) ("042" 42) ("100" 100)))
-  (assert (= (retrodeck:parse-dashboard-inherited-volume (first fixture))
-             (second fixture))))
-(dolist (invalid '("" "loud" "101" "-1" "1x"))
-  (assert-signals error
-                  (retrodeck:parse-dashboard-inherited-volume invalid)))
+(assert-unary-table #'= #'retrodeck:parse-dashboard-inherited-volume
+                    '(("0" 0) ("00" 0) ("042" 42) ("100" 100)))
+(assert-signaled-table error #'retrodeck:parse-dashboard-inherited-volume
+                       '("" "loud" "101" "-1" "1x"))
 (let ((retrodeck:*dashboard-volume-default* 0))
   (assert (zerop (retrodeck:parse-dashboard-inherited-volume nil))))
 (assert (= (retrodeck:dashboard-inherited-volume) 42))
@@ -482,42 +450,36 @@
                (list "/tmp/volume.state" (format nil "63~%"))))
 (assert-signals type-error
                 (retrodeck:save-dashboard-volume-state "/tmp/volume.state" 101))
-(dolist (fixture (list (list (format nil "12~%") 12)
-                       (list (format nil "~C~C~C12~C~C~C"
-                                          #\Space #\Tab (code-char 11)
-                                          (code-char 12) #\Return #\Newline)
-                             12)
-                       '("00020" 20)
-                       '("4294967295" 4294967295)))
-  (assert (= (retrodeck::parse-dashboard-control-integer
-              (first fixture) "brightness")
-             (second fixture))))
-(dolist (invalid (list "" (format nil " ~C~C~%" #\Tab #\Return)
-                       "-1" "12x" "4294967296"))
-  (assert-signals error
-                  (retrodeck::parse-dashboard-control-integer
-                   invalid "brightness")))
-(dolist (fixture (list (list (format nil "10~%") 10)
-                       (list (format nil "60~%") 60)
-                       (list (format nil "100~%") 100)))
-  (assert (= (retrodeck:parse-dashboard-brightness-state (first fixture))
-             (second fixture))))
-(dolist (invalid (list "" (format nil "0~%") (format nil "5~%")
-                       (format nil "05~%") (format nil "55~%")
-                       (format nil "110~%") "60"
-                       (format nil "60~%~%") (format nil " 60~%")))
-  (assert-signals error
-                  (retrodeck:parse-dashboard-brightness-state invalid)))
+(assert-unary-table #'= #'retrodeck::parse-dashboard-control-integer
+                    (list (list (format nil "12~%") 12)
+                          (list (format nil "~C~C~C12~C~C~C"
+                                             #\Space #\Tab (code-char 11)
+                                             (code-char 12) #\Return #\Newline)
+                                12)
+                          '("00020" 20) '("4294967295" 4294967295))
+                    "brightness")
+(assert-signaled-table
+ error (lambda (value)
+         (retrodeck::parse-dashboard-control-integer value "brightness"))
+ (list "" (format nil " ~C~C~%" #\Tab #\Return)
+       "-1" "12x" "4294967296"))
+(assert-unary-table #'= #'retrodeck:parse-dashboard-brightness-state
+                    (list (list (format nil "10~%") 10)
+                          (list (format nil "60~%") 60)
+                          (list (format nil "100~%") 100)))
+(assert-signaled-table error #'retrodeck:parse-dashboard-brightness-state
+                       (list "" (format nil "0~%") (format nil "5~%")
+                             (format nil "05~%") (format nil "55~%")
+                             (format nil "110~%") "60"
+                             (format nil "60~%~%") (format nil " 60~%")))
 (assert (= (retrodeck::dashboard-brightness-raw-value 10 20) 2))
 (assert (= (retrodeck::dashboard-brightness-raw-value 60 20) 12))
 (assert (= (retrodeck::dashboard-brightness-raw-value 100 20) 20))
 (assert (= (retrodeck::dashboard-brightness-raw-value 10 1) 1))
 (assert (zerop (retrodeck::dashboard-brightness-raw-value 60 0)))
-(dolist (fixture '((0 20 10) (1 20 10) (12 20 60)
-                   (13 20 70) (19 20 100) (20 20 100)))
-  (assert (= (retrodeck::dashboard-observed-brightness-percent
-              (first fixture) (second fixture))
-             (third fixture))))
+(assert-binary-table #'= #'retrodeck::dashboard-observed-brightness-percent
+                     '((0 20 10) (1 20 10) (12 20 60)
+                       (13 20 70) (19 20 100) (20 20 100)))
 (assert-signals error
                 (retrodeck::dashboard-observed-brightness-percent 21 20))
 (setf *control-file-write-status* 1
@@ -608,14 +570,13 @@
 (assert (equal (reverse *control-file-read-paths*) '("/tmp/max_brightness")))
 (assert (null *state-file-read-paths*))
 
-(dolist (fixture (list (list (format nil "us~%") "us")
-                       (list (format nil "cz~%") "cz")))
-  (assert (string= (retrodeck:parse-dashboard-keymap-state (first fixture))
-                   (second fixture))))
-(dolist (invalid (list "" "us" (format nil "US~%") (format nil "de~%")
-                       (format nil "us~%~%") (format nil "us ~%")
-                       (format nil "us~C~%" #\Return)))
-  (assert-signals error (retrodeck:parse-dashboard-keymap-state invalid)))
+(assert-unary-table #'string= #'retrodeck:parse-dashboard-keymap-state
+                    (list (list (format nil "us~%") "us")
+                          (list (format nil "cz~%") "cz")))
+(assert-signaled-table error #'retrodeck:parse-dashboard-keymap-state
+                       (list "" "us" (format nil "US~%") (format nil "de~%")
+                             (format nil "us~%~%") (format nil "us ~%")
+                             (format nil "us~C~%" #\Return)))
 (setf *state-file-read-result* '(0)
       *state-file-write-status* 1
       *state-file-write-arguments* nil)
@@ -906,17 +867,8 @@
                   *canvas-glyph-calls* :test #'equal))
   (dolist (target '(:close :wifi :volume-down :volume-up
                     :brightness-down :brightness-up :terminal :keymap))
-    (destructuring-bind (x y width height) (getf layout target)
-      (assert (eq (retrodeck:settings-target-at layout x y) target))
-      (assert (eq (retrodeck:settings-target-at
-                   layout (+ x width -1) (+ y height -1))
-                  target))
-      (assert (not (eq (retrodeck:settings-target-at
-                        layout (+ x width) y)
-                       target)))
-      (assert (not (eq (retrodeck:settings-target-at
-                        layout x (+ y height))
-                       target)))))
+    (assert-rect-target-boundaries
+     #'retrodeck:settings-target-at layout target))
   (setf *canvas-fill-calls* nil
         *canvas-glyph-calls* nil)
   (retrodeck:render-dashboard-settings 0 60 "us" :volume-up "" network)
@@ -1143,15 +1095,7 @@
                   *canvas-fill-calls* :test #'equal))
   (dolist (target '(:back :ssid :passphrase :save
                     :mode :shift :space :delete))
-    (destructuring-bind (x y width height) (getf layout target)
-      (assert (eq (retrodeck:wifi-target-at layout x y) target))
-      (assert (eq (retrodeck:wifi-target-at
-                   layout (+ x width -1) (+ y height -1))
-                  target))
-      (assert (not (eq (retrodeck:wifi-target-at layout (+ x width) y)
-                       target)))
-      (assert (not (eq (retrodeck:wifi-target-at layout x (+ y height))
-                       target)))))
+    (assert-rect-target-boundaries #'retrodeck:wifi-target-at layout target))
   (assert (equal (retrodeck:wifi-target-at layout 18 86) '(:key 0 #\q)))
   (assert (equal (retrodeck:wifi-target-at layout 136 147)
                  '(:key 0 #\q)))
