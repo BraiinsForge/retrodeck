@@ -1038,6 +1038,51 @@ production lines, including the existing catalog compiler, and 17,128 lines
 with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
 without compressed or generated first-party source.
 
+## Effective dashboard bootstrap checkpoint
+
+Startup-loaded Lisp now exposes non-authoritative readers for the
+launcher-selected effective `games.tsv` and `palette.tsv`. The caller supplies
+the selected paths, so a validated `combined-games.tsv` preserves uploaded games
+in exact manifest order instead of silently reverting to `games.sexp` or the
+base catalog. The manifest reader accepts the existing optional header,
+comments, and CRLF form; enforces the 65,536-byte file, 4,096-byte line, 64-game,
+ID, system, absolute-path, UTF-8, color-syntax, and duplicate bounds; and converts
+each non-ASCII title codepoint to one display `?` exactly like the C++ bitmap UI.
+It consumes data only after the launcher's existing native/compiler validation
+gate, so xterm-palette validation remains there and the approved omission of
+pre-launch ROM-content validation remains in force.
+
+The aggregate reader appends fresh copies of the seven Lisp-owned built-ins and
+returns a complete palette in policy role order. It accepts the retired
+`settings-icon` row for compatibility, rejects unknown, duplicate, or missing
+roles, and falls back all-or-nothing to a fresh startup palette without mutating
+global policy. String leaves are copied as well as list structure, so rehearsal
+state cannot modify later bootstrap results. The loaded games and dynamically
+bound palette are used only by bounded host and ARM/ECL rehearsal fixtures;
+`RETRODECK:MAIN` remains unchanged and the C++ dashboard stays authoritative.
+
+Named and fresh SBCL runs, the complete host suite, ARM build matrix, targeted
+ARM/ECL smoke, `nix flake check`, and two review rounds passed. ARM/ECL read the
+checked-in files through the real native regular-file boundary, accepted a CRLF
+combined upload title as `?lu?`, rejected malformed UTF-8, and exercised complete
+palette fallback. Commits `1a6a4c6` and `7f67347` were pushed immediately.
+
+The installed effective paths were `/mnt/data/nes-deck/state/games.tsv` and
+`/mnt/data/nes-deck/state/palette.tsv`. Installed hashes were
+`320cd46d77189b4e604c8aafae0918119c94b9d984fbe1159da2acf818b3cb4e` for
+`startup.lisp`, `baf89f646dfcaa59fd425c5e1c90c1a6f096399feb9162d7a437b2e300556422`
+for `ui.lisp`, and
+`717fcebbecbb850d167f0164282af20ae552d4b25f722c10ae8223fa6303cf4f` for
+`policy.lisp`. Normal installed startup and a harmless zero-iteration rehearsal
+loaded 15 manifest games plus seven built-ins and all 22 palette roles without
+opening real presentation or input devices. The C++ dashboard retained PID 2051
+and the Deck health check remained healthy.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 11,169
+production lines, including the existing catalog compiler, and 17,628 lines
+with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
+without compressed or generated first-party source.
+
 ## Validation baseline
 
 Updated on 2026-07-24:
@@ -1098,6 +1143,9 @@ Updated on 2026-07-24:
   iterations, distinguished limit, operator, and runtime shutdown, collected
   iteration traces, and cleaned up normal and failure paths through a harmless
   installed ARM/ECL fixture while C++ retained PID 2051
+- The startup-loaded effective TSV bootstrap preserved generated and uploaded
+  game order, exact UTF-8 display fallback, complete palette fallback, and fresh
+  policy copies through host and ARM/ECL fixtures while C++ retained PID 2051
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
