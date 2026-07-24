@@ -1265,9 +1265,56 @@ production lines, including the existing catalog compiler, and 17,940 lines with
 focused Rust and Lisp tests. This leaves 644 lines below the 15,909/18,584
 budgets without compressed or generated first-party source.
 
+## Candidate Lisp uploader checkpoint
+
+One compact Hunchentoot service now implements the owner-facing uploader as an
+opt-in, non-authoritative candidate. A network-enabled ARM ECL runtime supplies
+threads and sockets, maintained Hunchentoot, RFC2388, ZIP, and cryptography
+libraries supply their existing mechanisms, and Rust exposes only the narrow
+password-configuration verifier. Startup-loaded Lisp owns the exact routes,
+headers, HTML, CSS, JavaScript, authentication, session and CSRF policy, login
+throttle, raw and single-ROM ZIP intake, per-system validation, duplicate
+protection, catalog updates, palette editing, restart requests, and listener
+lifecycle. The ECL multipart boundary preserves arbitrary binary octets rather
+than rewriting them through UTF-8.
+
+The candidate deliberately omits the Go service's hard-link and fsync machinery,
+bounded-map eviction, and hostile-local-user HTTP scaffolding. The Go uploader
+remains authoritative. `RETRODECK:MAIN`, the dashboard, launcher, init script,
+and installed Go service are unchanged. Commits `2563a85`, `6060b58`,
+`ba9a5c2`, `cf0e843`, `b9abcb2`, and `aad76cb` were pushed incrementally.
+
+Targeted host and ARM/ECL uploader policy and live HTTP checks, the complete host
+suite, the complete ARM build matrix, `nix flake check`, and independent review
+passed. The live check covers exact CSS and JavaScript, host and origin gates,
+security headers, method and status bodies, the real password helper, wrong and
+successful login, cookies, CSRF, lockout, non-ASCII raw and ZIP uploads,
+duplicate rejection, all 22 palette colors, logout, and clean listener shutdown.
+
+The candidate was then deployed only under
+`/mnt/data/nes-deck/uploader-lisp-test/` on the secondary Deck at `10.0.0.15` and
+served port 18080 as PID 31955. Its normalized unauthenticated DOM, assets,
+security headers, and safe route responses matched the Go service. The complete
+authenticated raw-upload, ZIP-upload, duplicate, palette, and logout flow passed
+with the real ARM password helper and exactly three isolated restart requests.
+The candidate stopped cleanly and port 18080 closed. Canonical catalogs, palette,
+and the aggregate ROM-tree hash were unchanged. The authoritative Go uploader
+remained PID 2466 on port 8080 throughout.
+
+The focused Lisp fixtures were then consolidated without removing an assertion,
+fixture value, condition type, diagnostic, concurrency path, or HTTP lifecycle
+check. Fresh SBCL, host, ARM/ECL, Nix, and independent review passed before commit
+`ff2cb5a` was pushed. The consolidation removed 199 physical Lisp test lines.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 11,972
+production lines, including the existing catalog compiler, and 18,566 lines with
+focused Rust and Lisp tests. This leaves 3,937 production lines and 18 total lines
+below the 15,909/18,584 budgets without compressed or generated first-party
+source.
+
 ## Validation baseline
 
-Updated on 2026-07-24:
+Updated on 2026-07-25:
 
 - `./tests/run-host-tests.sh`: passed
 - `./tests/verify-arm-builds.sh`: passed
@@ -1335,6 +1382,10 @@ Updated on 2026-07-24:
 - The candidate-session boundary composed launcher-selected games, palette,
   credits, reduced-motion, and automatic presentation policy through host,
   ARM/ECL, and a harmless installed bounded fixture while C++ retained PID 2051
+- The candidate Lisp uploader matched the authoritative Go DOM, assets, headers,
+  status bodies, authentication, raw and ZIP intake, duplicate handling, palette,
+  logout, and shutdown on the secondary Deck at `10.0.0.15`; canonical data stayed
+  unchanged and Go PID 2466 remained authoritative on port 8080
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
@@ -1355,7 +1406,6 @@ Still require physical acceptance for:
 - the terminal's physical two-second Goodix touch-return hold
 - Wayland widget movement and game layer surfaces
 - chiptune and timer behavior
-- uploader and palette editing
 
 ## Migration discipline
 
