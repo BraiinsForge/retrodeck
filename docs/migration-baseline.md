@@ -1312,6 +1312,55 @@ focused Rust and Lisp tests. This leaves 3,937 production lines and 18 total lin
 below the 15,909/18,584 budgets without compressed or generated first-party
 source.
 
+## Focused fixture headroom checkpoint
+
+The native controls, touch, and managed-process tests now use small test-only
+constructors and shared process-group fixture helpers. All 19 test functions,
+distinct assertions, expected event values, cleanup paths, and diagnostics remain;
+the refactor removed 162 Rust test lines. The Lisp policy suite now lets startup
+export its mocked native symbols and uses comparator-preserving table and rectangle
+boundary helpers. All fixture values, condition types, and 123 consolidated table
+and boundary assertions remain; that refactor removed another 56 Lisp test lines.
+
+Direct Cargo and fresh SBCL checks, the complete host suite, complete ARM
+verification, `nix flake check`, and independent review passed. Commits `bfc0715`
+and `07f7f53` were pushed immediately.
+
+At this checkpoint the production footprint remains 11,972 lines and the total
+falls to 18,348 lines with focused Rust and Lisp tests. This leaves 236 total lines
+below the 18,584 budget without compressed or generated source.
+
+## 10 Seconds policy and render checkpoint
+
+Startup-loaded `timer.lisp` now owns the first non-authoritative 10 Seconds
+boundary: exact cue note policy, centisecond formatting and clamp, ready/running/
+stopped transitions, 16 ms redraw scheduling, Back touch bounds, result effects,
+seven-segment composition, labels, colors, and the exact 624x224-to-1280x480
+nearest-neighbor layout. The standard deployment, activation, and health paths
+now install and validate all nine editable Lisp files.
+
+Five complete RGB565 frames match independently rendered C++ references through
+the real ARM/ECL canvas ABI: ready at 00.00 `562ba370a3b4da05`, running at 01.23
+`802225e33aea53b5`, exact 10.00 `171e4a78d40d458d`, late 10.03
+`0171d3938f410bd5`, and capped 99.99 `d8877f2ba172c415`. Host policy tests also
+pin every cue, touch edges, early/exact/late and clamp results, stopped retry,
+Back, redraw threshold, and reducer effect order.
+
+This is deliberately an unwired policy/state/render boundary, not yet a runnable
+replacement application. It does not open presentation or input devices, poll the
+clock, execute audio effects, or replace `ten-seconds-deck`. `RETRODECK:MAIN`, the
+launcher, and the authoritative C++ executable remain unchanged; runtime,
+Wayland/fbdev, input arbitration, cue lifecycle, and physical timing acceptance
+remain later slices. Fresh SBCL, the complete host suite, complete ARM verification,
+`nix flake check`, visual inspection of the canonical frame, and two independent
+review rounds passed. Commit `26b63fa` was pushed immediately.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 12,102
+production lines, including the existing catalog compiler, and 18,558 lines with
+focused Rust and Lisp tests. This leaves 3,807 production lines and 26 total lines
+below the 15,909/18,584 budgets without compressed or generated first-party
+source.
+
 ## Validation baseline
 
 Updated on 2026-07-25:
@@ -1386,6 +1435,9 @@ Updated on 2026-07-25:
   status bodies, authentication, raw and ZIP intake, duplicate handling, palette,
   logout, and shutdown on the secondary Deck at `10.0.0.15`; canonical data stayed
   unchanged and Go PID 2466 remained authoritative on port 8080
+- The startup-loaded 10 Seconds policy/state/render boundary matched five complete
+  C++ RGB565 frames through ARM/ECL; runtime polling, input, audio, presentation,
+  and physical timing remain deferred while the C++ executable stays authoritative
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
