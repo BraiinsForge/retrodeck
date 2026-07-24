@@ -986,6 +986,7 @@
           WAYLAND_DISPLAY=retrodeck-smoke \
             XDG_RUNTIME_DIR=/tmp \
             RETRO_DECK_VOLUME_PERCENT=0 \
+            RETRO_DECK_REDUCED_MOTION=1 \
             ECLDIR=${eclArm}/lib/ecl/ \
             ${pkgs.qemu-user}/bin/qemu-arm \
             ${self.packages.${system}.retrodeck-native}/bin/retrodeck-native \
