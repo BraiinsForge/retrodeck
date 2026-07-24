@@ -44,6 +44,7 @@
            #:wayland-dispatch
            #:wayland-next-touch
            #:wayland-open-widget
+           #:wayland-open-widget-at
            #:wayland-present-canvas
            #:wayland-present-solid
            #:wayland-shutdown-p
@@ -93,6 +94,7 @@
                 #:wayland-dispatch
                 #:wayland-next-touch
                 #:wayland-open-widget
+                #:wayland-open-widget-at
                 #:wayland-present-canvas
                 #:wayland-present-solid
                 #:wayland-shutdown-p
@@ -114,6 +116,7 @@
            #:*dashboard-palette*
            #:*dashboard-reboot-confirmation-text*
            #:*dashboard-reduced-motion-environment*
+           #:*dashboard-wayland-display-environment*
            #:*dashboard-settings-geometry*
            #:*dashboard-settings-icon-path*
            #:*dashboard-settings-labels*
@@ -291,7 +294,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 18)
+(defconstant +native-abi-version+ 19)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -609,6 +612,10 @@
 
 (defun open-wayland-widget ()
   (= (wayland-open-widget) 1))
+
+(defun open-wayland-widget-at (display)
+  (check-type display string)
+  (= (wayland-open-widget-at (coerce display 'base-string)) 1))
 
 (defun close-wayland ()
   (wayland-close)

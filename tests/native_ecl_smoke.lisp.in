@@ -3,8 +3,33 @@
 (in-package #:retrodeck)
 
 (defun main ()
-  (unless (= (retrodeck.native:abi-version) 18)
+  (unless (= (retrodeck.native:abi-version) 19)
     (error "Native ABI mismatch"))
+  (unless (zerop (retrodeck.native:wayland-open-widget-at
+                  (coerce "retrodeck-no-wayland-smoke" 'base-string)))
+    (error "Relative Wayland display unexpectedly opened"))
+  (unless (zerop (retrodeck.native:wayland-open-widget-at
+                  (coerce "/tmp/retrodeck-no-wayland-smoke" 'base-string)))
+    (error "Absolute Wayland display unexpectedly opened"))
+  (unless (zerop (retrodeck.native:wayland-open-widget-at
+                  (coerce (list #\x (code-char 0)) 'base-string)))
+    (error "NUL Wayland display was accepted"))
+  (let ((runtime (make-dashboard-runtime :auto-presentation t)))
+    (unless (and (getf runtime :auto-presentation)
+                 (string= (getf runtime :wayland-display) "retrodeck-smoke")
+                 (dashboard-runtime-wayland-requested-p runtime)
+                 (not (getf runtime :wayland)))
+      (error "Automatic presentation environment snapshot diverged")))
+  (let ((runtime (make-dashboard-runtime
+                  :auto-presentation t :wayland-display "")))
+    (when (dashboard-runtime-wayland-requested-p runtime)
+      (error "Explicit empty Wayland display requested Wayland")))
+  (unless (handler-case
+              (progn
+                (make-dashboard-runtime :wayland nil :auto-presentation t)
+                nil)
+            (error () t))
+    (error "Explicit presentation conflicted silently with automatic mode"))
   (multiple-value-bind (games palette loaded-p)
       (load-dashboard-bootstrap "@games@" "@palette@")
     (unless (and loaded-p (= (length games) 22) (= (length palette) 22)

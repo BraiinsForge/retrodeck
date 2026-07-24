@@ -82,6 +82,8 @@
 (defparameter *fbdev-present-color* nil)
 (defparameter *fbdev-size* nil)
 (defparameter *wayland-open-status* 1)
+(defparameter *wayland-open-count* 0)
+(defparameter *wayland-open-display* nil)
 (defparameter *wayland-close-count* 0)
 (defparameter *wayland-canvas-count* 0)
 (defparameter *wayland-canvas-status* 1)
@@ -146,13 +148,14 @@
            #:wayland-dispatch
            #:wayland-next-touch
            #:wayland-open-widget
+           #:wayland-open-widget-at
            #:wayland-present-canvas
            #:wayland-present-solid
            #:wayland-shutdown-p
            #:wayland-size))
 
 (setf (symbol-function (find-symbol "ABI-VERSION" "RETRODECK.NATIVE"))
-      (lambda () 18)
+      (lambda () 19)
       (symbol-function (find-symbol "AUDIO-ACTIVE-P" "RETRODECK.NATIVE"))
       (lambda () (incf *active-count*) *active-status*)
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
@@ -312,7 +315,16 @@
       (symbol-function (find-symbol "FBDEV-SIZE" "RETRODECK.NATIVE"))
       (lambda () *fbdev-size*)
       (symbol-function (find-symbol "WAYLAND-OPEN-WIDGET" "RETRODECK.NATIVE"))
-      (lambda () *wayland-open-status*)
+      (lambda ()
+        (incf *wayland-open-count*)
+        (setf *wayland-open-display* :environment)
+        *wayland-open-status*)
+      (symbol-function
+       (find-symbol "WAYLAND-OPEN-WIDGET-AT" "RETRODECK.NATIVE"))
+      (lambda (display)
+        (incf *wayland-open-count*)
+        (setf *wayland-open-display* display)
+        *wayland-open-status*)
       (symbol-function (find-symbol "WAYLAND-CLOSE" "RETRODECK.NATIVE"))
       (lambda () (incf *wayland-close-count*) 0)
       (symbol-function (find-symbol "WAYLAND-PRESENT-CANVAS" "RETRODECK.NATIVE"))
@@ -1958,6 +1970,10 @@ secret!9
 (assert (string= retrodeck:*dashboard-reboot-confirmation-text*
                  "PRESS A OR TAP AGAIN TO REBOOT"))
 (assert (string= retrodeck:*dashboard-terminal-login-shell* "/BIN/ASH"))
+(assert (string= retrodeck:*dashboard-reduced-motion-environment*
+                 "RETRO_DECK_REDUCED_MOTION"))
+(assert (string= retrodeck:*dashboard-wayland-display-environment*
+                 "WAYLAND_DISPLAY"))
 
 (assert (equal retrodeck:*dashboard-built-in-applications*
                '((:id "lua-repl"
@@ -4145,12 +4161,86 @@ secret!9
        (assert (= *evdev-close-count* 1))
        (assert (= *evdev-controls-close-count* 1))))))
 
+(labels ((select-presentation
+             (display &key wayland-size fbdev-size (wayland-open 1)
+                           (fbdev-open 1) adopt)
+           (let* ((runtime
+                    (retrodeck:make-dashboard-runtime
+                     :auto-presentation t :adopt-presentation adopt
+                     :wayland-display display))
+                  (*wayland-size* wayland-size)
+                  (*fbdev-size* fbdev-size)
+                  (*wayland-open-status* wayland-open)
+                  (*wayland-open-count* 0)
+                  (*wayland-open-display* nil)
+                  (*wayland-close-count* 0)
+                  (*fbdev-open-status* fbdev-open)
+                  (*fbdev-open-count* 0)
+                  (*fbdev-close-count* 0)
+                  (errors (make-string-output-stream)))
+             (let ((*error-output* errors))
+               (multiple-value-bind (opened owned)
+                   (retrodeck::dashboard-runtime-open-presentation runtime)
+                 (let ((selected (getf runtime :wayland)))
+                   (when owned
+                     (retrodeck::dashboard-runtime-close-presentation runtime))
+                   (values
+                    (list opened owned selected *wayland-open-display*
+                          *wayland-open-count* *fbdev-open-count*
+                          *wayland-close-count* *fbdev-close-count*)
+                    (get-output-stream-string errors))))))))
+  (let ((runtime (retrodeck:make-dashboard-runtime
+                  :auto-presentation t :wayland-display "wayland-1")))
+    (assert (getf runtime :auto-presentation))
+    (assert (string= (getf runtime :wayland-display) "wayland-1"))
+    (assert (retrodeck::dashboard-runtime-wayland-requested-p runtime)))
+  (let ((runtime (retrodeck:make-dashboard-runtime
+                  :auto-presentation t :wayland-display "")))
+    (assert (not (retrodeck::dashboard-runtime-wayland-requested-p runtime))))
+  (assert (signals-type-error-p
+           (lambda ()
+             (retrodeck:make-dashboard-runtime
+              :auto-presentation t :wayland-display 1))))
+  (assert (signals-error-p
+           (lambda ()
+             (retrodeck:make-dashboard-runtime
+              :wayland t :auto-presentation t))))
+  (assert (signals-error-p
+           (lambda ()
+             (retrodeck:make-dashboard-runtime
+              :wayland nil :auto-presentation t))))
+  (multiple-value-bind (result errors) (select-presentation nil)
+    (assert (equal result '(t t nil nil 0 1 0 1)))
+    (assert (string= errors "")))
+  (multiple-value-bind (result errors) (select-presentation "wayland-1")
+    (assert (equal result '(t t t "wayland-1" 1 0 1 0)))
+    (assert (string= errors "")))
+  (multiple-value-bind (result errors)
+      (select-presentation "wayland-1" :wayland-open 0)
+    (assert (equal result '(t t nil "wayland-1" 1 1 0 1)))
+    (assert (search "Wayland widget unavailable; trying fbdev" errors)))
+  (multiple-value-bind (result errors)
+      (select-presentation "wayland-1" :wayland-open 0 :fbdev-open 0)
+    (assert (equal result '(nil nil nil "wayland-1" 1 1 0 0)))
+    (assert (search "Wayland widget unavailable; trying fbdev" errors)))
+  (multiple-value-bind (result errors)
+      (select-presentation "wayland-1" :wayland-size '(1280 480) :adopt t)
+    (assert (equal result '(t t t nil 0 0 1 0)))
+    (assert (string= errors "")))
+  (multiple-value-bind (result errors)
+      (select-presentation "wayland-1" :fbdev-size '(1280 480)
+                          :wayland-open 0)
+    (assert (equal result '(t nil nil "wayland-1" 1 0 0 0)))
+    (assert (search "Wayland widget unavailable; trying fbdev" errors))))
+
 (let* ((times '(201))
        (state (retrodeck:dashboard-loop-initial-state nil :now 190))
        (runtime (retrodeck:make-dashboard-runtime
                  :wayland t :clock (lambda () (or (pop times) 999))))
        (*wayland-size* nil)
        (*wayland-open-status* 1)
+       (*wayland-open-count* 0)
+       (*wayland-open-display* nil)
        (*wayland-close-count* 0)
        (*wayland-canvas-status* 1)
        (*wayland-canvas-count* 0)
@@ -4167,6 +4257,8 @@ secret!9
   (multiple-value-bind (initialized ignored-runtime)
       (retrodeck:dashboard-runtime-initialize state runtime 190)
     (declare (ignore ignored-runtime))
+    (assert (= *wayland-open-count* 1))
+    (assert (eq *wayland-open-display* :environment))
     (let ((snapshot (retrodeck:dashboard-runtime-poll-input runtime 40)))
       (assert (equal snapshot
                      '(:now 201 :tick-now 201 :poll-ready-p t
@@ -4182,7 +4274,13 @@ secret!9
       (assert (= *evdev-controls-close-count* 1)))))
 
 (let* ((state (retrodeck:dashboard-loop-initial-state nil :now 10))
-       (runtime (retrodeck:make-dashboard-runtime))
+       (runtime (retrodeck:make-dashboard-runtime
+                 :auto-presentation t :wayland-display "wayland-1"))
+       (*wayland-size* nil)
+       (*wayland-open-status* 0)
+       (*wayland-open-count* 0)
+       (*wayland-open-display* nil)
+       (*wayland-close-count* 0)
        (*fbdev-open-status* 1)
        (*fbdev-open-count* 0)
        (*fbdev-close-count* 0)
@@ -4191,10 +4289,18 @@ secret!9
        (*evdev-close-count* 0)
        (*evdev-controls-scan-count* 0)
        (*evdev-controls-close-count* 0)
-       (*fbdev-canvas-count* 0))
-  (assert (signals-error-p
-           (lambda ()
-             (retrodeck:dashboard-runtime-initialize state runtime 10))))
+       (*fbdev-canvas-count* 0)
+       (diagnostics (make-string-output-stream)))
+  (let ((*error-output* diagnostics))
+    (assert (signals-error-p
+             (lambda ()
+               (retrodeck:dashboard-runtime-initialize state runtime 10)))))
+  (assert (search "Wayland widget unavailable; trying fbdev"
+                  (get-output-stream-string diagnostics)))
+  (assert (= *wayland-open-count* 1))
+  (assert (string= *wayland-open-display* "wayland-1"))
+  (assert (zerop *wayland-close-count*))
+  (assert (not (getf runtime :wayland)))
   (assert (= *fbdev-open-count* 1))
   (assert (= *fbdev-close-count* 1))
   (assert (= *evdev-open-count* 1))

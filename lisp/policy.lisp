@@ -450,6 +450,7 @@
 (defparameter *dashboard-terminal-login-shell* "/BIN/ASH")
 (defparameter *dashboard-reduced-motion-environment*
   "RETRO_DECK_REDUCED_MOTION")
+(defparameter *dashboard-wayland-display-environment* "WAYLAND_DISPLAY")
 
 (defun dashboard-system-label (system)
   (let* ((name (etypecase system

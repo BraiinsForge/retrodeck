@@ -11,7 +11,8 @@ use std::fs::OpenOptions;
 use std::io::ErrorKind;
 use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::PathBuf;
+use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::slice;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -146,10 +147,35 @@ struct Widget {
     state: State,
 }
 
+fn display_socket_path(display: &Path, runtime_dir: Option<&Path>) -> Result<PathBuf, String> {
+    if display.as_os_str().is_empty() {
+        return Err("Wayland display name is empty".to_owned());
+    }
+    if display.is_absolute() {
+        return Ok(display.to_path_buf());
+    }
+    let runtime_dir = runtime_dir
+        .filter(|path| path.is_absolute())
+        .ok_or_else(|| "XDG_RUNTIME_DIR is unavailable or not absolute".to_owned())?;
+    Ok(runtime_dir.join(display))
+}
+
+fn connect_to_display(display: &Path) -> Result<Connection, String> {
+    let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
+    let socket_path = display_socket_path(display, runtime_dir.as_deref())?;
+    let stream = UnixStream::connect(socket_path)
+        .map_err(|error| format!("cannot connect to the Wayland display: {error}"))?;
+    Connection::from_socket(stream)
+        .map_err(|error| format!("cannot connect to the Wayland display: {error}"))
+}
+
 impl Widget {
-    fn open() -> Result<Self, String> {
-        let connection = Connection::connect_to_env()
-            .map_err(|error| format!("cannot connect to the Wayland display: {error}"))?;
+    fn open(display: Option<&Path>) -> Result<Self, String> {
+        let connection = match display {
+            Some(display) => connect_to_display(display),
+            None => Connection::connect_to_env()
+                .map_err(|error| format!("cannot connect to the Wayland display: {error}")),
+        }?;
         let mut queue = connection.new_event_queue::<State>();
         let qh = queue.handle();
         connection.display().get_registry(&qh, ());
@@ -487,8 +513,16 @@ thread_local! {
 }
 
 pub fn open_widget() -> Result<(), String> {
+    open_widget_for(None)
+}
+
+pub fn open_widget_at(display: &Path) -> Result<(), String> {
+    open_widget_for(Some(display))
+}
+
+fn open_widget_for(display: Option<&Path>) -> Result<(), String> {
     close();
-    let widget = Widget::open()?;
+    let widget = Widget::open(display)?;
     WIDGET.with(|current| *current.borrow_mut() = Some(widget));
     Ok(())
 }
@@ -759,6 +793,23 @@ impl Dispatch<deck_widget_surface_v1::DeckWidgetSurfaceV1, ()> for State {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolves_explicit_display_paths() {
+        assert_eq!(
+            display_socket_path(Path::new("/run/wayland-7"), None).unwrap(),
+            PathBuf::from("/run/wayland-7")
+        );
+        assert_eq!(
+            display_socket_path(Path::new("wayland-7"), Some(Path::new("/run/user/1000"))).unwrap(),
+            PathBuf::from("/run/user/1000/wayland-7")
+        );
+        assert!(display_socket_path(Path::new(""), Some(Path::new("/run"))).is_err());
+        assert!(display_socket_path(Path::new("wayland-7"), None).is_err());
+        assert!(
+            display_socket_path(Path::new("wayland-7"), Some(Path::new("run/user/1000"))).is_err()
+        );
+    }
 
     #[test]
     fn validates_frame_geometry() {

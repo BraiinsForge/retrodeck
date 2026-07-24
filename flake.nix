@@ -983,7 +983,9 @@
             --subst-var-by combined_games "$PWD/combined-games.tsv" \
             --subst-var-by invalid_games "$PWD/invalid-games.tsv" \
             --subst-var-by credits ${./deploy/menu/credits.tsv}
-          RETRO_DECK_VOLUME_PERCENT=0 \
+          WAYLAND_DISPLAY=retrodeck-smoke \
+            XDG_RUNTIME_DIR=/tmp \
+            RETRO_DECK_VOLUME_PERCENT=0 \
             ECLDIR=${eclArm}/lib/ecl/ \
             ${pkgs.qemu-user}/bin/qemu-arm \
             ${self.packages.${system}.retrodeck-native}/bin/retrodeck-native \

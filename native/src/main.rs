@@ -38,7 +38,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 18;
+const ABI_VERSION: ClFixnum = 19;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -314,6 +314,10 @@ impl Ecl {
             (
                 "WAYLAND-DISPATCH",
                 native_wayland_dispatch as EclOneArgumentFunction,
+            ),
+            (
+                "WAYLAND-OPEN-WIDGET-AT",
+                native_wayland_open_widget_at as EclOneArgumentFunction,
             ),
             (
                 "NETWORK-STATUS",
@@ -883,6 +887,14 @@ unsafe extern "C" fn native_fbdev_size() -> ClObject {
 
 unsafe extern "C" fn native_wayland_open_widget() -> ClObject {
     native_status(wayland::open_widget())
+}
+
+unsafe extern "C" fn native_wayland_open_widget_at(display: ClObject) -> ClObject {
+    let result = (|| {
+        let display = decode_path(display, "Wayland display")?;
+        wayland::open_widget_at(&display)
+    })();
+    native_status(result)
 }
 
 unsafe extern "C" fn native_wayland_close() -> ClObject {

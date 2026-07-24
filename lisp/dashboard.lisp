@@ -1320,8 +1320,10 @@
       (values next trace))))
 
 (defun make-dashboard-runtime
-    (&key wayland
+    (&key (wayland nil wayland-p)
+          auto-presentation
           adopt-presentation
+          (wayland-display nil wayland-display-p)
           (volume-state (dashboard-settings-path :volume-state))
           (default-volume (dashboard-inherited-volume))
           (brightness-device (dashboard-settings-path :brightness))
@@ -1332,6 +1334,8 @@
           (network-status-path (dashboard-wifi-path :selector-status))
           external-effect-handler
           (clock #'monotonic-ms))
+  (when (and auto-presentation wayland-p)
+    (error ":WAYLAND cannot be combined with :AUTO-PRESENTATION"))
   (check-type volume-state string)
   (check-type default-volume (integer 0 100))
   (check-type brightness-device string)
@@ -1339,31 +1343,40 @@
   (check-type brightness-state string)
   (check-type keymap-state string)
   (check-type network-status-path string)
+  (check-type wayland-display (or null string))
   (when external-effect-handler
     (check-type external-effect-handler function))
   (check-type clock function)
-  (list :wayland (not (null wayland))
-        :adopt-presentation (not (null adopt-presentation))
-        :volume-state volume-state
-        :default-volume default-volume
-        :brightness-device brightness-device
-        :brightness-maximum-path brightness-maximum-path
-        :brightness-state brightness-state
-        :brightness-maximum nil
-        :keymap-state keymap-state
-        :network-status-path network-status-path
-        :external-effect-handler external-effect-handler
-        :clock clock
-        :layout nil
-        :now 0
-        :initialized-p nil
-        :running nil
-        :audio-owned-p nil
-        :sound-active-p nil
-        :presentation-owned-p nil
-        :touch-owned-p nil
-        :controls-owned-p nil
-        :rescan-controls-p nil))
+  (let ((display
+          (if wayland-display-p
+              wayland-display
+              (and auto-presentation
+                   (dashboard-environment-value
+                    *dashboard-wayland-display-environment*)))))
+    (list :wayland (not (null wayland))
+          :auto-presentation (not (null auto-presentation))
+          :wayland-display display
+          :adopt-presentation (not (null adopt-presentation))
+          :volume-state volume-state
+          :default-volume default-volume
+          :brightness-device brightness-device
+          :brightness-maximum-path brightness-maximum-path
+          :brightness-state brightness-state
+          :brightness-maximum nil
+          :keymap-state keymap-state
+          :network-status-path network-status-path
+          :external-effect-handler external-effect-handler
+          :clock clock
+          :layout nil
+          :now 0
+          :initialized-p nil
+          :running nil
+          :audio-owned-p nil
+          :sound-active-p nil
+          :presentation-owned-p nil
+          :touch-owned-p nil
+          :controls-owned-p nil
+          :rescan-controls-p nil)))
 
 (defun dashboard-runtime-running-p (runtime)
   (not (null (getf runtime :running))))
@@ -1373,18 +1386,45 @@
   (or (getf runtime :sound-active-p)
       (< now *menu-sound-input-until-ms*)))
 
+(defun dashboard-runtime-wayland-requested-p (runtime)
+  (let ((display (getf runtime :wayland-display)))
+    (and (stringp display) (plusp (length display)))))
+
 (defun dashboard-runtime-open-presentation (runtime)
-  (let ((current-size
-          (if (getf runtime :wayland)
-              (current-wayland-size)
-              (current-fbdev-size))))
-    (if current-size
-        (values t (getf runtime :adopt-presentation))
-        (let ((opened
+  (labels ((open-selected (wayland)
+             (setf (getf runtime :wayland) wayland)
+             (let ((opened (if wayland (open-wayland-widget) (open-fbdev))))
+               (values opened (not (null opened))))))
+    (if (getf runtime :auto-presentation)
+        (if (dashboard-runtime-wayland-requested-p runtime)
+            (cond
+              ((current-wayland-size)
+               (setf (getf runtime :wayland) t)
+               (values t (getf runtime :adopt-presentation)))
+              ((open-wayland-widget-at (getf runtime :wayland-display))
+               (setf (getf runtime :wayland) t)
+               (values t t))
+              (t
+               (format *error-output*
+                       "retrodeck: Wayland widget unavailable; trying fbdev~%")
+               (finish-output *error-output*)
+               (if (current-fbdev-size)
+                   (progn
+                     (setf (getf runtime :wayland) nil)
+                     (values t (getf runtime :adopt-presentation)))
+                   (open-selected nil))))
+            (if (current-fbdev-size)
+                (progn
+                  (setf (getf runtime :wayland) nil)
+                  (values t (getf runtime :adopt-presentation)))
+                (open-selected nil)))
+        (let ((current-size
                 (if (getf runtime :wayland)
-                    (open-wayland-widget)
-                    (open-fbdev))))
-          (values opened (not (null opened)))))))
+                    (current-wayland-size)
+                    (current-fbdev-size))))
+          (if current-size
+              (values t (getf runtime :adopt-presentation))
+              (open-selected (getf runtime :wayland)))))))
 
 (defun dashboard-runtime-close-presentation (runtime)
   (if (getf runtime :wayland)
