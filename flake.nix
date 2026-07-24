@@ -1003,6 +1003,43 @@
           touch $out
         '';
 
+        uploader-password-smoke = pkgs.runCommand "uploader-password-smoke" { } ''
+          cat > password.conf <<'EOF'
+          version=1
+          iterations=100000
+          salt=AAECAwQFBgcICQoLDA0ODw
+          digest=d43qgN/WlhHSRiEo/5Z7C52SrUrDpGclHZKmaPtBmTo
+          EOF
+          chmod 600 password.conf
+          helper=${self.packages.${system}.retrodeck-native}/bin/retrodeck-native
+          qemu=${pkgs.qemu-user}/bin/qemu-arm
+          printf configured-test-password | $qemu $helper \
+            --verify-uploader-password password.conf
+          if printf wrong-password | $qemu $helper \
+              --verify-uploader-password password.conf; then
+            echo "uploader password helper accepted a wrong password" >&2
+            exit 1
+          fi
+          chmod 644 password.conf
+          if printf configured-test-password | $qemu $helper \
+              --verify-uploader-password password.conf; then
+            echo "uploader password helper accepted a public config" >&2
+            exit 1
+          fi
+          sed 's/$/\r/' password.conf > password-crlf.conf
+          cp password.conf password-extra-newline.conf
+          printf '\n' >> password-extra-newline.conf
+          chmod 600 password-crlf.conf password-extra-newline.conf
+          for malformed in password-crlf.conf password-extra-newline.conf; do
+            if printf configured-test-password | $qemu $helper \
+                --verify-uploader-password "$malformed"; then
+              echo "uploader password helper accepted $malformed" >&2
+              exit 1
+            fi
+          done
+          touch $out
+        '';
+
         ecl-arm-network-smoke = pkgs.runCommand "ecl-arm-network-smoke" { } ''
           cat > smoke.lisp <<'EOF'
           (unless (member :threads *features*)

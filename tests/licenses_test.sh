@@ -42,7 +42,11 @@ grep -Fq 'either version 3 of the License' \
   "$ecl/share/licenses/ecl-deck/GMP-README"
 grep -Fq 'version 2.1 of the License' \
   "$ecl/share/licenses/ecl-deck/ECL-LICENSE"
+grep -Fq '===== pbkdf2-0.12.2/LICENSE-MIT =====' \
+  "$runtime/share/licenses/runtime/Rust-crates-NOTICES.txt"
 grep -Fq '===== rustix-1.1.4/LICENSE-MIT =====' \
+  "$runtime/share/licenses/runtime/Rust-crates-NOTICES.txt"
+grep -Fq '===== subtle-2.6.1/LICENSE =====' \
   "$runtime/share/licenses/runtime/Rust-crates-NOTICES.txt"
 grep -Fq '===== wayland-client-0.31.14/LICENSE.txt =====' \
   "$runtime/share/licenses/runtime/Rust-crates-NOTICES.txt"

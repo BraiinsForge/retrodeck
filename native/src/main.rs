@@ -1,14 +1,20 @@
+use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
+use pbkdf2::pbkdf2_hmac_array;
 use retrodeck_native::{
     audio, canvas, control_file, controls, fbdev, input, network, polling, process, regular_file,
     state_file, wayland,
 };
+use sha2::Sha256;
 use std::env;
 use std::ffi::{CString, OsStr, OsString, c_char, c_int, c_void};
+use std::io::Read;
 use std::mem;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::ptr;
+use subtle::ConstantTimeEq;
 
 type ClObject = *mut c_void;
 type ClFixnum = isize;
@@ -1182,6 +1188,66 @@ fn decode_exit_code(object: ClObject) -> Result<u8, String> {
     u8::try_from(value).map_err(|_| "RETRODECK:MAIN returned an invalid exit status".to_owned())
 }
 
+fn verify_uploader_password(path: &OsStr) -> Result<u8, String> {
+    let path = Path::new(path);
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|error| format!("cannot inspect uploader password configuration: {error}"))?;
+    if !metadata.file_type().is_file()
+        || metadata.mode() & 0o077 != 0
+        || unsafe { libc::geteuid() } == 0 && metadata.uid() != 0
+    {
+        return Err("uploader password configuration must be private and root-owned".to_owned());
+    }
+    let bytes = regular_file::read_regular(path, 1, 1024, "uploader password configuration")?
+        .ok_or_else(|| "uploader password configuration is missing".to_owned())?;
+    let text = std::str::from_utf8(&bytes)
+        .map_err(|_| "uploader password configuration is not UTF-8".to_owned())?;
+    let lines = text.split('\n').collect::<Vec<_>>();
+    if lines.len() != 5 || lines[0] != "version=1" || !lines[4].is_empty() {
+        return Err("uploader password configuration has an invalid schema".to_owned());
+    }
+    let (mut iterations, mut salt, mut digest) = (None, None, None);
+    for line in &lines[1..4] {
+        let (name, value) = line
+            .split_once('=')
+            .ok_or_else(|| "uploader password configuration has a malformed field".to_owned())?;
+        let destination = match name {
+            "iterations" => &mut iterations,
+            "salt" => &mut salt,
+            "digest" => &mut digest,
+            _ => return Err("uploader password configuration has an unknown field".to_owned()),
+        };
+        if destination.replace(value).is_some() {
+            return Err("uploader password configuration repeats a field".to_owned());
+        }
+    }
+    let iterations = iterations
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|value| (100_000..=1_000_000).contains(value))
+        .ok_or_else(|| "uploader password configuration has invalid iterations".to_owned())?;
+    let salt = STANDARD_NO_PAD
+        .decode(salt.unwrap_or_default())
+        .map_err(|_| "uploader password configuration has an invalid salt".to_owned())?;
+    let digest = STANDARD_NO_PAD
+        .decode(digest.unwrap_or_default())
+        .map_err(|_| "uploader password configuration has an invalid digest".to_owned())?;
+    if salt.len() != 16 || digest.len() != 32 {
+        return Err("uploader password configuration has invalid byte lengths".to_owned());
+    }
+    let mut password = Vec::new();
+    std::io::stdin()
+        .take(129)
+        .read_to_end(&mut password)
+        .map_err(|error| format!("cannot read uploader password: {error}"))?;
+    if password.len() > 128 {
+        return Ok(1);
+    }
+    let candidate = pbkdf2_hmac_array::<Sha256, 32>(&password, &salt, iterations);
+    Ok(u8::from(!bool::from(
+        candidate.as_slice().ct_eq(digest.as_slice()),
+    )))
+}
+
 fn startup_path() -> Result<PathBuf, String> {
     let mut arguments = env::args_os();
     let _program = arguments.next();
@@ -1193,6 +1259,19 @@ fn startup_path() -> Result<PathBuf, String> {
 }
 
 fn run() -> Result<u8, String> {
+    let mut arguments = env::args_os();
+    let _program = arguments.next();
+    if arguments.next().as_deref() == Some(OsStr::new("--verify-uploader-password")) {
+        let path = arguments.next().ok_or_else(|| {
+            "usage: retrodeck-native --verify-uploader-password PASSWORD.CONF".to_owned()
+        })?;
+        if arguments.next().is_some() {
+            return Err(
+                "usage: retrodeck-native --verify-uploader-password PASSWORD.CONF".to_owned(),
+            );
+        }
+        return verify_uploader_password(&path);
+    }
     let startup = startup_path()?;
     let ecl = Ecl::boot()?;
     process::install_signal_handlers()?;
