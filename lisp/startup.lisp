@@ -134,6 +134,7 @@
            #:*dashboard-volume-step*
            #:*menu-sound-cues*
            #:*menu-sound-input-tail-ms*
+           #:*ten-seconds-cues*
            #:apply-dashboard-touch
            #:bitmap-text-width
            #:canvas-rgb565-hash
@@ -225,6 +226,7 @@
            #:load-dashboard-palette
            #:load-dashboard-volume-state
            #:load-project-credits
+           #:render-ten-seconds
            #:load-text-mask
            #:main
            #:make-dashboard-runtime
@@ -289,6 +291,11 @@
            #:wifi-target-at
            #:wifi-touch-transition
            #:wifi-valid-text-p
+           #:ten-seconds-cue-notes
+           #:ten-seconds-format
+           #:ten-seconds-initial-state
+           #:ten-seconds-reduce
+           #:ten-seconds-touch-event
            #:stroke-canvas-rect
            #:wayland-shutdown-requested-p
            #:write-native-control-file
@@ -654,6 +661,7 @@
 
 (let ((startup *load-truename*))
   (load (merge-pathnames "ui.lisp" startup) :verbose nil :print nil)
+  (load (merge-pathnames "timer.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "policy.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "process.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "settings.lisp" startup) :verbose nil :print nil)

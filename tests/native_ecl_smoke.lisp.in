@@ -178,6 +178,16 @@
   (check (signals-p type-error
            (fill-canvas-rect 0 0 #x100000000 1 0))
          "Canvas width exceeded the native unsigned range")
+  (dolist (fixture '((:ready 0 #x562ba370a3b4da05)
+                     (:running 123 #x802225e33aea53b5)
+                     (:stopped 1000 #x171e4a78d40d458d)
+                     (:stopped 1003 #x0171d3938f410bd5)
+                     (:stopped 9999 #xd8877f2ba172c415)))
+    (destructuring-bind (mode displayed expected) fixture
+      (check (render-ten-seconds (list :mode mode :displayed displayed))
+             "10 Seconds render failed for ~S/~D" mode displayed)
+      (check (= (canvas-rgb565-hash) expected)
+             "10 Seconds frame mismatch for ~S/~D" mode displayed)))
   (let ((credits (read-bounded-regular-file "@credits@" 1 32768)))
       (unless (and credits (search "FCEUmm" credits))
         (error "Bounded regular-file callback did not read credits")))

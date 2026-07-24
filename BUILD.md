@@ -95,9 +95,10 @@ argument it loads `/mnt/data/nes-deck/lisp/startup.lisp`; one alternate startup
 path may be supplied for development and smoke tests.
 
 `lisp/startup.lisp` validates the native ABI, then loads `ui.lisp`,
-`policy.lisp`, `process.lisp`, `settings.lisp`, `wifi.lisp`, `credits.lisp`,
-and `dashboard.lisp`. These editable files own bitmap UI composition, systems,
-labels, colors, applications, exact game/reboot/terminal executable routes,
+`timer.lisp`, `policy.lisp`, `process.lisp`, `settings.lisp`, `wifi.lisp`,
+`credits.lisp`, and `dashboard.lisp`. These editable files own bitmap UI and
+10 Seconds composition and policy, systems, labels, colors, applications,
+exact game/reboot/terminal executable routes,
 ordered arguments and environment, launch/return statuses and sequencing,
 timing, settings and Wi-Fi editor state and actions, exact inherited and
 persistent volume policy, exact brightness hardware and state policy, exact
@@ -107,7 +108,7 @@ touch policy, keyboard and THEGamepad mapping, modal command priority,
 controller burst recovery, input scan timing, and the Wi-Fi selector status path.
 Startup finally loads an optional `local.lisp` beside them for device-local
 overrides without a Rust
-rebuild. Deployment updates the eight standard Lisp files but leaves an
+rebuild. Deployment updates the nine standard Lisp files but leaves an
 existing `local.lisp` untouched.
 
 Native ABI 19 retains the widget-side Wayland and direct-fbdev primitives and
