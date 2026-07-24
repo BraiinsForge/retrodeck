@@ -1,17 +1,13 @@
 diff --git a/bmc-openwrt/src/compositor/render/egl_context.rs b/bmc-openwrt/src/compositor/render/egl_context.rs
-index 755b65f1..6f091254 100644
+index 04f1c22f..6de72933 100644
 --- a/bmc-openwrt/src/compositor/render/egl_context.rs
 +++ b/bmc-openwrt/src/compositor/render/egl_context.rs
-@@ -12,3 +12,6 @@ use smithay::{
-         egl::{EGLContext, EGLDisplay, fence::EGLFence},
--        renderer::gles::{GlesRenderer, ffi},
-+        renderer::{
-+            Renderer, TextureFilter,
-+            gles::{GlesRenderer, ffi},
-+        },
+@@ -9,3 +9,3 @@ use smithay::{
+         egl::{EGLContext, EGLDisplay},
+-        renderer::{Renderer, gles::GlesRenderer},
++        renderer::{Renderer, TextureFilter, gles::GlesRenderer},
      },
-@@ -47,3 +50,9 @@ impl EglContext {
-         let mut renderer =
+@@ -42,2 +42,8 @@ impl EglContext {
              unsafe { GlesRenderer::new(egl_context) }.context("Failed to create GLES renderer")?;
 +        renderer
 +            .downscale_filter(TextureFilter::Nearest)
@@ -19,4 +15,4 @@ index 755b65f1..6f091254 100644
 +        renderer
 +            .upscale_filter(TextureFilter::Nearest)
 +            .context("Failed to select nearest-neighbor upscaling")?;
-         let gl_sync_support = detect_gl_sync_support(&mut renderer, &egl_display)?;
+         tracing::info!("EGL context initialized");
