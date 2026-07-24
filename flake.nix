@@ -1040,6 +1040,26 @@
           touch $out
         '';
 
+        uploader-lisp-policy = pkgs.runCommand "uploader-lisp-policy" {
+          nativeBuildInputs = [ pkgs.sbcl ];
+        } ''
+          mkdir -p source/{deploy/menu,lisp,tests} home
+          cp ${./deploy/menu/palette.tsv} source/deploy/menu/palette.tsv
+          cp ${./lisp/uploader.lisp} source/lisp/uploader.lisp
+          cp ${./tests/uploader_lisp_test.lisp} source/tests/uploader_lisp_test.lisp
+          cd source
+          HOME=$NIX_BUILD_TOP/home \
+            CL_SOURCE_REGISTRY=${uploaderLispLibraries}/share/common-lisp/source//: \
+            sbcl --noinform --disable-debugger --script tests/uploader_lisp_test.lisp
+          HOME=$NIX_BUILD_TOP/home \
+            XDG_CACHE_HOME=$NIX_BUILD_TOP/home/cache \
+            CL_SOURCE_REGISTRY=${uploaderLispLibraries}/share/common-lisp/source//: \
+            ECLDIR=${eclArmNetwork}/lib/ecl/ \
+            ${pkgs.qemu-user}/bin/qemu-arm ${eclArmNetwork}/bin/ecl.bin \
+            -norc -load tests/uploader_lisp_test.lisp -eval '(ext:quit 0)'
+          touch $out
+        '';
+
         ecl-arm-network-smoke = pkgs.runCommand "ecl-arm-network-smoke" { } ''
           cat > smoke.lisp <<'EOF'
           (unless (member :threads *features*)

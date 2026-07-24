@@ -86,6 +86,8 @@ verify_package ecl-arm-network bin/ecl.bin
 build_flake .#checks.x86_64-linux.ecl-arm-network-smoke >/dev/null
 echo "ecl-arm-network-smoke: OK"
 verify_package uploader-lisp-libraries
+build_flake .#checks.x86_64-linux.uploader-lisp-policy >/dev/null
+echo "uploader-lisp-policy: OK"
 build_flake .#checks.x86_64-linux.uploader-hunchentoot-smoke >/dev/null
 echo "uploader-hunchentoot-smoke: OK"
 
