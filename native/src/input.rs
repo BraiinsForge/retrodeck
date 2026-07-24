@@ -409,58 +409,54 @@ mod tests {
         InputEvent::new(event_type.0, code, value)
     }
 
+    fn axis(code: AbsoluteAxisCode, value: i32) -> InputEvent {
+        event(EventType::ABSOLUTE, code.0, value)
+    }
+
+    fn key(code: KeyCode, value: i32) -> InputEvent {
+        event(EventType::KEY, code.0, value)
+    }
+
+    fn syn(code: SynchronizationCode) -> InputEvent {
+        event(EventType::SYNCHRONIZATION, code.0, 0)
+    }
+
+    fn touch_report(x: i32, y: i32, down: bool, pressed: bool, released: bool) -> TouchReport {
+        TouchReport {
+            x,
+            y,
+            down,
+            pressed,
+            released,
+        }
+    }
+
+    fn report(x: i32, y: i32, down: bool, pressed: bool, released: bool) -> TouchAction {
+        TouchAction::Report(touch_report(x, y, down, pressed, released))
+    }
+
     #[test]
     fn reports_exact_goodix_press_motion_release() {
         let mut state = TouchState::new(0, 0, false);
         assert_eq!(
-            state.handle(event(EventType::ABSOLUTE, AbsoluteAxisCode::ABS_X.0, 1400)),
+            state.handle(axis(AbsoluteAxisCode::ABS_X, 1400)),
             TouchAction::Ignore
         );
-        state.handle(event(EventType::ABSOLUTE, AbsoluteAxisCode::ABS_Y.0, -20));
-        state.handle(event(EventType::KEY, KeyCode::BTN_TOUCH.0, 1));
+        state.handle(axis(AbsoluteAxisCode::ABS_Y, -20));
+        state.handle(key(KeyCode::BTN_TOUCH, 1));
         assert_eq!(
-            state.handle(event(
-                EventType::SYNCHRONIZATION,
-                SynchronizationCode::SYN_REPORT.0,
-                0
-            )),
-            TouchAction::Report(TouchReport {
-                x: 1279,
-                y: 0,
-                down: true,
-                pressed: true,
-                released: false,
-            })
+            state.handle(syn(SynchronizationCode::SYN_REPORT)),
+            report(1279, 0, true, true, false)
         );
-        state.handle(event(EventType::ABSOLUTE, AbsoluteAxisCode::ABS_X.0, 42));
+        state.handle(axis(AbsoluteAxisCode::ABS_X, 42));
         assert_eq!(
-            state.handle(event(
-                EventType::SYNCHRONIZATION,
-                SynchronizationCode::SYN_REPORT.0,
-                0
-            )),
-            TouchAction::Report(TouchReport {
-                x: 42,
-                y: 0,
-                down: true,
-                pressed: false,
-                released: false,
-            })
+            state.handle(syn(SynchronizationCode::SYN_REPORT)),
+            report(42, 0, true, false, false)
         );
-        state.handle(event(EventType::KEY, KeyCode::BTN_TOUCH.0, 0));
+        state.handle(key(KeyCode::BTN_TOUCH, 0));
         assert_eq!(
-            state.handle(event(
-                EventType::SYNCHRONIZATION,
-                SynchronizationCode::SYN_REPORT.0,
-                0
-            )),
-            TouchAction::Report(TouchReport {
-                x: 42,
-                y: 0,
-                down: false,
-                pressed: false,
-                released: true,
-            })
+            state.handle(syn(SynchronizationCode::SYN_REPORT)),
+            report(42, 0, false, false, true)
         );
     }
 
@@ -468,34 +464,20 @@ mod tests {
     fn resynchronizes_only_after_dropped_report_boundary() {
         let mut state = TouchState::new(7, 9, false);
         assert_eq!(
-            state.handle(event(
-                EventType::SYNCHRONIZATION,
-                SynchronizationCode::SYN_DROPPED.0,
-                0
-            )),
+            state.handle(syn(SynchronizationCode::SYN_DROPPED)),
             TouchAction::Ignore
         );
         assert_eq!(
-            state.handle(event(EventType::ABSOLUTE, AbsoluteAxisCode::ABS_X.0, 900)),
+            state.handle(axis(AbsoluteAxisCode::ABS_X, 900)),
             TouchAction::Ignore
         );
         assert_eq!(
-            state.handle(event(
-                EventType::SYNCHRONIZATION,
-                SynchronizationCode::SYN_REPORT.0,
-                0
-            )),
+            state.handle(syn(SynchronizationCode::SYN_REPORT)),
             TouchAction::Resynchronize
         );
         assert_eq!(
             state.resynchronize(1300, 480, true),
-            TouchReport {
-                x: 1279,
-                y: 479,
-                down: true,
-                pressed: true,
-                released: false,
-            }
+            touch_report(1279, 479, true, true, false)
         );
     }
 

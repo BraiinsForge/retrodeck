@@ -665,18 +665,30 @@ mod tests {
         event(EventType::ABSOLUTE, code.0, value)
     }
 
+    fn axis_info(minimum: i32, maximum: i32, value: i32) -> AxisInfo {
+        AxisInfo {
+            minimum,
+            maximum,
+            value,
+        }
+    }
+
+    fn report(kind: u32, value: u32, flags: u32) -> ControlReport {
+        ControlReport { kind, value, flags }
+    }
+
+    fn keyboard_report(code: KeyCode, flags: u32) -> ControlAction {
+        ControlAction::Report(report(KEYBOARD_REPORT, u32::from(code.0), flags))
+    }
+
+    fn gamepad_report(value: u32) -> ControlAction {
+        ControlAction::Report(report(GAMEPAD_REPORT, value, 0))
+    }
+
     fn gamepad_snapshot(x: i32, y: i32, raw_buttons: u32) -> GamepadSnapshot {
         GamepadSnapshot {
-            x: AxisInfo {
-                minimum: 0,
-                maximum: 255,
-                value: x,
-            },
-            y: AxisInfo {
-                minimum: 0,
-                maximum: 255,
-                value: y,
-            },
+            x: axis_info(0, 255, x),
+            y: axis_info(0, 255, y),
             raw_buttons,
         }
     }
@@ -686,11 +698,7 @@ mod tests {
         let mut state = KeyboardState::default();
         assert_eq!(
             state.handle(key(KeyCode::KEY_TAB, 1)),
-            ControlAction::Report(ControlReport {
-                kind: KEYBOARD_REPORT,
-                value: u32::from(KeyCode::KEY_TAB.0),
-                flags: 0,
-            })
+            keyboard_report(KeyCode::KEY_TAB, 0)
         );
         assert_eq!(
             state.handle(key(KeyCode::KEY_LEFTSHIFT, 1)),
@@ -698,11 +706,7 @@ mod tests {
         );
         assert_eq!(
             state.handle(key(KeyCode::KEY_TAB, 1)),
-            ControlAction::Report(ControlReport {
-                kind: KEYBOARD_REPORT,
-                value: u32::from(KeyCode::KEY_TAB.0),
-                flags: KEYBOARD_SHIFT,
-            })
+            keyboard_report(KeyCode::KEY_TAB, KEYBOARD_SHIFT)
         );
         assert_eq!(
             state.handle(key(KeyCode::KEY_TAB, 2)),
@@ -710,21 +714,13 @@ mod tests {
         );
         assert_eq!(
             state.handle(key(KeyCode::KEY_RIGHT, 2)),
-            ControlAction::Report(ControlReport {
-                kind: KEYBOARD_REPORT,
-                value: u32::from(KeyCode::KEY_RIGHT.0),
-                flags: KEYBOARD_SHIFT | KEYBOARD_REPEAT,
-            })
+            keyboard_report(KeyCode::KEY_RIGHT, KEYBOARD_SHIFT | KEYBOARD_REPEAT)
         );
         state.handle(key(KeyCode::KEY_RIGHTSHIFT, 1));
         state.handle(key(KeyCode::KEY_LEFTSHIFT, 0));
         assert_eq!(
             state.handle(key(KeyCode::KEY_ENTER, 1)),
-            ControlAction::Report(ControlReport {
-                kind: KEYBOARD_REPORT,
-                value: u32::from(KeyCode::KEY_ENTER.0),
-                flags: KEYBOARD_SHIFT,
-            })
+            keyboard_report(KeyCode::KEY_ENTER, KEYBOARD_SHIFT)
         );
         state.handle(key(KeyCode::KEY_RIGHTSHIFT, 0));
         assert_eq!(
@@ -755,99 +751,27 @@ mod tests {
         state.resynchronize(false, true);
         assert_eq!(
             state.handle(key(KeyCode::KEY_TAB, 1)),
-            ControlAction::Report(ControlReport {
-                kind: KEYBOARD_REPORT,
-                value: u32::from(KeyCode::KEY_TAB.0),
-                flags: KEYBOARD_SHIFT,
-            })
+            keyboard_report(KeyCode::KEY_TAB, KEYBOARD_SHIFT)
         );
     }
 
     #[test]
     fn gamepad_uses_exact_thirds_and_reports_rising_edges_on_syn_report() {
-        assert_eq!(
-            axis_state(
-                AxisInfo {
-                    minimum: 0,
-                    maximum: 255,
-                    value: 84
-                },
-                1,
-                2
-            ),
-            1
-        );
-        assert_eq!(
-            axis_state(
-                AxisInfo {
-                    minimum: 0,
-                    maximum: 255,
-                    value: 85
-                },
-                1,
-                2
-            ),
-            1
-        );
-        assert_eq!(
-            axis_state(
-                AxisInfo {
-                    minimum: 0,
-                    maximum: 255,
-                    value: 86
-                },
-                1,
-                2
-            ),
-            0
-        );
-        assert_eq!(
-            axis_state(
-                AxisInfo {
-                    minimum: 0,
-                    maximum: 255,
-                    value: 169
-                },
-                1,
-                2
-            ),
-            0
-        );
-        assert_eq!(
-            axis_state(
-                AxisInfo {
-                    minimum: 0,
-                    maximum: 255,
-                    value: 170
-                },
-                1,
-                2
-            ),
-            2
-        );
-        assert_eq!(
-            axis_state(
-                AxisInfo {
-                    minimum: 4,
-                    maximum: 4,
-                    value: 4
-                },
-                1,
-                2
-            ),
-            0
-        );
+        assert_eq!(axis_state(axis_info(0, 255, 84), 1, 2), 1);
+        assert_eq!(axis_state(axis_info(0, 255, 85), 1, 2), 1);
+        assert_eq!(axis_state(axis_info(0, 255, 86), 1, 2), 0);
+        assert_eq!(axis_state(axis_info(0, 255, 169), 1, 2), 0);
+        assert_eq!(axis_state(axis_info(0, 255, 170), 1, 2), 2);
+        assert_eq!(axis_state(axis_info(4, 4, 4), 1, 2), 0);
 
         let mut state = GamepadState::new(gamepad_snapshot(127, 127, 0));
         state.handle(axis(AbsoluteAxisCode::ABS_X, 255));
         state.handle(key(KeyCode::BTN_THUMB2, 1));
         assert_eq!(
             state.handle(syn(SynchronizationCode::SYN_REPORT)),
-            ControlAction::Report(ControlReport {
-                kind: GAMEPAD_REPORT,
-                value: GAMEPAD_X_POSITIVE | (1 << (KeyCode::BTN_THUMB2.0 - KeyCode::BTN_TRIGGER.0)),
-                flags: 0,
-            })
+            gamepad_report(
+                GAMEPAD_X_POSITIVE | (1 << (KeyCode::BTN_THUMB2.0 - KeyCode::BTN_TRIGGER.0))
+            )
         );
         assert_eq!(
             state.handle(syn(SynchronizationCode::SYN_REPORT)),
@@ -858,11 +782,7 @@ mod tests {
         state.handle(key(KeyCode::BTN_THUMB2, 1));
         assert_eq!(
             state.handle(syn(SynchronizationCode::SYN_REPORT)),
-            ControlAction::Report(ControlReport {
-                kind: GAMEPAD_REPORT,
-                value: 1 << (KeyCode::BTN_THUMB2.0 - KeyCode::BTN_TRIGGER.0),
-                flags: 0,
-            })
+            gamepad_report(1 << (KeyCode::BTN_THUMB2.0 - KeyCode::BTN_TRIGGER.0))
         );
     }
 
@@ -871,11 +791,7 @@ mod tests {
         let mut state = KeyboardState::default();
         assert_eq!(
             state.handle(key(KeyCode::KEY_KPENTER, 1)),
-            ControlAction::Report(ControlReport {
-                kind: KEYBOARD_REPORT,
-                value: u32::from(KeyCode::KEY_KPENTER.0),
-                flags: 0,
-            })
+            keyboard_report(KeyCode::KEY_KPENTER, 0)
         );
         assert_eq!(
             state.handle(key(KeyCode::KEY_KPENTER, 2)),
@@ -883,59 +799,26 @@ mod tests {
         );
         assert_eq!(
             state.handle(key(KeyCode::KEY_A, 1)),
-            ControlAction::Report(ControlReport {
-                kind: KEYBOARD_REPORT,
-                value: u32::from(KeyCode::KEY_A.0),
-                flags: 0,
-            })
+            keyboard_report(KeyCode::KEY_A, 0)
         );
     }
 
     #[test]
     fn report_queue_merges_gamepads_deduplicates_keys_and_stays_bounded() {
         let mut reports = VecDeque::new();
-        queue_report(
-            &mut reports,
-            ControlReport {
-                kind: GAMEPAD_REPORT,
-                value: 1,
-                flags: 0,
-            },
-        );
-        queue_report(
-            &mut reports,
-            ControlReport {
-                kind: GAMEPAD_REPORT,
-                value: 4,
-                flags: 0,
-            },
-        );
-        let key_report = ControlReport {
-            kind: KEYBOARD_REPORT,
-            value: 28,
-            flags: 0,
-        };
+        queue_report(&mut reports, report(GAMEPAD_REPORT, 1, 0));
+        queue_report(&mut reports, report(GAMEPAD_REPORT, 4, 0));
+        let key_report = report(KEYBOARD_REPORT, 28, 0);
         queue_report(&mut reports, key_report);
         queue_report(&mut reports, key_report);
         for value in 0..100 {
             queue_report(
                 &mut reports,
-                ControlReport {
-                    kind: KEYBOARD_REPORT,
-                    value,
-                    flags: KEYBOARD_REPEAT,
-                },
+                report(KEYBOARD_REPORT, value, KEYBOARD_REPEAT),
             );
         }
         assert_eq!(reports.len(), MAXIMUM_CONTROL_REPORTS);
-        assert_eq!(
-            reports.front(),
-            Some(&ControlReport {
-                kind: GAMEPAD_REPORT,
-                value: 5,
-                flags: 0,
-            })
-        );
+        assert_eq!(reports.front(), Some(&report(GAMEPAD_REPORT, 5, 0)));
         assert_eq!(
             reports
                 .iter()
@@ -967,11 +850,7 @@ mod tests {
             state.handle(key(KeyCode(KeyCode::BTN_TRIGGER.0 + index), 1));
             assert_eq!(
                 state.handle(syn(SynchronizationCode::SYN_REPORT)),
-                ControlAction::Report(ControlReport {
-                    kind: GAMEPAD_REPORT,
-                    value: 1 << index,
-                    flags: 0,
-                })
+                gamepad_report(1 << index)
             );
         }
         let mut state = GamepadState::new(gamepad_snapshot(127, 127, 0));
@@ -1002,11 +881,7 @@ mod tests {
         state.handle(axis(AbsoluteAxisCode::ABS_Y, 255));
         assert_eq!(
             state.handle(syn(SynchronizationCode::SYN_REPORT)),
-            ControlAction::Report(ControlReport {
-                kind: GAMEPAD_REPORT,
-                value: GAMEPAD_Y_POSITIVE,
-                flags: 0,
-            })
+            gamepad_report(GAMEPAD_Y_POSITIVE)
         );
     }
 }

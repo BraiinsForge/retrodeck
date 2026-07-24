@@ -747,14 +747,13 @@ mod tests {
         assert_eq!(result.signal, Some(libc::SIGTERM));
     }
 
-    #[test]
-    fn kills_descendants_when_the_group_leader_exits_on_term() {
-        let path = temporary_path("leader-exits-pids");
+    fn run_stopped_group_fixture(action: &str) -> (ChildResult, Vec<libc::pid_t>) {
+        let path = temporary_path(&format!("{action}-pids"));
         let extra = [(
             OsString::from("RETRODECK_PROCESS_PIDS"),
             path.clone().into(),
         )];
-        let (executable, arguments, environment) = fixture_command("leader-exits", &extra);
+        let (executable, arguments, environment) = fixture_command(action, &extra);
         let started = Instant::now();
         let result = spawn_and_supervise(
             &executable,
@@ -766,69 +765,51 @@ mod tests {
                     StopRequest::Touch
                 } else {
                     thread::sleep(timeout);
-                    assert!(started.elapsed() < Duration::from_secs(2));
+                    assert!(
+                        started.elapsed() < Duration::from_secs(2),
+                        "{action} fixture did not publish process IDs"
+                    );
                     StopRequest::None
                 }
             },
             Duration::from_millis(5),
             Duration::from_millis(50),
         );
-        assert!(result.started);
-        assert!(result.exited_for_touch);
-        assert_eq!(result.signal, Some(libc::SIGTERM));
         let pids = std::fs::read_to_string(&path).unwrap();
-        std::fs::remove_file(&path).unwrap();
-        for pid in pids.split_whitespace().map(|pid| pid.parse().unwrap()) {
+        std::fs::remove_file(path).unwrap();
+        let pids = pids
+            .split_whitespace()
+            .map(|pid| pid.parse().unwrap())
+            .collect();
+        (result, pids)
+    }
+
+    fn assert_processes_exit(pids: &[libc::pid_t]) {
+        for &pid in pids {
             let deadline = Instant::now() + Duration::from_secs(1);
             while process_alive(pid) && Instant::now() < deadline {
                 thread::sleep(Duration::from_millis(10));
             }
-            assert!(!process_alive(pid));
+            assert!(!process_alive(pid), "process {pid} remained alive");
         }
     }
 
     #[test]
+    fn kills_descendants_when_the_group_leader_exits_on_term() {
+        let (result, pids) = run_stopped_group_fixture("leader-exits");
+        assert!(result.started);
+        assert!(result.exited_for_touch);
+        assert_eq!(result.signal, Some(libc::SIGTERM));
+        assert_processes_exit(&pids);
+    }
+
+    #[test]
     fn terminates_the_complete_child_process_group_after_touch() {
-        let path = env::temp_dir().join(format!(
-            "retrodeck-process-pids-{}-{}",
-            std::process::id(),
-            FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-        ));
-        let extra = [(
-            OsString::from("RETRODECK_PROCESS_PIDS"),
-            path.clone().into(),
-        )];
-        let (executable, arguments, environment) = fixture_command("group", &extra);
-        let started = Instant::now();
-        let result = spawn_and_supervise(
-            &executable,
-            &arguments,
-            &environment,
-            "fixture",
-            |timeout| {
-                if path.exists() {
-                    StopRequest::Touch
-                } else {
-                    thread::sleep(timeout);
-                    assert!(started.elapsed() < Duration::from_secs(2));
-                    StopRequest::None
-                }
-            },
-            Duration::from_millis(5),
-            Duration::from_millis(50),
-        );
+        let (result, pids) = run_stopped_group_fixture("group");
         assert!(result.started);
         assert!(result.exited_for_touch);
         assert_eq!(result.signal, Some(libc::SIGKILL));
-        let pids = std::fs::read_to_string(&path).unwrap();
-        std::fs::remove_file(&path).unwrap();
-        for pid in pids.split_whitespace().map(|pid| pid.parse().unwrap()) {
-            let deadline = Instant::now() + Duration::from_secs(1);
-            while process_alive(pid) && Instant::now() < deadline {
-                thread::sleep(Duration::from_millis(10));
-            }
-            assert!(!process_alive(pid));
-        }
+        assert_processes_exit(&pids);
     }
 
     fn process_alive(pid: libc::pid_t) -> bool {
