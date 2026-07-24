@@ -1,4 +1,5 @@
 {
+  networkSupport ? false,
   nixpkgsSrc ? builtins.fetchTarball {
     # nixpkgs revision 767b0d3ec98a143ad9ed7dfc0d5553510ac27133
     url = "https://releases.nixos.org/nixpkgs/nixpkgs-26.11pre1031701.767b0d3ec98a/nixexprs.tar.xz";
@@ -18,7 +19,7 @@ let
 
   eclStatic = (cross.ecl.override {
     gmp = gmpStatic;
-    threadSupport = false;
+    threadSupport = networkSupport;
   }).overrideAttrs (old: {
     nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ buildEcl ];
     buildInputs = (old.buildInputs or [ ]) ++ [ libc.static ];
@@ -28,15 +29,17 @@ let
     configureFlags = (old.configureFlags or [ ]) ++ [
       "--with-cross-config=../src/util/x86-linux-gnu.cross_config"
       "--disable-shared"
-      "--disable-threads"
+      (if networkSupport then "--enable-threads" else "--disable-threads")
       "--enable-boehm=included"
       "--enable-gmp=system"
       "--enable-manual=no"
       "--with-cmp=no"
       "--with-bytecmp=builtin"
       "--with-asdf=builtin"
-      "--with-tcp=no"
-      "--with-serve-event=no"
+      (if networkSupport then "--with-tcp=yes" else "--with-tcp=no")
+      (if networkSupport
+       then "--with-serve-event=yes"
+       else "--with-serve-event=no")
       "--with-clos-streams=yes"
       "--with-cmuformat=yes"
       "--with-dffi=no"
@@ -58,10 +61,11 @@ let
   libcVersion = libc.version;
   targetPrefix = cross.stdenv.cc.targetPrefix;
   targetBinutils = cross.stdenv.cc.bintools;
+  runtimeKind = if networkSupport then "network" else "static";
 in
 assert pkgs.lib.assertMsg (version == "26.5.5")
   "ecl-arm-static.nix expects ECL 26.5.5 from nixpkgs ${nixpkgsRev}";
-pkgs.runCommand "ecl-arm-static-runtime-${version}" {
+pkgs.runCommand "ecl-arm-${runtimeKind}-runtime-${version}" {
   inherit version;
   outputs = [ "out" "dev" ];
   nativeBuildInputs = [
@@ -77,13 +81,17 @@ pkgs.runCommand "ecl-arm-static-runtime-${version}" {
 
   passthru = {
     eclVersion = version;
-    inherit nixpkgsRev;
+    inherit networkSupport nixpkgsRev;
     eclDir = "lib/ecl/";
     targetSystem = "armv7l-linux";
   };
 
   meta = {
-    description = "Minimal static ECL runtime for the ARMv7 Forge Deck";
+    description =
+      if networkSupport then
+        "Network-enabled static ECL runtime for the ARMv7 Forge Deck"
+      else
+        "Minimal static ECL runtime for the ARMv7 Forge Deck";
     # This derivation runs on the cross-build host; its payload targets ARMv7.
     platforms = [ system ];
   };

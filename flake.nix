@@ -37,6 +37,9 @@
       pkgsCross = pkgs.pkgsCross.armv7l-hf-multiplatform;
       staticCross = pkgs.pkgsCross.armv7l-hf-multiplatform.pkgsStatic;
       eclArm = import ./nix/ecl-arm-static.nix { };
+      eclArmNetwork = import ./nix/ecl-arm-static.nix {
+        networkSupport = true;
+      };
       rustToolchain = fenix.packages.${system}.combine [
         fenix.packages.${system}.stable.cargo
         fenix.packages.${system}.stable.rustc
@@ -137,6 +140,8 @@
     in
     {
       packages.${system} = {
+        ecl-arm-network = eclArmNetwork;
+
         retrodeck-native = pkgs.stdenvNoCC.mkDerivation {
           pname = "retrodeck-native";
           version = "0.1.0";
@@ -888,8 +893,8 @@
         default = self.packages.${system}.nes-deck;
       };
 
-      checks.${system}.retrodeck-native-smoke =
-        pkgs.runCommand "retrodeck-native-smoke" { } ''
+      checks.${system} = {
+        retrodeck-native-smoke = pkgs.runCommand "retrodeck-native-smoke" { } ''
           cp ${./lisp/startup.lisp} startup.lisp
           cp ${./lisp/ui.lisp} ui.lisp
           cp ${./lisp/policy.lisp} policy.lisp
@@ -993,6 +998,40 @@
             smoke.lisp
           touch $out
         '';
+
+        ecl-arm-network-smoke = pkgs.runCommand "ecl-arm-network-smoke" { } ''
+          cat > smoke.lisp <<'EOF'
+          (unless (member :threads *features*)
+            (error "network ECL lacks thread support"))
+          (let ((complete nil))
+            (mp:process-join
+             (mp:process-run-function "network-ecl-smoke"
+                                      (lambda () (setf complete t))))
+            (unless complete
+              (error "network ECL thread probe diverged")))
+          (require 'serve-event)
+          (unless (null (serve-event:serve-all-events 0))
+            (error "network ECL serve-event probe diverged"))
+          (let ((socket (make-instance 'sb-bsd-sockets:inet-socket
+                                       :type :stream :protocol 6)))
+            (unwind-protect
+                (progn
+                  (sb-bsd-sockets:socket-bind socket #(127 0 0 1) 0)
+                  (sb-bsd-sockets:socket-listen socket 1)
+                  (multiple-value-bind (address port)
+                      (sb-bsd-sockets:socket-name socket)
+                    (unless (and (equalp address #(127 0 0 1)) (plusp port))
+                      (error "network ECL socket probe diverged"))))
+              (sb-bsd-sockets:socket-close socket)))
+          (format t "network-ecl-smoke: OK~%")
+          (ext:quit 0)
+          EOF
+          ECLDIR=${eclArmNetwork}/lib/ecl/ \
+            ${pkgs.qemu-user}/bin/qemu-arm \
+            ${eclArmNetwork}/bin/ecl.bin -norc -load smoke.lisp
+          touch $out
+        '';
+      };
 
       devShells.${system}.default = pkgs.mkShell {
         nativeBuildInputs = [

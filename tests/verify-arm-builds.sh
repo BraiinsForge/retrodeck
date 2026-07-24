@@ -80,6 +80,9 @@ verify_package python-deck bin/python
 verify_package chibi-deck bin/chibi-scheme
 verify_package chiptune-deck bin/chiptune-deck
 verify_package rom-uploader bin/rom-uploader
+verify_package ecl-arm-network bin/ecl.bin
+build_flake .#checks.x86_64-linux.ecl-arm-network-smoke >/dev/null
+echo "ecl-arm-network-smoke: OK"
 
 runtime_licenses=$(build_flake .#runtime-licenses)
 verify_closure_free runtime-licenses "$runtime_licenses"
