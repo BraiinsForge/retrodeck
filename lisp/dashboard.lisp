@@ -1793,6 +1793,52 @@
             (values after-input runtime
                     (append begin-trace input-trace)))))))
 
+(defun dashboard-runtime-rehearse
+    (state runtime &key iteration-limit stop-predicate)
+  "Run an opt-in dashboard lifecycle and return per-iteration effect traces."
+  (check-type state list)
+  (check-type runtime list)
+  (when iteration-limit
+    (check-type iteration-limit (integer 0 *)))
+  (when stop-predicate
+    (check-type stop-predicate function))
+  (when (getf runtime :initialized-p)
+    (error "Dashboard runtime is already initialized"))
+  (let ((current state)
+        (iteration 0)
+        (traces nil)
+        (reason nil)
+        (owns-runtime-p nil))
+    (unwind-protect
+        (progn
+          (multiple-value-bind (initialized ignored-runtime)
+              (dashboard-runtime-initialize
+               current runtime (dashboard-runtime-read-clock runtime))
+            (declare (ignore ignored-runtime))
+            (setf current initialized
+                  owns-runtime-p t))
+          (loop
+            (cond
+              ((not (dashboard-runtime-running-p runtime))
+               (setf reason :shutdown)
+               (return))
+              ((and iteration-limit (>= iteration iteration-limit))
+               (setf reason :limit)
+               (return))
+              ((and stop-predicate
+                    (funcall stop-predicate current runtime iteration))
+               (setf reason :operator-stop)
+               (return)))
+            (multiple-value-bind (next ignored-runtime trace)
+                (dashboard-runtime-run-iteration current runtime)
+              (declare (ignore ignored-runtime))
+              (setf current next)
+              (push trace traces)
+              (incf iteration)))
+          (values current runtime (nreverse traces) reason))
+      (when owns-runtime-p
+        (dashboard-runtime-shutdown runtime)))))
+
 (defun apply-dashboard-touch (games state layout report volume-percent presenter)
   (check-type games list)
   (check-type volume-percent (integer 0 100))

@@ -3778,6 +3778,136 @@ secret!9
         (assert (= *evdev-close-count* 1))
         (assert (= *evdev-controls-close-count* 1))))))
 
+(labels ((exercise (input times function)
+           (let* ((state (retrodeck:dashboard-loop-initial-state nil :now 90))
+                  (runtime
+                    (retrodeck:make-dashboard-runtime
+                     :clock (lambda () (or (pop times) 999))))
+                  (*active-status* 0)
+                  (*active-count* 0)
+                  (*fbdev-size* nil)
+                  (*fbdev-open-status* 1)
+                  (*fbdev-open-count* 0)
+                  (*fbdev-close-count* 0)
+                  (*fbdev-canvas-status* 1)
+                  (*fbdev-canvas-count* 0)
+                  (*evdev-open-status* 1)
+                  (*evdev-open-count* 0)
+                  (*evdev-close-count* 0)
+                  (*evdev-controls-scan-result* '(0 0))
+                  (*evdev-controls-scan-count* 0)
+                  (*evdev-controls-close-count* 0)
+                  (*evdev-controls* nil)
+                  (*evdev-touch-queue* nil)
+                  (*input-poll-result* input)
+                  (*input-poll-arguments* nil)
+                  (*network-status-result* '("" "" "" "CONNECTED"))
+                  (*control-file-read-results*
+                    (list
+                     (cons "/sys/class/backlight/display-bl/max_brightness"
+                           (format nil "20~%"))
+                     (cons "/sys/class/backlight/display-bl/brightness"
+                           (format nil "12~%"))))
+                  (*state-file-read-results*
+                    (list
+                     (cons "/mnt/data/nes-deck/state/menu-volume.state"
+                           (list 1 (format nil "37~%")))
+                     (cons "/mnt/data/nes-deck/state/menu-brightness.state"
+                           (list 1 (format nil "60~%")))
+                     (cons "/mnt/data/nes-deck/state/terminal-keymap.state"
+                           (list 1 (format nil "us~%")))))
+                  (*projection-status* 1)
+                  (*canvas-clear-status* 1)
+                  (*canvas-glyph-status* 1)
+                  (*canvas-fill-status* 1))
+             (setf retrodeck::*menu-sound-input-until-ms* 0)
+             (funcall function state runtime))))
+  (exercise
+   '(0 0 0 0 0 0) '(100 101 102 103 104)
+   (lambda (state runtime)
+     (multiple-value-bind (final returned-runtime traces reason)
+         (retrodeck:dashboard-runtime-rehearse
+          state runtime :iteration-limit 2)
+       (assert (eq returned-runtime runtime))
+       (assert (equal traces '(((:reap-sound)) ((:reap-sound)))))
+       (assert (eq reason :limit))
+       (assert (= (getf (getf final :settings) :volume) 37))
+       (assert (= *active-count* 2))
+       (assert (= *fbdev-open-count* 1))
+       (assert (= *fbdev-close-count* 1))
+       (assert (= *evdev-open-count* 1))
+       (assert (= *evdev-close-count* 1))
+       (assert (= *evdev-controls-close-count* 1))
+       (assert (not (getf runtime :initialized-p)))
+       (assert (not (retrodeck:dashboard-runtime-running-p runtime))))))
+  (exercise
+   '(0 0 0 0 0 0) '(200)
+   (lambda (state runtime)
+     (let ((stops nil))
+       (multiple-value-bind (final returned-runtime traces reason)
+           (retrodeck:dashboard-runtime-rehearse
+            state runtime
+            :stop-predicate
+            (lambda (current active iteration)
+              (assert (= (getf (getf current :settings) :volume) 37))
+              (assert (eq active runtime))
+              (push iteration stops)
+              t))
+         (declare (ignore final))
+         (assert (eq returned-runtime runtime))
+         (assert (null traces))
+         (assert (eq reason :operator-stop))
+         (assert (equal stops '(0)))
+         (assert (null *input-poll-arguments*))
+         (assert (= *fbdev-close-count* 1))
+         (assert (= *evdev-close-count* 1))
+         (assert (= *evdev-controls-close-count* 1))))))
+  (exercise
+   '(0 0 0 0 0 1) '(300 301 302)
+   (lambda (state runtime)
+     (multiple-value-bind (final returned-runtime traces reason)
+         (retrodeck:dashboard-runtime-rehearse state runtime)
+       (declare (ignore final))
+       (assert (eq returned-runtime runtime))
+       (assert (equal traces '(((:reap-sound)))))
+       (assert (eq reason :shutdown))
+       (assert (= *active-count* 1))
+       (assert (= *fbdev-close-count* 1))
+       (assert (= *evdev-close-count* 1))
+       (assert (= *evdev-controls-close-count* 1)))))
+  (exercise
+   nil '(400 401)
+   (lambda (state runtime)
+     (assert
+      (signals-error-p
+       (lambda ()
+         (retrodeck:dashboard-runtime-rehearse state runtime))))
+     (assert (= *active-count* 1))
+     (assert (= *fbdev-close-count* 1))
+     (assert (= *evdev-close-count* 1))
+     (assert (= *evdev-controls-close-count* 1))
+     (assert (not (getf runtime :initialized-p)))
+     (assert (not (retrodeck:dashboard-runtime-running-p runtime)))))
+  (exercise
+   '(0 0 0 0 0 0) '(500)
+   (lambda (state runtime)
+     (multiple-value-bind (initialized ignored-runtime)
+         (retrodeck:dashboard-runtime-initialize state runtime 500)
+       (declare (ignore initialized ignored-runtime))
+       (assert
+        (signals-error-p
+         (lambda ()
+           (retrodeck:dashboard-runtime-rehearse state runtime))))
+       (assert (getf runtime :initialized-p))
+       (assert (retrodeck:dashboard-runtime-running-p runtime))
+       (assert (zerop *fbdev-close-count*))
+       (assert (zerop *evdev-close-count*))
+       (assert (zerop *evdev-controls-close-count*))
+       (retrodeck:dashboard-runtime-shutdown runtime)
+       (assert (= *fbdev-close-count* 1))
+       (assert (= *evdev-close-count* 1))
+       (assert (= *evdev-controls-close-count* 1))))))
+
 (let* ((times '(201))
        (state (retrodeck:dashboard-loop-initial-state nil :now 190))
        (runtime (retrodeck:make-dashboard-runtime
