@@ -1277,10 +1277,13 @@ Updated on 2026-07-24:
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
-The allocated Deck firmware does not contain `bmc-compositor`, so the deployed
-reference currently uses the supported direct-fbdev fallback. Use it for touch,
-audio, launch, emulator, and framebuffer comparisons. Install a compatible BMC
-image before claiming Wayland parity.
+The Deck firmware itself does not contain `bmc-compositor`. Nix profile
+generation 1 from `/root/bmc-main` activated successfully with the local
+nearest-neighbor filter fix, but the Deck immediately stopped responding to
+ping and SSH. Fifteen minutes and 180 automatic recovery attempts produced no
+response. No compositor acceptance is claimed. Physically power-cycle the Deck,
+run `/root/retrodeck-fbdev-recover.sh`, and retain the last accepted direct-fbdev
+reference until the failure is understood.
 
 Still require physical acceptance for:
 
