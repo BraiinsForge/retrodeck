@@ -40,6 +40,9 @@
       eclArmNetwork = import ./nix/ecl-arm-static.nix {
         networkSupport = true;
       };
+      uploaderLispLibraries = import ./nix/uploader-lisp-libraries.nix {
+        inherit pkgs;
+      };
       rustToolchain = fenix.packages.${system}.combine [
         fenix.packages.${system}.stable.cargo
         fenix.packages.${system}.stable.rustc
@@ -141,6 +144,7 @@
     {
       packages.${system} = {
         ecl-arm-network = eclArmNetwork;
+        uploader-lisp-libraries = uploaderLispLibraries;
 
         retrodeck-native = pkgs.stdenvNoCC.mkDerivation {
           pname = "retrodeck-native";
@@ -1031,6 +1035,99 @@
             ${eclArmNetwork}/bin/ecl.bin -norc -load smoke.lisp
           touch $out
         '';
+
+        uploader-hunchentoot-smoke =
+          pkgs.runCommand "uploader-hunchentoot-smoke" { } ''
+            cat > smoke.lisp <<'EOF'
+            (pushnew :hunchentoot-no-ssl *features*)
+            (require 'asdf)
+            (asdf:operate 'asdf:load-source-op :hunchentoot)
+
+            ;; ECL bytecode lacks USOCKET's FDSET-ALLOC wait-list helper.
+            ;; The uploader deliberately accepts on the blocking listener instead.
+            (defclass uploader-smoke-acceptor (hunchentoot:easy-acceptor) ())
+
+            (defmethod hunchentoot:accept-connections
+                ((acceptor uploader-smoke-acceptor))
+              (usocket:with-server-socket
+                  (listener (hunchentoot::acceptor-listen-socket acceptor))
+                (loop
+                  (bordeaux-threads:with-lock-held
+                      ((hunchentoot::acceptor-shutdown-lock acceptor))
+                    (when (hunchentoot::acceptor-shutdown-p acceptor)
+                      (return)))
+                  (let ((client
+                          (handler-case (usocket:socket-accept listener)
+                            (usocket:connection-aborted-error () nil))))
+                    (when client
+                      (hunchentoot::set-timeouts
+                       client (hunchentoot:acceptor-read-timeout acceptor)
+                       (hunchentoot:acceptor-write-timeout acceptor))
+                      (hunchentoot:handle-incoming-connection
+                       (hunchentoot::acceptor-taskmaster acceptor) client))))))
+
+            (hunchentoot:define-easy-handler (health :uri "/health") ()
+              (setf (hunchentoot:content-type*) "text/plain")
+              "OK")
+
+            (let ((acceptor
+                    (make-instance 'uploader-smoke-acceptor
+                                   :address "127.0.0.1" :port 0)))
+              (unwind-protect
+                  (progn
+                    (hunchentoot:start acceptor)
+                    (format t "hunchentoot-smoke: READY ~D~%"
+                            (hunchentoot:acceptor-port acceptor))
+                    (finish-output)
+                    (loop until (probe-file "stop") do (sleep 0.05)))
+                (hunchentoot:stop acceptor)))
+            (format t "hunchentoot-smoke: STOPPED~%")
+            (ext:quit 0)
+            EOF
+
+            mkdir home
+            HOME=$PWD/home \
+              XDG_CACHE_HOME=$PWD/home/cache \
+              CL_SOURCE_REGISTRY=${uploaderLispLibraries}/share/common-lisp/source//: \
+              ECLDIR=${eclArmNetwork}/lib/ecl/ \
+              ${pkgs.qemu-user}/bin/qemu-arm \
+              ${eclArmNetwork}/bin/ecl.bin -norc -load smoke.lisp \
+              > server.log 2>&1 &
+            server=$!
+            cleanup() {
+              kill "$server" 2>/dev/null || true
+              wait "$server" 2>/dev/null || true
+            }
+            trap cleanup EXIT
+
+            port=
+            for attempt in $(seq 1 240); do
+              port=$(sed -n \
+                's/^hunchentoot-smoke: READY \([0-9][0-9]*\)$/\1/p' \
+                server.log | tail -n 1)
+              [ -n "$port" ] && break
+              kill -0 "$server" 2>/dev/null || break
+              sleep 0.25
+            done
+            if [ -z "$port" ]; then
+              cat server.log
+              exit 1
+            fi
+
+            response=$(${pkgs.curl}/bin/curl --fail --silent --show-error \
+              --max-time 5 "http://127.0.0.1:$port/health")
+            [ "$response" = OK ] || {
+              printf 'unexpected response: %s\n' "$response" >&2
+              exit 1
+            }
+
+            touch stop
+            timeout 20 tail --pid="$server" -f /dev/null
+            wait "$server"
+            trap - EXIT
+            grep -q '^hunchentoot-smoke: STOPPED$' server.log
+            touch $out
+          '';
       };
 
       devShells.${system}.default = pkgs.mkShell {

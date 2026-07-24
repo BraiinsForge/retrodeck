@@ -83,6 +83,9 @@ verify_package rom-uploader bin/rom-uploader
 verify_package ecl-arm-network bin/ecl.bin
 build_flake .#checks.x86_64-linux.ecl-arm-network-smoke >/dev/null
 echo "ecl-arm-network-smoke: OK"
+verify_package uploader-lisp-libraries
+build_flake .#checks.x86_64-linux.uploader-hunchentoot-smoke >/dev/null
+echo "uploader-hunchentoot-smoke: OK"
 
 runtime_licenses=$(build_flake .#runtime-licenses)
 verify_closure_free runtime-licenses "$runtime_licenses"
