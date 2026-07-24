@@ -213,8 +213,11 @@
            #:fit-text-width
            #:load-cover-raster
            #:load-png-raster
+           #:load-dashboard-bootstrap
            #:load-dashboard-brightness
+           #:load-dashboard-games
            #:load-dashboard-keymap-state
+           #:load-dashboard-palette
            #:load-dashboard-volume-state
            #:load-project-credits
            #:load-text-mask

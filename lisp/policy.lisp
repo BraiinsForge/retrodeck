@@ -88,6 +88,199 @@
      :rom "/sbin/reboot"
      :color #xd75f5f)))
 
+(defun copy-dashboard-policy-value (value)
+  (typecase value
+    (cons (cons (copy-dashboard-policy-value (car value))
+                (copy-dashboard-policy-value (cdr value))))
+    (string (copy-seq value))
+    (t value)))
+
+(defun dashboard-tsv-lines (text)
+  (loop with start = 0
+        while (< start (length text))
+        for end = (position #\Newline text :start start)
+        collect (subseq text start (or end (length text)))
+        do (if end (setf start (1+ end)) (loop-finish))))
+
+(defun dashboard-tsv-fields (line)
+  (loop with start = 0
+        for end = (position #\Tab line :start start)
+        collect (subseq line start (or end (length line)))
+        do (if end (setf start (1+ end)) (loop-finish))))
+
+(defun dashboard-bootstrap-path (path description)
+  (let ((name (namestring (pathname path))))
+    (unless (and (plusp (length name)) (char= (char name 0) #\/))
+      (error "~A path must be absolute" description))
+    name))
+
+(defun dashboard-manifest-id-p (value)
+  (and (<= 1 (length value) 48)
+       (loop for character across value
+             for position from 0
+             always
+             (or (and (char<= #\a character) (char<= character #\z))
+                 (digit-char-p character)
+                 (and (char= character #\-)
+                      (plusp position)
+                      (< position (1- (length value)))
+                      (not (char= (char value (1- position)) #\-)))))))
+
+(defun dashboard-manifest-system (name line-number)
+  (or (cdr (assoc name '(("nes" . :nes) ("gb" . :gb) ("gbc" . :gbc)
+                         ("zx" . :zx) ("chip8" . :chip8) ("deck" . :deck))
+                  :test #'string=))
+      (error "Invalid system on manifest line ~D" line-number)))
+
+(defun dashboard-rgb-color (text context)
+  (unless (and (= (length text) 7) (char= (char text 0) #\#)
+               (loop for index from 1 below (length text)
+                     always (digit-char-p (char text index) 16)))
+    (error "Invalid #RRGGBB color in ~A" context))
+  (parse-integer text :start 1 :radix 16))
+
+(defun dashboard-manifest-header-p (fields)
+  (and (= (length fields) 5)
+       (equal (subseq fields 0 4) '("id" "title" "system" "rom"))
+       (member (fifth fields) '("color" "#RRGGBB") :test #'string=)))
+
+(defun load-dashboard-games (path)
+  "Read a launcher-selected effective manifest after its native validation gate."
+  (let* ((name (dashboard-bootstrap-path path "Manifest"))
+         (contents (read-bounded-regular-file name 1 65536)))
+    (unless (stringp contents)
+      (error "Cannot read dashboard manifest ~A" name))
+    (let ((ids (make-hash-table :test #'equal))
+          (roms (make-hash-table :test #'equal))
+          (games nil)
+          (saw-data nil))
+      (loop for raw-line in (dashboard-tsv-lines contents)
+            for line-number from 1
+            for line = (if (and (plusp (length raw-line))
+                                (char= (char raw-line (1- (length raw-line)))
+                                       #\Return))
+                           (subseq raw-line 0 (1- (length raw-line)))
+                           raw-line)
+            do (when (> (length raw-line) 4096)
+                 (error "Manifest line ~D exceeds 4096 bytes" line-number))
+            unless (or (zerop (length line)) (char= (char line 0) #\#))
+              do (let ((fields (dashboard-tsv-fields line)))
+                (cond
+                  ((and (not saw-data) (dashboard-manifest-header-p fields))
+                   (setf saw-data t))
+                  (t
+                   (setf saw-data t)
+                   (unless (= (length fields) 5)
+                     (error "Manifest line ~D must have 5 fields" line-number))
+                   (destructuring-bind (id raw-title system-name rom color) fields
+                     (unless (dashboard-manifest-id-p id)
+                       (error "Invalid id on manifest line ~D" line-number))
+                     (let ((title
+                             (display-utf8-bytes-ascii raw-title 64)))
+                       (unless (and (plusp (length title))
+                                    (not (char= (char raw-title 0) #\Space))
+                                    (not (char= (char raw-title
+                                                      (1- (length raw-title)))
+                                                #\Space)))
+                         (error "Invalid title on manifest line ~D" line-number))
+                       (unless (and (<= 1 (length rom) 4095)
+                                    (char= (char rom 0) #\/)
+                                    (not (char= (char rom (1- (length rom)))
+                                                #\Space)))
+                         (error "Invalid ROM path on manifest line ~D" line-number))
+                       (display-utf8-bytes-ascii rom 4095)
+                       (when (gethash id ids)
+                         (error "Duplicate id on manifest line ~D" line-number))
+                       (when (gethash rom roms)
+                         (error "Duplicate ROM on manifest line ~D" line-number))
+                       (setf (gethash id ids) t
+                             (gethash rom roms) t)
+                       (push (list :id id :title title
+                                   :system (dashboard-manifest-system
+                                            system-name line-number)
+                                   :rom rom
+                                   :color (dashboard-rgb-color
+                                           color
+                                           (format nil "manifest line ~D"
+                                                   line-number)))
+                             games)
+                       (when (> (length games) 64)
+                         (error "Manifest contains more than 64 games"))))))))
+      (unless games
+        (error "Manifest contains no games"))
+      (nreverse games))))
+
+(defun dashboard-palette-role (name)
+  (car (find name *dashboard-palette* :test #'string=
+             :key (lambda (entry)
+                    (string-downcase (symbol-name (car entry)))))))
+
+(defun dashboard-palette-icon-p (name)
+  (and (<= 1 (length name) 64)
+       (loop for character across name
+             always (or (and (char<= #\a character)
+                             (char<= character #\z))
+                        (digit-char-p character)
+                        (char= character #\-)))))
+
+(defun load-dashboard-palette (path)
+  "Read one complete dashboard palette without changing startup policy."
+  (let* ((name (dashboard-bootstrap-path path "Palette"))
+         (contents (read-bounded-regular-file name 1 4096)))
+    (unless (stringp contents)
+      (error "Cannot read dashboard palette ~A" name))
+    (let ((colors (make-hash-table :test #'eq))
+          (saw-settings-icon nil))
+      (loop for raw-line in (dashboard-tsv-lines contents)
+            for line-number from 1
+            for line = (if (and (plusp (length raw-line))
+                                (char= (char raw-line (1- (length raw-line)))
+                                       #\Return))
+                           (subseq raw-line 0 (1- (length raw-line)))
+                           raw-line)
+            unless (or (zerop (length line)) (char= (char line 0) #\#))
+              do (let ((fields (dashboard-tsv-fields line)))
+                   (unless (= (length fields) 2)
+                     (error "Palette line ~D must have 2 fields" line-number))
+                   (if (string= (first fields) "settings-icon")
+                       (progn
+                         (when (or saw-settings-icon
+                                   (not (dashboard-palette-icon-p
+                                         (second fields))))
+                           (error "Invalid legacy settings icon on palette line ~D"
+                                  line-number))
+                         (setf saw-settings-icon t))
+                       (let ((role (dashboard-palette-role (first fields))))
+                         (unless role
+                           (error "Unknown palette role on line ~D" line-number))
+                         (when (nth-value 1 (gethash role colors))
+                           (error "Duplicate palette role on line ~D" line-number))
+                         (setf (gethash role colors)
+                               (dashboard-rgb-color
+                                (second fields)
+                                (format nil "palette line ~D" line-number)))))))
+      (loop for entry in *dashboard-palette*
+            for role = (car entry)
+            collect
+            (multiple-value-bind (color present-p) (gethash role colors)
+              (unless present-p
+                (error "Palette is missing role ~(~A~)" role))
+              (cons role color))))))
+
+(defun load-dashboard-bootstrap (manifest-path palette-path)
+  "Return rehearsal policy data without installing it as dashboard authority."
+  (let ((games (append (load-dashboard-games manifest-path)
+                       (copy-dashboard-policy-value
+                        *dashboard-built-in-applications*)))
+        (fallback (copy-dashboard-policy-value *dashboard-palette*)))
+    (handler-case
+        (values games (load-dashboard-palette palette-path) t)
+      (error (condition)
+        (format *error-output*
+                "retrodeck: ~A; using startup dashboard palette~%" condition)
+        (finish-output *error-output*)
+        (values games fallback nil)))))
+
 (defparameter *dashboard-timings*
   '((:child-touch-exit-ms . 2000)
     (:child-term-grace-ms . 4000)
@@ -303,7 +496,7 @@
           (find id *dashboard-built-in-applications*
                 :key (lambda (entry) (getf entry :id))
                 :test #'string=)))
-    (and application (copy-tree application))))
+    (and application (copy-dashboard-policy-value application))))
 
 (defun dashboard-application-id-p (application id)
   (and (eq (getf application :system) :deck)

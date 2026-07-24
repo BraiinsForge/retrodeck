@@ -29,7 +29,9 @@
 (defparameter *text-mask-calls* nil)
 (defparameter *text-mask-clear-count* 0)
 (defparameter *regular-file-result* nil)
+(defparameter *regular-file-results* nil)
 (defparameter *regular-file-arguments* nil)
+(defparameter *regular-file-calls* nil)
 (defparameter *control-file-read-result* "")
 (defparameter *control-file-read-results* nil)
 (defparameter *control-file-read-paths* nil)
@@ -218,7 +220,10 @@
        (symbol-function (find-symbol "READ-REGULAR-FILE" "RETRODECK.NATIVE"))
         (lambda (&rest arguments)
           (setf *regular-file-arguments* arguments)
-          *regular-file-result*)
+          (push arguments *regular-file-calls*)
+          (let ((entry (assoc (first arguments) *regular-file-results*
+                              :test #'string=)))
+            (if entry (cdr entry) *regular-file-result*)))
         (symbol-function (find-symbol "READ-STATE-FILE" "RETRODECK.NATIVE"))
          (lambda (path)
            (setf *state-file-read-path* path)
@@ -829,6 +834,24 @@
   (assert (signals-type-error-p function)))
 
 (assert (string= (retrodeck:display-ascii "AČz") "A?z"))
+(labels ((bytes (&rest values)
+           (map 'string #'code-char values)))
+  (assert (string= (retrodeck::display-utf8-bytes-ascii
+                    (bytes #xc5 #xbd #x6c #x75 #xc5 #xa5) 4)
+                   "?lu?"))
+  (dolist (invalid (list (bytes #xc0 #xaf)
+                         (bytes #x80)
+                         (bytes #xc5)
+                         (bytes #xe2 #x28 #xa1)
+                         (bytes #xed #xa0 #x80)
+                         (bytes #x1f)
+                         "Č"))
+    (assert (signals-error-p
+             (lambda ()
+               (retrodeck::display-utf8-bytes-ascii invalid 64)))))
+  (assert (signals-error-p
+           (lambda ()
+             (retrodeck::display-utf8-bytes-ascii "AB" 1)))))
 (assert (= (retrodeck:bitmap-text-width "" 2) 0))
 (assert (= (retrodeck:bitmap-text-width "AB" 2) 22))
 (assert (= (retrodeck:fit-text-scale "ABCDE" 29 3 1) 1))
@@ -1977,9 +2000,203 @@ secret!9
                   :system :deck
                   :rom "/sbin/reboot"
                   :color #xd75f5f))))
+(labels ((bytes (&rest values)
+           (map 'string #'code-char values))
+         (tsv (&rest fields)
+           (with-output-to-string (output)
+             (loop for field in fields
+                   for separator = nil then t
+                   when separator do (write-char #\Tab output)
+                   do (write-string field output))
+             (write-char #\Return output)
+             (terpri output)))
+         (game-row (id title system rom &optional (color "#D78787"))
+           (tsv id title system rom color))
+         (reject-games (contents)
+           (let ((*regular-file-result* nil)
+                 (*regular-file-results*
+                   (and contents (list (cons "/tmp/games.tsv" contents)))))
+             (signals-error-p
+              (lambda () (retrodeck:load-dashboard-games "/tmp/games.tsv")))))
+         (palette-text (entries &optional legacy-icon)
+           (with-output-to-string (output)
+             (when legacy-icon
+               (write-string (tsv "settings-icon" legacy-icon) output))
+             (dolist (entry entries)
+               (write-string
+                (tsv (string-downcase (symbol-name (car entry)))
+                     (format nil "#~6,'0X" (cdr entry)))
+                output))))
+         (reject-palette (contents)
+           (let ((*regular-file-result* nil)
+                 (*regular-file-results*
+                   (and contents (list (cons "/tmp/palette.tsv" contents)))))
+             (signals-error-p
+              (lambda ()
+                (retrodeck:load-dashboard-palette "/tmp/palette.tsv"))))))
+  (let* ((manifest-path
+           (namestring
+            (truename (merge-pathnames "../deploy/menu/games.tsv"
+                                       *load-truename*))))
+         (palette-path
+           (namestring
+            (truename (merge-pathnames "../deploy/menu/palette.tsv"
+                                       *load-truename*))))
+         (*regular-file-result* nil)
+         (*regular-file-results*
+           (list (cons manifest-path (test-file-string manifest-path))
+                 (cons palette-path (test-file-string palette-path))))
+         (*regular-file-calls* nil))
+    (multiple-value-bind (games palette loaded-p)
+        (retrodeck:load-dashboard-bootstrap manifest-path palette-path)
+      (assert loaded-p)
+      (assert
+       (equal (mapcar (lambda (game) (getf game :id)) (subseq games 0 15))
+              '("mario" "micro-mages" "kirbys-adventure" "metroid" "tetris"
+                "pokemon-red" "final-fantasy-legend-iii" "kirbys-dream-land"
+                "donkey-kong-country" "super-mario-bros-deluxe" "elite"
+                "knight-lore" "outlaw" "space-racer" "ten-seconds")))
+      (assert
+       (equal (mapcar (lambda (game) (getf game :id)) (subseq games 15))
+              '("lua-repl" "lisp-repl" "python-repl" "scheme-repl"
+                "chiptunes" "terminal" "reboot")))
+      (assert (equal palette retrodeck:*dashboard-palette*)))
+    (assert
+     (equal (reverse *regular-file-calls*)
+            (list (list manifest-path 1 65536)
+                  (list palette-path 1 4096)))))
+
+  (let* ((title (bytes #xc5 #xbd #x6c #x75 #xc5 #xa5))
+         (contents
+           (concatenate
+            'string
+            (format nil "# combined launcher manifest~C~%~C~%" #\Return #\Return)
+            (tsv "id" "title" "system" "rom" "#RRGGBB")
+            (game-row "base-one" "BASE ONE" "nes" "/missing/base.nes")
+            (game-row "upload-one" title "gb" "/missing/upload.gb"
+                      "#87AFAF")))
+         (*regular-file-result* nil)
+         (*regular-file-results* (list (cons "/tmp/combined-games.tsv" contents)))
+         (*regular-file-calls* nil)
+         (games (retrodeck:load-dashboard-games "/tmp/combined-games.tsv")))
+    (assert (equal (mapcar (lambda (game) (getf game :id)) games)
+                   '("base-one" "upload-one")))
+    (assert (string= (getf (second games) :title) "?lu?"))
+    (assert (eq (getf (second games) :system) :gb))
+    (assert (string= (getf (second games) :rom) "/missing/upload.gb"))
+    (assert (equal *regular-file-calls*
+                   '(("/tmp/combined-games.tsv" 1 65536)))))
+
+  (assert (reject-games nil))
+  (assert (reject-games ""))
+  (assert (reject-games (tsv "only" "four" "fields" "here")))
+  (assert (reject-games
+           (game-row "Bad" "BAD ID" "nes" "/missing/bad.nes")))
+  (assert (reject-games
+           (game-row "bad-system" "BAD SYSTEM" "other" "/missing/bad.rom")))
+  (assert (reject-games
+           (game-row "bad-path" "BAD PATH" "nes" "relative.nes")))
+  (assert (reject-games
+           (game-row "bad-color" "BAD COLOR" "nes" "/missing/bad.nes"
+                     "#12345G")))
+  (assert (reject-games
+           (concatenate 'string
+                        (game-row "same" "ONE" "nes" "/missing/one.nes")
+                        (game-row "same" "TWO" "gb" "/missing/two.gb"))))
+  (assert (reject-games
+           (concatenate 'string
+                        (game-row "one" "ONE" "nes" "/missing/same.nes")
+                        (game-row "two" "TWO" "nes" "/missing/same.nes"))))
+  (assert (reject-games
+           (concatenate 'string "#" (make-string 4096 :initial-element #\x)
+                        (string #\Newline))))
+  (let* ((prefix (concatenate 'string "#" (make-string 4095 :initial-element #\x)
+                              (string #\Newline)))
+         (*regular-file-result* nil)
+         (*regular-file-results*
+           (list (cons "/tmp/games.tsv"
+                       (concatenate 'string prefix
+                                    (game-row "one" "ONE" "nes"
+                                              "/missing/one.nes"))))))
+    (assert (= (length (retrodeck:load-dashboard-games "/tmp/games.tsv")) 1)))
+  (let ((sixty-four
+          (with-output-to-string (output)
+            (dotimes (index 64)
+              (write-string
+               (game-row (format nil "g~D" index) (format nil "GAME ~D" index)
+                         "nes" (format nil "/missing/g~D.nes" index))
+               output)))))
+    (let ((*regular-file-result* nil)
+          (*regular-file-results* (list (cons "/tmp/games.tsv" sixty-four))))
+      (assert (= (length (retrodeck:load-dashboard-games "/tmp/games.tsv")) 64)))
+    (assert
+     (reject-games
+      (concatenate 'string sixty-four
+                   (game-row "overflow" "OVERFLOW" "nes"
+                             "/missing/overflow.nes")))))
+  (let ((*regular-file-calls* nil))
+    (assert (signals-error-p
+             (lambda () (retrodeck:load-dashboard-games "relative.tsv"))))
+    (assert (null *regular-file-calls*)))
+
+  (let* ((original (copy-tree retrodeck:*dashboard-palette*))
+         (custom
+           (loop for entry in retrodeck:*dashboard-palette*
+                 for index from 1
+                 collect (cons (car entry) (* index #x010101))))
+         (contents
+           (concatenate
+            'string
+            (format nil "# complete override~C~%" #\Return)
+            (palette-text (reverse custom) "pixel-cog-2")))
+         (*regular-file-result* nil)
+         (*regular-file-results* (list (cons "/tmp/palette.tsv" contents)))
+         (*regular-file-calls* nil)
+         (palette (retrodeck:load-dashboard-palette "/tmp/palette.tsv")))
+    (assert (equal palette custom))
+    (assert (equal retrodeck:*dashboard-palette* original))
+    (assert (equal *regular-file-calls* '(("/tmp/palette.tsv" 1 4096)))))
+  (assert (reject-palette nil))
+  (assert (reject-palette (tsv "unknown" "#000000")))
+  (assert (reject-palette
+           (concatenate 'string
+                        (tsv "background" "#000000")
+                        (tsv "background" "#111111"))))
+  (assert (reject-palette
+           (palette-text (butlast retrodeck:*dashboard-palette*))))
+  (assert (reject-palette
+           (concatenate 'string
+                        (tsv "settings-icon" "pixel-cog-2")
+                        (tsv "settings-icon" "pixel-cog-3")
+                        (palette-text retrodeck:*dashboard-palette*))))
+
+  (let* ((manifest (game-row "one" "ONE" "nes" "/missing/one.nes"))
+         (partial (tsv "background" "#FFFFFF"))
+         (original (copy-tree retrodeck:*dashboard-palette*))
+         (*regular-file-result* nil)
+         (*regular-file-results*
+           (list (cons "/tmp/games.tsv" manifest)
+                 (cons "/tmp/palette.tsv" partial)))
+         (errors (make-string-output-stream)))
+    (let ((*error-output* errors))
+      (multiple-value-bind (games palette loaded-p)
+          (retrodeck:load-dashboard-bootstrap "/tmp/games.tsv"
+                                              "/tmp/palette.tsv")
+        (assert (not loaded-p))
+        (assert (= (length games) 8))
+        (assert (equal palette original))
+        (setf (cdar palette) #xffffff
+              (char (getf (second games) :title) 0) #\X)
+        (assert (equal retrodeck:*dashboard-palette* original))
+        (assert (string= (getf (first retrodeck:*dashboard-built-in-applications*)
+                               :title)
+                         "LUA REPL"))))
+    (assert (search "using startup dashboard palette"
+                    (get-output-stream-string errors)))))
+
 (assert (null (retrodeck:dashboard-application "missing")))
 (let ((application (retrodeck:dashboard-application "terminal")))
-  (setf (getf application :title) "CHANGED")
+  (setf (char (getf application :title) 0) #\X)
   (assert (string= (getf (retrodeck:dashboard-application "terminal") :title)
                    "TERMINAL")))
 
@@ -3778,8 +3995,10 @@ secret!9
         (assert (= *evdev-close-count* 1))
         (assert (= *evdev-controls-close-count* 1))))))
 
-(labels ((exercise (input times function)
-           (let* ((state (retrodeck:dashboard-loop-initial-state nil :now 90))
+(labels ((exercise (input times function &optional games palette)
+           (let* ((state (retrodeck:dashboard-loop-initial-state games :now 90))
+                  (retrodeck:*dashboard-palette*
+                    (or palette retrodeck:*dashboard-palette*))
                   (runtime
                     (retrodeck:make-dashboard-runtime
                      :clock (lambda () (or (pop times) 999))))
@@ -3822,24 +4041,42 @@ secret!9
                   (*canvas-fill-status* 1))
              (setf retrodeck::*menu-sound-input-until-ms* 0)
              (funcall function state runtime))))
-  (exercise
-   '(0 0 0 0 0 0) '(100 101 102 103 104)
-   (lambda (state runtime)
-     (multiple-value-bind (final returned-runtime traces reason)
-         (retrodeck:dashboard-runtime-rehearse
-          state runtime :iteration-limit 2)
-       (assert (eq returned-runtime runtime))
-       (assert (equal traces '(((:reap-sound)) ((:reap-sound)))))
-       (assert (eq reason :limit))
-       (assert (= (getf (getf final :settings) :volume) 37))
-       (assert (= *active-count* 2))
-       (assert (= *fbdev-open-count* 1))
-       (assert (= *fbdev-close-count* 1))
-       (assert (= *evdev-open-count* 1))
-       (assert (= *evdev-close-count* 1))
-       (assert (= *evdev-controls-close-count* 1))
-       (assert (not (getf runtime :initialized-p)))
-       (assert (not (retrodeck:dashboard-runtime-running-p runtime))))))
+  (let* ((manifest-path
+           (namestring
+            (truename (merge-pathnames "../deploy/menu/games.tsv"
+                                       *load-truename*))))
+         (palette-path
+           (namestring
+            (truename (merge-pathnames "../deploy/menu/palette.tsv"
+                                       *load-truename*))))
+         (*regular-file-result* nil)
+         (*regular-file-results*
+           (list (cons manifest-path (test-file-string manifest-path))
+                 (cons palette-path (test-file-string palette-path)))))
+    (multiple-value-bind (games palette loaded-p)
+        (retrodeck:load-dashboard-bootstrap manifest-path palette-path)
+      (assert loaded-p)
+      (exercise
+       '(0 0 0 0 0 0) '(100 101 102 103 104)
+       (lambda (state runtime)
+         (multiple-value-bind (final returned-runtime traces reason)
+             (retrodeck:dashboard-runtime-rehearse
+              state runtime :iteration-limit 2)
+           (assert (eq returned-runtime runtime))
+           (assert (equal traces '(((:reap-sound)) ((:reap-sound)))))
+           (assert (eq reason :limit))
+           (assert (= (length (getf final :games)) 22))
+           (assert (string= (getf (first (getf final :games)) :id) "mario"))
+           (assert (= (getf (getf final :settings) :volume) 37))
+           (assert (= *active-count* 2))
+           (assert (= *fbdev-open-count* 1))
+           (assert (= *fbdev-close-count* 1))
+           (assert (= *evdev-open-count* 1))
+           (assert (= *evdev-close-count* 1))
+           (assert (= *evdev-controls-close-count* 1))
+           (assert (not (getf runtime :initialized-p)))
+           (assert (not (retrodeck:dashboard-runtime-running-p runtime)))))
+       games palette)))
   (exercise
    '(0 0 0 0 0 0) '(200)
    (lambda (state runtime)
