@@ -1079,6 +1079,13 @@
             (pushnew :hunchentoot-no-ssl *features*)
             (require 'asdf)
             (asdf:operate 'asdf:load-source-op :hunchentoot)
+            (asdf:operate 'asdf:load-source-op :zip)
+            (zip:with-zipfile (archive "one.zip")
+              (let ((entry (zip:get-zipfile-entry "rom.ch8" archive)))
+                (unless (and (= 1 (hash-table-count (zip:zipfile-entries archive)))
+                             (equalp #(1 2 3 4)
+                                     (zip:zipfile-entry-contents entry)))
+                  (error "ZIP source probe diverged"))))
 
             ;; ECL bytecode lacks USOCKET's FDSET-ALLOC wait-list helper.
             ;; The uploader deliberately accepts on the blocking listener instead.
@@ -1122,6 +1129,8 @@
             (ext:quit 0)
             EOF
 
+            printf '\001\002\003\004' > rom.ch8
+            ${pkgs.zip}/bin/zip -q one.zip rom.ch8
             mkdir home
             HOME=$PWD/home \
               XDG_CACHE_HOME=$PWD/home/cache \

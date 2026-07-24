@@ -6,7 +6,7 @@ let
     inherit package;
   };
   closure = pkgs.lib.genericClosure {
-    startSet = [ (wrap pkgs.sbclPackages.hunchentoot) ];
+    startSet = map wrap [ pkgs.sbclPackages.hunchentoot pkgs.sbclPackages.zip ];
     operator = item:
       map wrap (builtins.filter
         (package: package.pname != "cl+ssl")
