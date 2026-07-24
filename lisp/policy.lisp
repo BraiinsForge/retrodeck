@@ -95,6 +95,127 @@
     (string (copy-seq value))
     (t value)))
 
+(defparameter *uploader-policy*
+  '(:paths
+    (:password-config "/mnt/data/nes-deck/uploader/password.conf"
+     :address-config "/mnt/data/nes-deck/uploader/address.conf"
+     :rom-root "/mnt/data/roms"
+     :base-catalog "/mnt/data/nes-deck/menu/games.tsv"
+     :upload-catalog "/mnt/data/nes-deck/uploads/games.tsv"
+     :active-palette "/mnt/data/nes-deck/state/palette.tsv"
+     :base-palette "/mnt/data/nes-deck/menu/palette.tsv"
+     :palette-override "/mnt/data/nes-deck/state/dashboard-palette.sexp")
+    :http
+    (:address "0.0.0.0:8080" :port "8080"
+     :routes ((:get "/") (:post "/login") (:post "/logout")
+              (:post "/upload") (:post "/palette")
+              (:get "/assets/paper.css") (:get "/assets/palette.js"))
+     :read-header-timeout-ms 5000 :read-timeout-ms 35000
+     :write-timeout-ms 35000 :idle-timeout-ms 30000
+     :maximum-address-config-bytes 64 :maximum-header-bytes 16384
+     :maximum-login-bytes 512 :maximum-palette-bytes 4096
+     :multipart-memory-bytes 1048576 :maximum-request-bytes 12582912
+     :urlencoded-content-type "application/x-www-form-urlencoded"
+     :urlencoded-routes ("/login" "/palette")
+     :form-fields
+     (:login ("password") :logout ("csrf")
+      :upload ("csrf" "system" "title" "rom")
+      :palette ("csrf" :palette-fields))
+     :upload-file-field "rom" :maximum-upload-files 1
+     :response-headers
+     (("Cache-Control" . "no-store")
+      ("Content-Security-Policy" .
+       "default-src 'none'; img-src 'self'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+      ("Cross-Origin-Opener-Policy" . "same-origin")
+      ("Cross-Origin-Resource-Policy" . "same-origin")
+      ("Referrer-Policy" . "no-referrer")
+      ("X-Content-Type-Options" . "nosniff")
+      ("X-Frame-Options" . "DENY")))
+    :authentication
+    (:password-config-version 1 :password-iterations 210000
+     :minimum-password-bytes 8 :maximum-password-bytes 128
+     :minimum-config-iterations 100000
+     :maximum-config-iterations 1000000 :maximum-config-bytes 1024
+     :salt-bytes 16 :digest-bytes 32 :token-bytes 32
+     :cookie-token-characters 43 :csrf-token-bytes 32
+     :password-config-fields ("version" "iterations" "salt" "digest")
+     :session-cookie "deck_rom_session" :session-cookie-path "/"
+     :session-cookie-http-only t :session-cookie-same-site :strict
+     :session-cookie-max-age-seconds 28800
+     :session-cookie-delete-max-age -1 :session-lifetime-ms 28800000
+     :maximum-sessions 8 :maximum-login-sources 256
+     :login-gate-capacity 1 :failures-before-lock 5
+     :lock-duration-ms 300000 :login-check-wait-ms 2000
+     :busy-retry-after-seconds 3)
+    :dashboard
+    (:restart-executable "/etc/init.d/nes-deck" :restart-arguments ("restart")
+     :restart-timeout-ms 20000)
+    :storage
+    (:rom-directory-mode #o755 :private-directory-mode #o700
+     :private-file-mode #o600)
+    :rom
+    (:minimum-title-runes 1 :maximum-title-runes 64
+     :minimum-rom-bytes 1 :maximum-slug-bytes 32
+     :maximum-identifier-bytes 48 :archive-extension ".zip"
+     :maximum-archive-bytes 10485760 :maximum-catalog-bytes 65536
+     :catalog-scanner-maximum-bytes 4097 :catalog-field-count 5
+     :catalog-fields ("id" "title" "system" "rom" "color")
+     :maximum-games 64)
+    :palette
+    (:minimum-bytes 1 :maximum-bytes 4096
+     :canonical-rgb-characters 7 :field-count 22
+     :legacy-tsv-field "settings-icon"
+     :override-version-field ":version"
+     :override-legacy-icon-field ":settings-icon"
+     :override-palette-field ":palette"
+     :minimum-legacy-icon-name-bytes 1
+     :maximum-legacy-icon-name-bytes 64 :maximum-override-token-bytes 64
+     :maximum-override-tokens 54 :accepted-override-versions (2 3)
+     :written-override-version 2)
+    :systems
+    ((:id "nes" :label "NES" :extension ".nes" :color "#FF5F00"
+      :maximum-rom-bytes 8388608)
+     (:id "gb" :label "Game Boy" :extension ".gb" :color "#87AF87"
+      :maximum-rom-bytes 8388608)
+     (:id "gbc" :label "Game Boy Color" :extension ".gbc" :color "#5F87D7"
+      :maximum-rom-bytes 8388608)
+     (:id "zx" :label "ZX Spectrum" :extension ".tap" :color "#AF87D7"
+      :maximum-rom-bytes 8388608)
+     (:id "chip8" :label "CHIP-8" :extension ".ch8" :color "#5FD7D7"
+      :maximum-rom-bytes 65024))
+    :palette-fields
+    (("background" . "Background") ("text-dark" . "Dark text")
+     ("field" . "Field") ("surface" . "Surface")
+     ("inactive-border" . "Inactive border")
+     ("control-border" . "Control border") ("footer" . "Footer")
+     ("inactive-text" . "Inactive text") ("text" . "Text")
+     ("white" . "Bright white") ("title" . "Title")
+     ("volume-off" . "Volume off") ("volume-on" . "Volume on")
+     ("selected" . "Selected item") ("wifi-active" . "Wi-Fi active")
+     ("wifi-focus" . "Wi-Fi focus")
+     ("wifi-active-border" . "Wi-Fi active border")
+     ("field-label" . "Field label") ("accent" . "Accent")
+     ("active" . "Active control")
+     ("control-surface" . "Control surface")
+     ("muted" . "Muted control"))))
+
+(defun uploader-policy-section (section)
+  (check-type section keyword)
+  (let ((value (getf *uploader-policy* section :missing)))
+    (when (eq value :missing)
+      (error "Unknown uploader policy section ~S" section))
+    (copy-dashboard-policy-value value)))
+
+(defun uploader-policy-snapshot ()
+  (copy-dashboard-policy-value *uploader-policy*))
+
+(defun uploader-system-policy (id)
+  (check-type id string)
+  (let ((system (find id (getf *uploader-policy* :systems)
+                      :key (lambda (entry) (getf entry :id))
+                      :test #'string=)))
+    (and system (copy-dashboard-policy-value system))))
+
 (defun dashboard-tsv-lines (text)
   (loop with start = 0
         while (< start (length text))
