@@ -93,8 +93,10 @@
 (defparameter *wayland-shutdown-status* 0)
 (defparameter *helper-result* '(0 0 -1 nil))
 (defparameter *helper-arguments* nil)
-(defparameter *terminal-result* '(1 0 0 -1 nil))
+(defparameter *terminal-result* '(1 0 0 -1 nil 0))
 (defparameter *terminal-arguments* nil)
+(defparameter *child-result* '(1 0 0 -1 nil 0))
+(defparameter *child-arguments* nil)
 
 (defpackage #:retrodeck.native
   (:use)
@@ -130,6 +132,7 @@
            #:read-control-file
            #:read-regular-file
            #:read-state-file
+           #:run-child
            #:run-helper
            #:run-terminal
            #:stop-audio
@@ -147,7 +150,7 @@
            #:wayland-size))
 
 (setf (symbol-function (find-symbol "ABI-VERSION" "RETRODECK.NATIVE"))
-      (lambda () 17)
+      (lambda () 18)
       (symbol-function (find-symbol "AUDIO-ACTIVE-P" "RETRODECK.NATIVE"))
       (lambda () (incf *active-count*) *active-status*)
       (symbol-function (find-symbol "PLAY-TONES" "RETRODECK.NATIVE"))
@@ -241,7 +244,11 @@
         (lambda (&rest arguments)
           (setf *helper-arguments* arguments)
           *helper-result*)
-        (symbol-function (find-symbol "RUN-TERMINAL" "RETRODECK.NATIVE"))
+        (symbol-function (find-symbol "RUN-CHILD" "RETRODECK.NATIVE"))
+         (lambda (&rest arguments)
+           (setf *child-arguments* arguments)
+           *child-result*)
+         (symbol-function (find-symbol "RUN-TERMINAL" "RETRODECK.NATIVE"))
         (lambda (&rest arguments)
           (setf *terminal-arguments* arguments)
           *terminal-result*)
@@ -2022,7 +2029,7 @@ secret!9
                    (("RETRO_DECK_VOLUME_PERCENT" . "17")
                     ("RETRO_DECK_PRESENTATION" . "layer-shell"))
                    :label "ten-seconds"
-                   :touch-supervision nil
+                   :touch-supervision t
                    :mirror-console nil))))
 
 (let ((plan
@@ -2050,14 +2057,14 @@ secret!9
 
 (let* ((plan (retrodeck:dashboard-launch-plan
               (retrodeck:dashboard-application "terminal") 42 :keymap "cz"))
-       (fixtures '(((0 0 -1 -1 "exec failed")
+       (fixtures '(((0 0 -1 -1 "exec failed" 0)
                     "TERMINAL ERROR - CHECK LOG")
-                   ((0 0 -1 -1 nil) "TERMINAL DID NOT START")
-                   ((1 1 -1 15 nil) "RETURNED FROM TERMINAL")
-                   ((1 0 0 -1 nil) "TERMINAL EXITED")
-                   ((1 0 7 -1 nil) "TERMINAL EXITED (STATUS 7)")
-                   ((1 0 -1 15 nil) "TERMINAL STOPPED (SIGNAL 15)")
-                   ((1 0 -1 -1 nil) "TERMINAL STOPPED"))))
+                   ((0 0 -1 -1 nil 0) "TERMINAL DID NOT START")
+                   ((1 1 -1 15 nil 0) "RETURNED FROM TERMINAL")
+                   ((1 0 0 -1 nil 0) "TERMINAL EXITED")
+                   ((1 0 7 -1 nil 0) "TERMINAL EXITED (STATUS 7)")
+                   ((1 0 -1 15 nil 0) "TERMINAL STOPPED (SIGNAL 15)")
+                   ((1 0 -1 -1 nil 0) "TERMINAL STOPPED"))))
   (assert (string= (retrodeck:dashboard-terminal-title plan) "TERMINAL"))
   (assert (string= (retrodeck:dashboard-terminal-starting-status plan)
                    "STARTING TERMINAL"))
@@ -2066,7 +2073,7 @@ secret!9
       (assert
        (string=
         (retrodeck:dashboard-terminal-result-status
-         plan (retrodeck::decode-native-terminal-result native-result))
+         plan (retrodeck::decode-native-child-result native-result))
         expected))))
   (let ((repl-plan (retrodeck:dashboard-launch-plan
                     (retrodeck:dashboard-application "lisp-repl")
@@ -2076,30 +2083,66 @@ secret!9
     (assert (string= (retrodeck:dashboard-terminal-starting-status repl-plan)
                      "STARTING LISP REPL"))))
 
-(dolist (result '((2 0 -1 -1 nil)
-                  (1 -1 -1 -1 nil)
-                  (1 0 -2 -1 nil)
-                  (1 0 -1 0 nil)
-                  (0 1 -1 -1 nil)
-                  (0 0 0 -1 nil)
-                  (1 0 0 15 nil)))
+(dolist (result '((2 0 -1 -1 nil 0)
+                  (1 -1 -1 -1 nil 0)
+                  (1 0 -2 -1 nil 0)
+                  (1 0 -1 0 nil 0)
+                  (0 1 -1 -1 nil 0)
+                  (0 0 0 -1 nil 0)
+                  (1 0 0 15 nil 0)
+                  (1 0 0 -1 nil 2)
+                  (0 0 -1 -1 nil 1)
+                  (1 1 -1 15 nil 1)
+                  (1 0 0 -1 7 0)))
   (assert (signals-error-p
-           (lambda () (retrodeck::decode-native-terminal-result result)))))
+           (lambda () (retrodeck::decode-native-child-result result)))))
 
 (let* ((plan (retrodeck:dashboard-launch-plan
               (retrodeck:dashboard-application "terminal") 42 :keymap "cz"))
        (before *finish-count*))
-  (setf *terminal-result* '(1 0 0 -1 nil)
+  (setf *terminal-result* '(1 0 0 -1 nil 0)
         *terminal-arguments* nil
         retrodeck::*menu-sound-input-until-ms* 100)
   (assert (equal (retrodeck:run-dashboard-terminal plan)
                  '(:started t :exited-for-touch nil
-                   :exit-code 0 :signal nil :error nil)))
+                   :exit-code 0 :signal nil :error nil
+                   :shutdown-requested nil)))
   (assert (= *finish-count* (1+ before)))
   (assert (= retrodeck::*menu-sound-input-until-ms* 0))
   (assert (equal *terminal-arguments*
                  '("/mnt/data/nes-deck/terminal/retro-terminal"
-                   "cz" "shell" "terminal"))))
+                   "cz" "shell" "terminal")))
+  (let ((before-no-finish *finish-count*))
+    (retrodeck:run-dashboard-terminal plan nil)
+    (assert (= *finish-count* before-no-finish))))
+
+(let* ((plan '(:executable "/tmp/retrodeck-game"
+               :arguments ("first argument" "second")
+               :environment (("RETRODECK_ALPHA" . "alpha value")
+                             ("RETRODECK_BETA" . "beta"))
+               :label "alpha"
+               :touch-supervision t
+               :mirror-console nil)))
+  (setf *child-result* '(1 0 7 -1 nil 0)
+        *child-arguments* nil)
+  (assert (equal (retrodeck::run-dashboard-child plan)
+                 '(:started t :exited-for-touch nil
+                   :exit-code 7 :signal nil :error nil
+                   :shutdown-requested nil)))
+  (assert (equal *child-arguments*
+                 '("/tmp/retrodeck-game"
+                   ("first argument" "second")
+                   (("RETRODECK_ALPHA" . "alpha value")
+                    ("RETRODECK_BETA" . "beta"))
+                   "alpha" 1)))
+  (setf (getf plan :touch-supervision) nil
+        *child-result* '(1 0 -1 15 nil 1))
+  (assert (equal (retrodeck:run-dashboard-launch plan :game)
+                 '(:child-returned :shutdown t :touch-disconnected t
+                   :result (:started t :exited-for-touch nil
+                            :exit-code nil :signal 15 :error nil
+                            :shutdown-requested t))))
+  (assert (zerop (fifth *child-arguments*))))
 
 (let ((plan
         (retrodeck:dashboard-launch-plan
@@ -2111,6 +2154,147 @@ secret!9
                    :label "reboot"
                    :touch-supervision t
                    :mirror-console nil))))
+
+(let* ((application '(:id "alpha" :title "ALPHA" :system :nes
+                      :rom "/tmp/alpha.nes" :color #x5f87ff))
+       (plan (retrodeck:dashboard-launch-plan application 42 :wayland t
+                                               :volume-state "/tmp/volume.state"))
+       (state (retrodeck:dashboard-loop-initial-state (list application)))
+       (runtime (retrodeck:make-dashboard-runtime :wayland t
+                                                   :clock (lambda () 7000))))
+  (setf (getf state :active-launch)
+        (list :kind :game :application application :plan plan)
+        *child-result* '(1 0 0 -1 nil 0)
+        *child-arguments* nil)
+  (assert
+   (equal
+    (retrodeck::dashboard-runtime-handle-effect
+     runtime (list :launch plan) state)
+    '(:child-returned :shutdown nil :touch-disconnected nil
+      :result (:started t :exited-for-touch nil
+               :exit-code 0 :signal nil :error nil
+               :shutdown-requested nil))))
+  (assert (equal *child-arguments*
+                 '("/mnt/data/nes-deck/nes-deck"
+                   ("/tmp/alpha.nes")
+                   (("RETRO_DECK_VOLUME_PERCENT" . "42")
+                    ("RETRO_DECK_EXIT_HINT" . "1")
+                    ("RETRO_DECK_PRESENTATION" . "layer-shell")
+                    ("RETRO_DECK_VOLUME_STATE" . "/tmp/volume.state"))
+                   "alpha" 1)))
+  (setf *child-result* '(1 0 -1 15 nil 1))
+  (let ((completion
+          (retrodeck::dashboard-runtime-handle-effect
+           runtime (list :launch plan) state)))
+    (multiple-value-bind (stopped effects)
+        (retrodeck:dashboard-reduce state completion)
+      (assert (null (getf stopped :active-launch)))
+      (assert (equal effects '((:stop-loop)))))))
+
+(let* ((application (retrodeck:dashboard-application "reboot"))
+       (plan (retrodeck:dashboard-launch-plan application 42))
+       (state (retrodeck:dashboard-loop-initial-state (list application)))
+       (runtime (retrodeck:make-dashboard-runtime :wayland t)))
+  (setf (getf state :active-launch)
+        (list :kind :reboot :application application :plan plan)
+        *child-result* '(1 0 7 -1 nil 0)
+        *child-arguments* nil)
+  (assert
+   (equal
+    (retrodeck::dashboard-runtime-handle-effect
+     runtime (list :launch plan) state)
+    '(:child-returned :shutdown nil :touch-disconnected nil
+      :result (:started t :exited-for-touch nil
+               :exit-code 7 :signal nil :error nil
+               :shutdown-requested nil))))
+  (assert (equal *child-arguments*
+                 '("/sbin/reboot" nil nil "reboot" 1))))
+
+(let* ((application (retrodeck:dashboard-application "terminal"))
+       (plan (retrodeck:dashboard-launch-plan application 42 :keymap "cz"))
+       (state (retrodeck:dashboard-loop-initial-state nil))
+       (runtime (retrodeck:make-dashboard-runtime :wayland t))
+       (before *finish-count*))
+  (setf (getf state :active-launch)
+        (list :kind :terminal :application application :plan plan)
+        *terminal-result* '(1 0 0 -1 nil 0)
+        *terminal-arguments* nil)
+  (assert
+   (equal
+    (retrodeck::dashboard-runtime-handle-effect
+     runtime (list :launch plan) state)
+    '(:child-returned :shutdown nil :touch-disconnected nil
+      :result (:started t :exited-for-touch nil
+               :exit-code 0 :signal nil :error nil
+               :shutdown-requested nil))))
+  (assert (= *finish-count* before))
+  (assert (equal *terminal-arguments*
+                 '("/mnt/data/nes-deck/terminal/retro-terminal"
+                   "cz" "shell" "terminal"))))
+
+(let* ((application '(:id "ten-seconds" :title "10 SECONDS" :system :deck
+                      :rom "/mnt/data/nes-deck/games/ten-seconds"
+                      :color #xffaf87))
+       (plan (retrodeck:dashboard-launch-plan application 42))
+       (state (retrodeck:dashboard-loop-initial-state
+               (list application) :now 1000 :touch-connected-p t))
+       (runtime (retrodeck:make-dashboard-runtime :adopt-presentation t)))
+  (setf (getf state :active-launch)
+        (list :kind :game :application application :plan plan)
+        (getf runtime :presentation-owned-p) t
+        *child-result* '(1 0 0 -1 nil 0))
+  (let ((completion
+          (retrodeck::dashboard-runtime-handle-effect
+           runtime (list :launch plan) state)))
+    (assert (getf (rest completion) :touch-disconnected))
+    (multiple-value-bind (returned return-effects)
+        (retrodeck:dashboard-reduce state completion)
+      (assert (not (getf returned :touch-connected-p)))
+      (assert (equal return-effects '((:scan-controls :force t))))
+      (multiple-value-bind (scanned scan-effects)
+          (retrodeck:dashboard-reduce
+           returned '(:controls-rescanned :now 5000))
+        (assert (equal scan-effects '((:open-presentation))))
+        (multiple-value-bind (presented presentation-effects)
+            (retrodeck:dashboard-reduce scanned '(:presentation-opened))
+          (assert (equal presentation-effects '((:reload-volume))))
+          (multiple-value-bind (complete complete-effects)
+              (retrodeck:dashboard-reduce
+               presented '(:child-complete :volume 42))
+            (assert (equal complete-effects '((:render) (:present))))
+            (multiple-value-bind (waiting reconnect-trace)
+                (retrodeck:dashboard-loop-begin-iteration
+                 complete '(:now 5001 :wayland nil)
+                 (lambda (effect current)
+                   (declare (ignore effect current))))
+              (assert (not (getf waiting :touch-connected-p)))
+              (assert (equal reconnect-trace
+                             '((:reap-sound) (:reconnect-touch)))))))))))
+
+(let* ((application '(:id "alpha" :title "ALPHA" :system :nes
+                      :rom "/tmp/alpha.nes" :color #x5f87ff))
+       (plan (retrodeck:dashboard-launch-plan application 42 :wayland t))
+       (state (retrodeck:dashboard-loop-initial-state (list application)))
+       (calls 0)
+       (runtime
+         (retrodeck:make-dashboard-runtime
+          :wayland t
+          :external-effect-handler
+          (lambda (effect current)
+            (declare (ignore effect current))
+            (incf calls)
+            '(:child-returned :result (:started nil :error "external"))))))
+  (setf (getf state :active-launch)
+        (list :kind :game :application application :plan plan)
+        *child-arguments* nil
+        *terminal-arguments* nil)
+  (assert (equal (retrodeck::dashboard-runtime-handle-effect
+                  runtime (list :launch plan) state)
+                 '(:child-returned
+                   :result (:started nil :error "external"))))
+  (assert (= calls 1))
+  (assert (null *child-arguments*))
+  (assert (null *terminal-arguments*)))
 
 (assert (retrodeck:reboot-confirmation-active-p 5000 4999))
 (assert (not (retrodeck:reboot-confirmation-active-p 5000 5000)))
@@ -3756,7 +3940,9 @@ secret!9
             (declare (ignore current))
             (case (first effect)
               (:network-action '(:network-result :network nil))
-              (otherwise (incf external-calls))))))
+              (otherwise
+                (incf external-calls)
+                '(:external-launch))))))
        (*fbdev-size* '(1280 480))
        (*fbdev-open-count* 0)
        (*fbdev-close-count* 0)
@@ -3771,11 +3957,16 @@ secret!9
     (declare (ignore ignored-runtime))
     (assert (null *network-status-path*))
     (assert (not (getf runtime :presentation-owned-p)))
+    (assert (equal
+             (retrodeck::dashboard-runtime-handle-effect
+              runtime '(:launch (:executable "/tmp/noop")) initialized)
+             '(:external-launch)))
+    (assert (= external-calls 1))
+    (setf (getf runtime :external-effect-handler) nil)
     (assert (signals-error-p
              (lambda ()
                (retrodeck::dashboard-runtime-handle-effect
                 runtime '(:launch (:executable "/tmp/noop")) initialized))))
-    (assert (zerop external-calls))
     (retrodeck:dashboard-runtime-shutdown runtime)
     (assert (zerop *fbdev-open-count*))
     (assert (zerop *fbdev-close-count*))

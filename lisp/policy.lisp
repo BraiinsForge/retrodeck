@@ -372,7 +372,7 @@
                :arguments arguments
                :environment environment
                :label (getf application :id)
-               :touch-supervision (not (eq system :deck))
+               :touch-supervision (or wayland (not (eq system :deck)))
                :mirror-console nil))))))
 
 (defun reboot-confirmation-active-p (deadline now)

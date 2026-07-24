@@ -1102,6 +1102,9 @@
             (getf next :active-launch) nil)
       (return-from dashboard-reduce-child-returned
         (values next '((:stop-loop)))))
+    (when (getf arguments :touch-disconnected)
+      (setf next (copy-list next)
+            (getf next :touch-connected-p) nil))
     (setf next (copy-list next)
           (getf next :pending-child-result) (copy-tree result)
           (getf next :child-return-stage) :controls)
@@ -1495,6 +1498,13 @@
   (let ((handler (getf runtime :external-effect-handler)))
     (cond
       (handler (funcall handler effect state))
+      ((eq (first effect) :launch)
+       (when (and (not (getf runtime :wayland))
+                  (not (getf runtime :presentation-owned-p)))
+         (error "Dashboard runtime cannot launch with a borrowed fbdev presentation; use :ADOPT-PRESENTATION T"))
+       (let ((launch (or (getf state :active-launch)
+                         (error "Dashboard has no active launch"))))
+         (run-dashboard-launch (second effect) (getf launch :kind))))
       ((eq (first effect) :network-action)
        (list :network-result :network
              (read-native-network-status
@@ -1625,9 +1635,6 @@
      (dashboard-runtime-shutdown runtime)
      nil)
     (:launch
-     (when (and (not (getf runtime :wayland))
-                (not (getf runtime :presentation-owned-p)))
-       (error "Dashboard runtime cannot launch with a borrowed fbdev presentation; use :ADOPT-PRESENTATION T"))
      (let ((completion (dashboard-runtime-external-effect runtime effect state)))
        (setf (getf runtime :now) (dashboard-runtime-read-clock runtime))
        completion))

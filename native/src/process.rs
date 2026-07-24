@@ -56,6 +56,7 @@ pub fn shutdown_requested() -> bool {
 pub struct ChildResult {
     pub started: bool,
     pub exited_for_touch: bool,
+    pub shutdown_requested: bool,
     pub exit_code: Option<i32>,
     pub signal: Option<i32>,
     pub error: Option<String>,
@@ -160,8 +161,9 @@ impl TouchHold {
     }
 }
 
-struct TerminalInteraction {
+struct ChildInteraction {
     uses_wayland: bool,
+    touch_supervision: bool,
     mirror_console: bool,
     next_console_frame: Instant,
     last_touch_attempt: Option<Instant>,
@@ -169,15 +171,19 @@ struct TerminalInteraction {
     hold: TouchHold,
 }
 
-impl TerminalInteraction {
-    fn new() -> Self {
+impl ChildInteraction {
+    fn new(touch_supervision: bool, mirror_console: bool) -> Self {
         let uses_wayland = wayland::size().is_some();
         if !uses_wayland {
             fbdev::close();
+            if !touch_supervision {
+                input::close_touch();
+            }
         }
         Self {
             uses_wayland,
-            mirror_console: uses_wayland,
+            touch_supervision,
+            mirror_console: uses_wayland && mirror_console,
             next_console_frame: Instant::now(),
             last_touch_attempt: None,
             last_touch_error: String::new(),
@@ -192,10 +198,14 @@ impl TerminalInteraction {
                 self.hold.reset();
             }
             while let Some(report) = wayland::next_touch() {
-                self.hold.update(report.down, report.x, report.y);
+                if self.touch_supervision {
+                    self.hold.update(report.down, report.x, report.y);
+                }
             }
-        } else {
+        } else if self.touch_supervision {
             self.poll_evdev(timeout);
+        } else {
+            thread::sleep(timeout);
         }
 
         let now = Instant::now();
@@ -210,7 +220,7 @@ impl TerminalInteraction {
         }
         if shutdown_requested() || (self.uses_wayland && wayland::shutdown_requested()) {
             StopRequest::Shutdown
-        } else if self.hold.complete(now) {
+        } else if self.touch_supervision && self.hold.complete(now) {
             StopRequest::Touch
         } else {
             StopRequest::None
@@ -321,16 +331,21 @@ pub fn run_helper(executable: &Path, input: &[u8]) -> HelperResult {
     }
 }
 
-pub fn run_terminal(executable: &Path, keymap: &OsStr, mode: &OsStr, label: &str) -> ChildResult {
-    let mut interaction = TerminalInteraction::new();
+pub fn run_child(
+    executable: &Path,
+    arguments: &[OsString],
+    environment: &[(OsString, OsString)],
+    label: &str,
+    touch_supervision: bool,
+    mirror_console: bool,
+) -> ChildResult {
+    let mut interaction = ChildInteraction::new(touch_supervision, mirror_console);
     let tty = TtySnapshot::capture();
     eprintln!("retrodeck: launching {label}");
-    let arguments = [OsString::from(mode)];
-    let environment = [(OsString::from("RETRO_DECK_KEYMAP"), OsString::from(keymap))];
     let result = spawn_and_supervise(
         executable,
-        &arguments,
-        &environment,
+        arguments,
+        environment,
         label,
         |timeout| interaction.step(timeout),
         POLL_INTERVAL,
@@ -338,6 +353,12 @@ pub fn run_terminal(executable: &Path, keymap: &OsStr, mode: &OsStr, label: &str
     );
     tty.restore();
     result
+}
+
+pub fn run_terminal(executable: &Path, keymap: &OsStr, mode: &OsStr, label: &str) -> ChildResult {
+    let arguments = [OsString::from(mode)];
+    let environment = [(OsString::from("RETRO_DECK_KEYMAP"), OsString::from(keymap))];
+    run_child(executable, &arguments, &environment, label, true, true)
 }
 
 fn spawn_and_supervise<F>(
@@ -390,6 +411,12 @@ where
         match child.try_wait() {
             Ok(Some(status)) => {
                 set_status(&mut result, status);
+                if let Some(sent_at) = term_sent_at
+                    && finish_stopped_group(pid, sent_at, term_grace, poll_interval, &mut step)
+                {
+                    result.exited_for_touch = false;
+                    result.shutdown_requested = true;
+                }
                 break;
             }
             Ok(None) => {}
@@ -409,6 +436,7 @@ where
             signal_child_group(pid, libc::SIGTERM);
             term_sent_at = Some(Instant::now());
             result.exited_for_touch = request == StopRequest::Touch;
+            result.shutdown_requested = request == StopRequest::Shutdown;
         }
         if !kill_sent && term_sent_at.is_some_and(|sent| sent.elapsed() >= term_grace) {
             signal_child_group(pid, libc::SIGKILL);
@@ -446,6 +474,32 @@ fn signal_child_group(pid: libc::pid_t, signal: libc::c_int) {
     }
 }
 
+fn child_group_exists(pid: libc::pid_t) -> bool {
+    (unsafe { libc::kill(-pid, 0) }) == 0
+        || io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+}
+
+fn finish_stopped_group<F>(
+    pid: libc::pid_t,
+    term_sent_at: Instant,
+    term_grace: Duration,
+    poll_interval: Duration,
+    step: &mut F,
+) -> bool
+where
+    F: FnMut(Duration) -> StopRequest,
+{
+    let mut shutdown = false;
+    while child_group_exists(pid) && term_sent_at.elapsed() < term_grace {
+        let timeout = poll_interval.min(term_grace.saturating_sub(term_sent_at.elapsed()));
+        shutdown |= step(timeout) == StopRequest::Shutdown;
+    }
+    if child_group_exists(pid) {
+        signal_child_group(pid, libc::SIGKILL);
+    }
+    shutdown
+}
+
 fn set_status(result: &mut ChildResult, status: ExitStatus) {
     result.exit_code = status.code();
     result.signal = status.signal();
@@ -476,6 +530,29 @@ mod tests {
             "exit-7" => std::process::exit(7),
             "signal" => unsafe {
                 libc::raise(libc::SIGUSR1);
+            },
+            "wait" => unsafe {
+                loop {
+                    libc::pause();
+                }
+            },
+            "leader-exits" => unsafe {
+                let grandchild = libc::fork();
+                if grandchild == 0 {
+                    libc::signal(libc::SIGTERM, libc::SIG_IGN);
+                    loop {
+                        libc::pause();
+                    }
+                }
+                assert!(grandchild > 0);
+                std::fs::write(
+                    env::var_os("RETRODECK_PROCESS_PIDS").unwrap(),
+                    format!("{} {grandchild}\n", std::process::id()),
+                )
+                .unwrap();
+                loop {
+                    libc::pause();
+                }
             },
             "group" => unsafe {
                 libc::signal(libc::SIGTERM, libc::SIG_IGN);
@@ -597,6 +674,44 @@ mod tests {
     }
 
     #[test]
+    fn passes_exact_generic_child_arguments_and_environment() {
+        let capture = temporary_path("child-capture");
+        let child = helper_script(&format!(
+            "[ \"$#\" -eq 2 ] || exit 90\n\
+             printf '%s\\n%s\\n%s\\n%s\\n' \"$1\" \"$2\" \
+             \"$RETRODECK_ALPHA\" \"$RETRODECK_BETA\" > '{}'\n",
+            capture.display()
+        ));
+        let arguments = [OsString::from("first argument"), OsString::from("second")];
+        let environment = [
+            (
+                OsString::from("RETRODECK_ALPHA"),
+                OsString::from("alpha value"),
+            ),
+            (OsString::from("RETRODECK_BETA"), OsString::from("beta")),
+        ];
+        let result = spawn_and_supervise(
+            &child,
+            &arguments,
+            &environment,
+            "generic fixture",
+            |timeout| {
+                thread::sleep(timeout);
+                StopRequest::None
+            },
+            Duration::from_millis(5),
+            Duration::from_millis(50),
+        );
+        assert_eq!(result.exit_code, Some(0));
+        assert_eq!(
+            std::fs::read_to_string(&capture).unwrap(),
+            "first argument\nsecond\nalpha value\nbeta\n"
+        );
+        std::fs::remove_file(capture).unwrap();
+        std::fs::remove_file(child).unwrap();
+    }
+
+    #[test]
     fn classifies_clean_nonzero_signal_and_exec_failure() {
         assert_eq!(run_fixture("clean").exit_code, Some(0));
         assert_eq!(run_fixture("exit-7").exit_code, Some(7));
@@ -612,6 +727,64 @@ mod tests {
         );
         assert!(!result.started);
         assert!(result.error.unwrap().starts_with("cannot start terminal:"));
+    }
+
+    #[test]
+    fn reports_shutdown_requests() {
+        let (executable, arguments, environment) = fixture_command("wait", &[]);
+        let result = spawn_and_supervise(
+            &executable,
+            &arguments,
+            &environment,
+            "fixture",
+            |_| StopRequest::Shutdown,
+            Duration::from_millis(5),
+            Duration::from_millis(50),
+        );
+        assert!(result.started);
+        assert!(!result.exited_for_touch);
+        assert!(result.shutdown_requested);
+        assert_eq!(result.signal, Some(libc::SIGTERM));
+    }
+
+    #[test]
+    fn kills_descendants_when_the_group_leader_exits_on_term() {
+        let path = temporary_path("leader-exits-pids");
+        let extra = [(
+            OsString::from("RETRODECK_PROCESS_PIDS"),
+            path.clone().into(),
+        )];
+        let (executable, arguments, environment) = fixture_command("leader-exits", &extra);
+        let started = Instant::now();
+        let result = spawn_and_supervise(
+            &executable,
+            &arguments,
+            &environment,
+            "fixture",
+            |timeout| {
+                if path.exists() {
+                    StopRequest::Touch
+                } else {
+                    thread::sleep(timeout);
+                    assert!(started.elapsed() < Duration::from_secs(2));
+                    StopRequest::None
+                }
+            },
+            Duration::from_millis(5),
+            Duration::from_millis(50),
+        );
+        assert!(result.started);
+        assert!(result.exited_for_touch);
+        assert_eq!(result.signal, Some(libc::SIGTERM));
+        let pids = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        for pid in pids.split_whitespace().map(|pid| pid.parse().unwrap()) {
+            let deadline = Instant::now() + Duration::from_secs(1);
+            while process_alive(pid) && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert!(!process_alive(pid));
+        }
     }
 
     #[test]

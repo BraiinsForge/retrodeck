@@ -911,6 +911,25 @@
           esac
           EOF
           chmod +x terminal-fixture
+          cat > child-fixture <<'EOF'
+          #!${pkgs.runtimeShell}
+          [ "$#" -eq 2 ] || exit 90
+          [ "$2" = "second argument" ] || exit 91
+          [ "$RETRODECK_ALPHA" = "alpha value" ] || exit 92
+          [ "$RETRODECK_BETA" = beta ] || exit 93
+          case "$1" in
+            clean) exit 0 ;;
+            failure) exit 7 ;;
+            signal) kill -TERM "$$" ;;
+            *) exit 94 ;;
+          esac
+          EOF
+          cat > reboot-fixture <<'EOF'
+          #!${pkgs.runtimeShell}
+          [ "$#" -eq 0 ] || exit 90
+          exit 0
+          EOF
+          chmod +x child-fixture reboot-fixture
           cat > helper-fixture <<'EOF'
           #!${pkgs.runtimeShell}
           [ "$#" -eq 0 ] || exit 90
@@ -948,6 +967,8 @@
             --subst-var-by wifi_status "$PWD/wifi-status" \
             --subst-var-by settings_icon "$PWD/settings-icon.png" \
             --subst-var-by terminal_fixture "$PWD/terminal-fixture" \
+            --subst-var-by child_fixture "$PWD/child-fixture" \
+            --subst-var-by reboot_fixture "$PWD/reboot-fixture" \
             --subst-var-by helper_fixture "$PWD/helper-fixture" \
             --subst-var-by helper_failure_fixture "$PWD/helper-failure-fixture" \
             --subst-var-by helper_signal_fixture "$PWD/helper-signal-fixture" \

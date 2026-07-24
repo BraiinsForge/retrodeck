@@ -3,7 +3,7 @@
 (in-package #:retrodeck)
 
 (defun main ()
-  (unless (= (retrodeck.native:abi-version) 17)
+  (unless (= (retrodeck.native:abi-version) 18)
     (error "Native ABI mismatch"))
   (let ((request (format nil "test net~%secret!9~%")))
     (unless (equal (retrodeck.native:run-helper
@@ -363,7 +363,8 @@
       (let ((result (run-dashboard-terminal plan)))
         (unless (equal result
                        '(:started t :exited-for-touch nil
-                         :exit-code 0 :signal nil :error nil))
+                         :exit-code 0 :signal nil :error nil
+                          :shutdown-requested nil))
           (error "Terminal process callback result changed: ~S" result))
         (unless (string= (dashboard-terminal-result-status plan result)
                          "TERMINAL EXITED")
@@ -396,6 +397,87 @@
                    (string= (dashboard-terminal-result-status plan result)
                             "TERMINAL ERROR - CHECK LOG"))
         (error "Terminal exec failure result changed: ~S" result)))
+    (let ((native-result
+            (retrodeck.native:run-child
+             (native-path-string "@child_fixture@")
+             (list (coerce "clean" 'base-string)
+                   (coerce "second argument" 'base-string))
+             (list (cons (coerce "RETRODECK_ALPHA" 'base-string)
+                         (coerce "alpha value" 'base-string))
+                   (cons (coerce "RETRODECK_BETA" 'base-string)
+                         (coerce "beta" 'base-string)))
+             (coerce "child fixture" 'base-string) 0)))
+      (unless (equal native-result '(1 0 0 -1 nil 0))
+        (error "Generic child callback result changed: ~S" native-result)))
+    (dolist (native-result
+             (list
+              (retrodeck.native:run-child
+               (native-path-string "@child_fixture@")
+               (coerce "not a list" 'base-string) nil
+               (coerce "child fixture" 'base-string) 0)
+              (retrodeck.native:run-child
+               (native-path-string "@child_fixture@") nil
+               (list (coerce "not a pair" 'base-string))
+               (coerce "child fixture" 'base-string) 0)))
+      (unless (and (= (length native-result) 6)
+                   (zerop (first native-result))
+                   (stringp (fifth native-result))
+                   (zerop (sixth native-result)))
+        (error "Malformed child lists escaped native validation: ~S"
+               native-result)))
+    (dolist (fixture '(("clean" :exit-code 0)
+                       ("failure" :exit-code 7)
+                       ("signal" :signal 15)))
+      (destructuring-bind (mode field expected) fixture
+        (let* ((plan (list :executable "@child_fixture@"
+                           :arguments (list mode "second argument")
+                           :environment
+                           '(("RETRODECK_ALPHA" . "alpha value")
+                             ("RETRODECK_BETA" . "beta"))
+                           :label "child fixture"
+                           :touch-supervision nil
+                           :mirror-console nil))
+               (result (run-dashboard-child plan)))
+          (unless (and (eql (getf result field) expected)
+                       (not (getf result :shutdown-requested)))
+            (error "Generic child ~A result changed: ~S" mode result)))))
+    (let* ((plan '(:executable "/no/such/retrodeck-child"
+                   :arguments nil :environment nil :label "missing child"
+                   :touch-supervision nil :mirror-console nil))
+           (result (run-dashboard-child plan)))
+      (unless (and (not (getf result :started))
+                   (stringp (getf result :error))
+                   (not (getf result :shutdown-requested)))
+        (error "Generic child exec failure result changed: ~S" result)))
+    (labels ((exercise-launch (kind plan)
+               (let ((state (dashboard-loop-initial-state nil))
+                     (runtime (make-dashboard-runtime :wayland t)))
+                 (setf (getf state :active-launch)
+                       (list :kind kind :plan plan))
+                 (let ((completion
+                         (dashboard-runtime-handle-effect
+                          runtime (list :launch plan) state)))
+                   (unless (and (eq (first completion) :child-returned)
+                                (eql (getf (getf (rest completion) :result) :exit-code)
+                                     0))
+                     (error "No-handler ~A launch changed: ~S"
+                            kind completion))))))
+      (exercise-launch
+       :game
+       '(:executable "@child_fixture@"
+         :arguments ("clean" "second argument")
+         :environment (("RETRODECK_ALPHA" . "alpha value")
+                       ("RETRODECK_BETA" . "beta"))
+         :label "child fixture" :touch-supervision nil :mirror-console nil))
+      (exercise-launch
+       :reboot
+       '(:executable "@reboot_fixture@" :arguments nil :environment nil
+         :label "reboot" :touch-supervision t :mirror-console nil))
+      (exercise-launch
+       :terminal
+       '(:executable "@terminal_fixture@" :arguments ("shell")
+         :environment (("RETRO_DECK_KEYMAP" . "cz"))
+         :label "terminal" :touch-supervision t :mirror-console t)))
     (let ((icon (load-png-raster "@settings_icon@" 23 23)))
       (unless icon
         (error "PNG raster callback did not load the settings asset"))

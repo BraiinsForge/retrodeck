@@ -3,9 +3,9 @@ use retrodeck_native::{
     state_file, wayland,
 };
 use std::env;
-use std::ffi::{CString, OsStr, c_char, c_int, c_void};
+use std::ffi::{CString, OsStr, OsString, c_char, c_int, c_void};
 use std::mem;
-use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::ptr;
@@ -38,7 +38,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 17;
+const ABI_VERSION: ClFixnum = 18;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -69,6 +69,10 @@ unsafe extern "C" {
     fn ecl_def_c_function(symbol: ClObject, function: EclFixedFunction, arguments: c_int);
     fn ecl_make_integer(value: ClFixnum) -> ClObject;
     fn ecl_cons(car: ClObject, cdr: ClObject) -> ClObject;
+    fn cl_car(value: ClObject) -> ClObject;
+    fn cl_cdr(value: ClObject) -> ClObject;
+    fn cl_consp(value: ClObject) -> ClObject;
+    fn cl_stringp(value: ClObject) -> ClObject;
     fn ecl_make_simple_base_string(value: *const c_char, length: ClFixnum) -> ClObject;
     fn ecl_base_string_pointer_safe(value: ClObject) -> *mut c_char;
     fn ecl_length(value: ClObject) -> ClFixnum;
@@ -132,6 +136,13 @@ impl Ecl {
             mem::transmute::<EclFourArgumentFunction, EclFixedFunction>(native_run_terminal)
         };
         unsafe { ecl_def_c_function(run_terminal, callback, 4) };
+
+        let run_child_name = c_string("RUN-CHILD")?;
+        let run_child = unsafe { ecl_make_symbol(run_child_name.as_ptr(), package_name.as_ptr()) };
+        let callback = unsafe {
+            mem::transmute::<EclFiveArgumentFunction, EclFixedFunction>(native_run_child)
+        };
+        unsafe { ecl_def_c_function(run_child, callback, 5) };
 
         for (name, function) in [
             (
@@ -415,20 +426,33 @@ unsafe extern "C" fn native_run_terminal(
             &label,
         ))
     })();
-    let result = result.unwrap_or_else(|error| process::ChildResult {
-        error: Some(error),
-        ..process::ChildResult::default()
-    });
-    let error = result.error.as_deref().map_or(ECL_NIL, |error| {
-        make_base_string(error.as_bytes(), "terminal error")
-    });
-    make_object_list(&[
-        unsafe { ecl_make_integer(boolean_fixnum(result.started)) },
-        unsafe { ecl_make_integer(boolean_fixnum(result.exited_for_touch)) },
-        unsafe { ecl_make_integer(result.exit_code.map_or(-1, |value| value as ClFixnum)) },
-        unsafe { ecl_make_integer(result.signal.map_or(-1, |value| value as ClFixnum)) },
-        error,
-    ])
+    make_child_result(result.unwrap_or_else(child_decode_error))
+}
+
+unsafe extern "C" fn native_run_child(
+    executable: ClObject,
+    arguments: ClObject,
+    environment: ClObject,
+    label: ClObject,
+    touch_supervision: ClObject,
+) -> ClObject {
+    let result = (|| {
+        let executable = decode_path(executable, "child executable")?;
+        let arguments = decode_os_string_list(arguments, "child arguments")?;
+        let environment = decode_environment(environment)?;
+        let label = String::from_utf8(decode_base_string(label, "child label")?)
+            .map_err(|_| "child label is not UTF-8".to_owned())?;
+        let touch_supervision = decode_boolean_fixnum(touch_supervision, "child touch flag")?;
+        Ok(process::run_child(
+            &executable,
+            &arguments,
+            &environment,
+            &label,
+            touch_supervision,
+            false,
+        ))
+    })();
+    make_child_result(result.unwrap_or_else(child_decode_error))
 }
 
 unsafe extern "C" fn native_play_tones(
@@ -965,6 +989,27 @@ fn native_optional_string(result: Result<Option<Vec<u8>>, String>) -> ClObject {
     }
 }
 
+fn child_decode_error(error: String) -> process::ChildResult {
+    process::ChildResult {
+        error: Some(error),
+        ..process::ChildResult::default()
+    }
+}
+
+fn make_child_result(result: process::ChildResult) -> ClObject {
+    let error = result.error.as_deref().map_or(ECL_NIL, |error| {
+        make_base_string(error.as_bytes(), "child error")
+    });
+    make_object_list(&[
+        unsafe { ecl_make_integer(boolean_fixnum(result.started)) },
+        unsafe { ecl_make_integer(boolean_fixnum(result.exited_for_touch)) },
+        unsafe { ecl_make_integer(result.exit_code.map_or(-1, |value| value as ClFixnum)) },
+        unsafe { ecl_make_integer(result.signal.map_or(-1, |value| value as ClFixnum)) },
+        error,
+        unsafe { ecl_make_integer(boolean_fixnum(result.shutdown_requested)) },
+    ])
+}
+
 fn make_base_string(value: &[u8], name: &str) -> ClObject {
     let Ok(length) = ClFixnum::try_from(value.len()) else {
         eprintln!("retrodeck: {name} is too large for ECL");
@@ -1021,9 +1066,75 @@ fn decode_path(object: ClObject, name: &str) -> Result<PathBuf, String> {
     Ok(PathBuf::from(OsStr::from_bytes(&bytes)))
 }
 
+fn decode_object_list(object: ClObject, name: &str) -> Result<Vec<ClObject>, String> {
+    let mut values = Vec::new();
+    let mut seen = Vec::new();
+    let mut cursor = object;
+    while cursor != ECL_NIL {
+        if unsafe { cl_consp(cursor) } == ECL_NIL {
+            return Err(format!("{name} must be a proper list"));
+        }
+        if seen.contains(&cursor) {
+            return Err(format!("{name} cannot be circular"));
+        }
+        seen.push(cursor);
+        values.push(unsafe { cl_car(cursor) });
+        cursor = unsafe { cl_cdr(cursor) };
+    }
+    Ok(values)
+}
+
+fn decode_os_string(object: ClObject, name: &str) -> Result<OsString, String> {
+    if unsafe { cl_stringp(object) } == ECL_NIL {
+        return Err(format!("{name} must be a string"));
+    }
+    let bytes = decode_base_string(object, name)?;
+    if bytes.contains(&0) {
+        return Err(format!("{name} cannot contain NUL"));
+    }
+    Ok(OsString::from_vec(bytes))
+}
+
+fn decode_os_string_list(object: ClObject, name: &str) -> Result<Vec<OsString>, String> {
+    decode_object_list(object, name)?
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| decode_os_string(value, &format!("{name} item {index}")))
+        .collect()
+}
+
+fn decode_environment(object: ClObject) -> Result<Vec<(OsString, OsString)>, String> {
+    decode_object_list(object, "child environment")?
+        .into_iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            if unsafe { cl_consp(entry) } == ECL_NIL {
+                return Err(format!("child environment item {index} must be a pair"));
+            }
+            let key = decode_os_string(
+                unsafe { cl_car(entry) },
+                &format!("child environment key {index}"),
+            )?;
+            let value = decode_os_string(
+                unsafe { cl_cdr(entry) },
+                &format!("child environment value {index}"),
+            )?;
+            Ok((key, value))
+        })
+        .collect()
+}
+
 fn decode_fixnum(object: ClObject) -> Option<ClFixnum> {
     let tagged = object as usize;
     (tagged & 3 == FIXNUM_TAG).then_some((tagged as isize) >> 2)
+}
+
+fn decode_boolean_fixnum(object: ClObject, name: &str) -> Result<bool, String> {
+    match decode_fixnum(object) {
+        Some(0) => Ok(false),
+        Some(1) => Ok(true),
+        _ => Err(format!("{name} must be zero or one")),
+    }
 }
 
 fn decode_i32(object: ClObject, name: &str) -> Result<c_int, String> {

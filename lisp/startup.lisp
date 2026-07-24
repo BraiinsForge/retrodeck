@@ -32,6 +32,7 @@
            #:read-control-file
            #:read-regular-file
            #:read-state-file
+           #:run-child
            #:run-helper
            #:run-terminal
            #:stop-audio
@@ -80,6 +81,7 @@
                 #:read-control-file
                 #:read-regular-file
                 #:read-state-file
+                #:run-child
                 #:run-helper
                 #:run-terminal
                 #:stop-audio
@@ -245,6 +247,7 @@
            #:read-native-state-file
            #:reboot-confirmation-active-p
            #:scan-evdev-controls
+           #:run-dashboard-launch
            #:run-dashboard-terminal
            #:run-dashboard-wifi-profile
            #:render-dashboard
@@ -284,7 +287,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 17)
+(defconstant +native-abi-version+ 18)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
