@@ -46,19 +46,12 @@ pub fn read_regular(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::fixture_directory;
     use std::os::unix::fs::symlink;
 
     #[test]
     fn reads_only_bounded_regular_files_without_following_links() {
-        let suffix = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let directory = std::env::temp_dir().join(format!(
-            "retrodeck-regular-file-{}-{suffix}",
-            std::process::id()
-        ));
-        std::fs::create_dir(&directory).unwrap();
+        let directory = fixture_directory("regular-file");
         let path = directory.join("fixture.tsv");
         let link = directory.join("fixture-link.tsv");
         std::fs::write(&path, b"alpha\tbeta\n").unwrap();

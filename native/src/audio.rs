@@ -328,17 +328,10 @@ fn status_succeeded(status: c_int) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::fnv1a;
 
     fn digest(samples: &[i16]) -> u64 {
-        samples
-            .iter()
-            .fold(14695981039346656037, |mut hash, sample| {
-                for byte in sample.to_le_bytes() {
-                    hash ^= u64::from(byte);
-                    hash = hash.wrapping_mul(1099511628211);
-                }
-                hash
-            })
+        fnv1a(samples.iter().flat_map(|sample| sample.to_le_bytes()))
     }
 
     #[test]

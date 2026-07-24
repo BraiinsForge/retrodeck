@@ -13,4 +13,6 @@ pub mod protocol;
 mod raster;
 pub mod regular_file;
 pub mod state_file;
+#[cfg(test)]
+mod test_support;
 pub mod wayland;

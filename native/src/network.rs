@@ -172,17 +172,12 @@ pub fn read_network_status(selector_status_path: &Path) -> NetworkStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::fixture_directory;
     use std::os::unix::fs::symlink;
 
     #[test]
     fn reads_selector_status_with_cpp_compatibility() {
-        let suffix = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let directory =
-            std::env::temp_dir().join(format!("retrodeck-network-{}-{suffix}", std::process::id()));
-        std::fs::create_dir(&directory).unwrap();
+        let directory = fixture_directory("network");
         let path = directory.join("status");
         let link = directory.join("status-link");
 

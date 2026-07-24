@@ -244,15 +244,14 @@ fn write_rgb565(rgba: &mut [u8], color: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::fnv1a;
 
     fn hash_rgb565(canvas: &[u8]) -> u64 {
-        let mut hash = 0xcbf29ce484222325_u64;
-        for rgba in canvas.chunks_exact(4) {
-            let pixel = rgba_rgb565(rgba);
-            hash = (hash ^ u64::from(pixel & 0xff)).wrapping_mul(0x100000001b3);
-            hash = (hash ^ u64::from(pixel >> 8)).wrapping_mul(0x100000001b3);
-        }
-        hash
+        fnv1a(
+            canvas
+                .chunks_exact(4)
+                .flat_map(|rgba| rgba_rgb565(rgba).to_le_bytes()),
+        )
     }
 
     fn draw_starfield(canvas: &mut [u8], size: (u32, u32), color: u16) {

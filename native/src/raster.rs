@@ -553,13 +553,7 @@ mod tests {
 
     #[test]
     fn loads_ppm_only_after_a_missing_png() {
-        let suffix = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let directory =
-            std::env::temp_dir().join(format!("retrodeck-raster-{}-{suffix}", std::process::id()));
-        std::fs::create_dir(&directory).unwrap();
+        let directory = crate::test_support::fixture_directory("raster");
         let png_path = directory.join("fixture.png");
         let ppm_path = directory.join("fixture.ppm");
         let first = xterm_color(202);

@@ -86,25 +86,12 @@ pub fn write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::fixture_directory;
     use std::os::unix::fs::symlink;
-    use std::path::PathBuf;
-
-    fn fixture_directory() -> PathBuf {
-        let suffix = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let directory = std::env::temp_dir().join(format!(
-            "retrodeck-control-file-{}-{suffix}",
-            std::process::id()
-        ));
-        std::fs::create_dir(&directory).unwrap();
-        directory
-    }
 
     #[test]
     fn reads_exact_bounded_control_bytes_and_follows_links() {
-        let directory = fixture_directory();
+        let directory = fixture_directory("control-file");
         let path = directory.join("brightness");
         let link = directory.join("brightness-link");
         std::fs::write(&path, b" 12\n").unwrap();
@@ -120,7 +107,7 @@ mod tests {
 
     #[test]
     fn writes_exact_existing_control_bytes() {
-        let directory = fixture_directory();
+        let directory = fixture_directory("control-file");
         let path = directory.join("brightness");
         let link = directory.join("brightness-link");
         std::fs::write(&path, b"12345\n").unwrap();

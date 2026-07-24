@@ -454,17 +454,11 @@ pub fn size() -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::fnv1a;
     use std::mem;
 
     fn canvas_hash(canvas: &[u16]) -> u64 {
-        let mut hash = 0xcbf29ce484222325_u64;
-        for pixel in canvas {
-            hash ^= u64::from(pixel & 0xff);
-            hash = hash.wrapping_mul(0x100000001b3);
-            hash ^= u64::from(pixel >> 8);
-            hash = hash.wrapping_mul(0x100000001b3);
-        }
-        hash
+        fnv1a(canvas.iter().flat_map(|pixel| pixel.to_le_bytes()))
     }
 
     fn valid_geometry() -> (FbVariableScreenInfo, FbFixedScreenInfo) {

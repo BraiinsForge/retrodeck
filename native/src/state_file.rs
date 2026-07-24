@@ -136,24 +136,12 @@ pub fn write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::fixture_directory;
     use std::os::unix::fs::{PermissionsExt, symlink};
-
-    fn fixture_directory() -> PathBuf {
-        let suffix = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let directory = std::env::temp_dir().join(format!(
-            "retrodeck-state-file-{}-{suffix}",
-            std::process::id()
-        ));
-        std::fs::create_dir(&directory).unwrap();
-        directory
-    }
 
     #[test]
     fn reads_missing_empty_bounded_and_linked_state() {
-        let directory = fixture_directory();
+        let directory = fixture_directory("state-file");
         let path = directory.join("volume.state");
         let link = directory.join("volume-link.state");
         assert_eq!(read(&path).unwrap(), StateRead::Missing);
@@ -171,7 +159,7 @@ mod tests {
 
     #[test]
     fn writes_exact_private_atomic_state() {
-        let directory = fixture_directory();
+        let directory = fixture_directory("state-file");
         let path = directory.join("volume.state");
         write(&path, b"42\n").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"42\n");
@@ -188,7 +176,7 @@ mod tests {
 
     #[test]
     fn leaves_prior_state_when_temporary_names_are_exhausted() {
-        let directory = fixture_directory();
+        let directory = fixture_directory("state-file");
         let path = directory.join("volume.state");
         std::fs::write(&path, b"37\n").unwrap();
         for attempt in 0..TEMPORARY_ATTEMPTS {

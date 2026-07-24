@@ -120,16 +120,11 @@ pub fn rows(input: u8) -> &'static [u8; 7] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::fnv1a;
 
     #[test]
     fn matches_complete_reference_font() {
-        let mut hash = 0xcbf29ce484222325_u64;
-        for character in 0..=u8::MAX {
-            for row in rows(character) {
-                hash ^= u64::from(*row);
-                hash = hash.wrapping_mul(0x100000001b3);
-            }
-        }
+        let hash = fnv1a((0..=u8::MAX).flat_map(|character| rows(character).iter().copied()));
         // FNV-1a over bytes 0..=255 from src/menu_ui.cpp::glyph_rows.
         assert_eq!(hash, 0x0e33_c5d5_773c_4964);
     }
