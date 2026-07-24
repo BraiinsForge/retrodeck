@@ -1244,6 +1244,27 @@ production lines, including the existing catalog compiler, and falls to 18,478
 lines with focused Rust and Lisp tests. This leaves 106 lines below the
 15,909/18,584 budgets without compressed or generated first-party source.
 
+## Compact uploader course correction
+
+The replacement uploader will be one compact Hunchentoot implementation, not a
+Common Lisp mirror of the Go package and policy decomposition. It will run in a
+separate network-enabled Lisp runtime because the dashboard ECL is intentionally
+built without TCP or threads. Hunchentoot and maintained ZIP and cryptography
+libraries own their existing mechanisms; the Lisp file owns the small editable
+routing, validation, persistence, and presentation policy.
+
+The non-authoritative uploader policy inventory, palette save-plan, exports, and
+their dedicated tests were removed before runtime implementation. The Go
+uploader remains authoritative, and the dashboard, launcher, and
+`RETRODECK:MAIN` are unchanged. Fresh SBCL, the complete host suite, targeted
+and complete ARM verification, `nix flake check`, exact reference scans, and
+independent review passed. Commit `0ed403d` was pushed immediately.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 11,329
+production lines, including the existing catalog compiler, and 17,940 lines with
+focused Rust and Lisp tests. This leaves 644 lines below the 15,909/18,584
+budgets without compressed or generated first-party source.
+
 ## Validation baseline
 
 Updated on 2026-07-24:
