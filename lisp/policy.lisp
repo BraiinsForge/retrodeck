@@ -107,6 +107,10 @@
      :palette-override "/mnt/data/nes-deck/state/dashboard-palette.sexp")
     :http
     (:address "0.0.0.0:8080" :port "8080"
+     :required-host-address-family :ipv4-or-mapped-ipv6
+     :required-host-port "8080"
+     :origin-allow-missing t :origin-allow-null t
+     :origin-match :exact-http-request-host
      :routes ((:get "/") (:post "/login") (:post "/logout")
               (:post "/upload") (:post "/palette")
               (:get "/assets/paper.css") (:get "/assets/palette.js"))
@@ -132,8 +136,11 @@
       ("X-Content-Type-Options" . "nosniff")
       ("X-Frame-Options" . "DENY")))
     :authentication
-    (:password-config-version 1 :password-iterations 210000
+    (:password-config-version 1 :password-derivation :pbkdf2-hmac-sha256
+     :password-iterations 210000
      :minimum-password-bytes 8 :maximum-password-bytes 128
+     :password-config-private-regular t
+     :password-config-root-owned-when-root t
      :minimum-config-iterations 100000
      :maximum-config-iterations 1000000 :maximum-config-bytes 1024
      :salt-bytes 16 :digest-bytes 32 :token-bytes 32
@@ -143,7 +150,10 @@
      :session-cookie-http-only t :session-cookie-same-site :strict
      :session-cookie-max-age-seconds 28800
      :session-cookie-delete-max-age -1 :session-lifetime-ms 28800000
+     :session-storage :memory-only :session-key-digest :sha256
+     :session-eviction :earliest-expiry
      :maximum-sessions 8 :maximum-login-sources 256
+     :login-source-eviction :least-recently-seen
      :login-gate-capacity 1 :failures-before-lock 5
      :lock-duration-ms 300000 :login-check-wait-ms 2000
      :busy-retry-after-seconds 3)
@@ -155,12 +165,34 @@
      :private-file-mode #o600)
     :rom
     (:minimum-title-runes 1 :maximum-title-runes 64
-     :minimum-rom-bytes 1 :maximum-slug-bytes 32
-     :maximum-identifier-bytes 48 :archive-extension ".zip"
-     :maximum-archive-bytes 10485760 :maximum-catalog-bytes 65536
+     :title-must-equal-trimmed t :title-requires-valid-utf8 t
+     :title-forbid-controls t
+     :minimum-rom-bytes 1 :minimum-slug-bytes 1 :maximum-slug-bytes 32
+     :slug-case-fold :unicode-lowercase :slug-alphabet "abcdefghijklmnopqrstuvwxyz0123456789"
+     :slug-separator "-" :slug-collapse-separators t
+     :slug-trim-separators t
+     :identifier-components ("upload" :system :slug)
+     :maximum-identifier-bytes 48 :identifier-trim-separators t
+     :duplicate-catalog-keys (:identifier :rom-path)
+     :upload-sort (:system :title)
+     :archive-extension ".zip" :accepted-upload-kinds (:raw :single-rom-zip)
+     :raw-extension :system-extension :extension-match :case-insensitive
+     :maximum-archive-bytes 10485760 :archive-nondirectory-members 1
+     :archive-reject-encrypted t :archive-reject-symlink t
+     :archive-member-basename-only t :archive-reject-backslash t
+     :archive-member-extension :system-extension
+     :archive-uncompressed-limit :system-maximum
+     :archive-revalidate-rom t
+     :maximum-catalog-bytes 65536 :catalog-file-kind :regular-no-symlink
      :catalog-scanner-maximum-bytes 4097 :catalog-field-count 5
      :catalog-fields ("id" "title" "system" "rom" "color")
-     :maximum-games 64)
+     :catalog-ignore (:blank :hash-comment) :catalog-accept-crlf t
+     :base-catalog-missing :error :upload-catalog-missing :empty
+     :maximum-games 64 :maximum-games-scope :base-plus-upload
+     :persistence-order (:install-rom :write-upload-catalog :restart-dashboard)
+     :catalog-write-failure
+     (:remove-installed-rom :best-effort :catalog-state :possibly-renamed)
+     :restart-failure :retain-rom-and-catalog-and-report)
     :palette
     (:minimum-bytes 1 :maximum-bytes 4096
      :canonical-rgb-characters 7 :field-count 22
@@ -171,18 +203,37 @@
      :minimum-legacy-icon-name-bytes 1
      :maximum-legacy-icon-name-bytes 64 :maximum-override-token-bytes 64
      :maximum-override-tokens 54 :accepted-override-versions (2 3)
-     :written-override-version 2)
+     :written-override-version 2
+     :base-read-order (:base-palette :active-palette)
+     :base-read-policy :first-valid
+     :override-read-policy :apply-only-valid-ignore-missing-or-invalid
+     :persistence-order (:write-override :restart-dashboard)
+     :write-failure-state :possibly-renamed-no-restart
+     :restart-failure :retain-override-and-report)
     :systems
     ((:id "nes" :label "NES" :extension ".nes" :color "#FF5F00"
-      :maximum-rom-bytes 8388608)
+      :maximum-rom-bytes 8388608
+      :validation (:minimum-header-bytes 16 :magic-hex "4E45531A"))
      (:id "gb" :label "Game Boy" :extension ".gb" :color "#87AF87"
-      :maximum-rom-bytes 8388608)
+      :maximum-rom-bytes 8388608
+      :validation (:minimum-header-bytes #x150 :logo :nintendo
+                   :logo-offset #x104 :logo-bytes 48
+                   :checksum :game-boy-header-complement
+                   :checksum-range (#x134 #x14c) :checksum-byte #x14d))
      (:id "gbc" :label "Game Boy Color" :extension ".gbc" :color "#5F87D7"
-      :maximum-rom-bytes 8388608)
+      :maximum-rom-bytes 8388608
+      :validation (:minimum-header-bytes #x150 :logo :nintendo
+                   :logo-offset #x104 :logo-bytes 48
+                   :checksum :game-boy-header-complement
+                   :checksum-range (#x134 #x14c) :checksum-byte #x14d
+                   :color-flag-byte #x143 :color-flags (#x80 #xc0)))
      (:id "zx" :label "ZX Spectrum" :extension ".tap" :color "#AF87D7"
-      :maximum-rom-bytes 8388608)
+      :maximum-rom-bytes 8388608
+      :validation (:minimum-bytes 4 :block-length-endian :little
+                   :minimum-block-bytes 2 :checksum :xor-zero
+                   :minimum-blocks 1 :exact-framing t))
      (:id "chip8" :label "CHIP-8" :extension ".ch8" :color "#5FD7D7"
-      :maximum-rom-bytes 65024))
+      :maximum-rom-bytes 65024 :validation :size-only))
     :palette-fields
     (("background" . "Background") ("text-dark" . "Dark text")
      ("field" . "Field") ("surface" . "Surface")
