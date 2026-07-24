@@ -134,7 +134,6 @@
            #:*dashboard-volume-step*
            #:*menu-sound-cues*
            #:*menu-sound-input-tail-ms*
-           #:*uploader-policy*
            #:apply-dashboard-touch
            #:bitmap-text-width
            #:canvas-rgb565-hash
@@ -291,10 +290,6 @@
            #:wifi-touch-transition
            #:wifi-valid-text-p
            #:stroke-canvas-rect
-           #:uploader-palette-save-plan
-           #:uploader-policy-section
-           #:uploader-policy-snapshot
-           #:uploader-system-policy
            #:wayland-shutdown-requested-p
            #:write-native-control-file
            #:write-native-state-file))

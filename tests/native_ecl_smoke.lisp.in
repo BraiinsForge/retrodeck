@@ -80,18 +80,6 @@
       (unless (and (not loaded-p) (= (length games) 22)
                    (equal palette *dashboard-palette*))
         (error "Dashboard palette fallback diverged"))))
-  (let* ((fields (loop for spec in (getf *uploader-policy* :palette-fields)
-                       for color in *dashboard-palette*
-                       collect (cons (car spec)
-                                     (format nil "#~6,'0X" (cdr color)))))
-         (plan (uploader-palette-save-plan (reverse fields)))
-         (contents (getf (getf plan :write) :contents)))
-    (unless (and (getf plan :accepted-p) (= (getf plan :status) 200)
-                 (search ":accent \"#FE6C27\"" contents)
-                 (= (getf (uploader-palette-save-plan (butlast fields))
-                          :status)
-                    422))
-      (error "Uploader palette save plan diverged")))
   (let ((request (format nil "test net~%secret!9~%")))
     (unless (equal (retrodeck.native:run-helper
                     (native-path-string "@helper_fixture@")
