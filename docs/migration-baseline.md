@@ -940,6 +940,69 @@ production lines, including the existing catalog compiler, and 16,408 lines
 with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
 without compressed or generated first-party source.
 
+## Lisp-owned managed child launch checkpoint
+
+Native ABI 18 adds one generic managed-child mechanism without application
+knowledge. Rust receives an executable, an ordered argument list, ordered
+environment pairs, a log label, and one touch-supervision flag directly from
+Lisp. It closes direct fbdev presentation while retaining an open Wayland
+widget, snapshots and restores the TTY, starts a separate process group, keeps
+Wayland or evdev supervision outside the child, and polls every 40 ms. Shutdown
+or the original uninterrupted two-second touch hold sends TERM; after four
+seconds the complete process group receives KILL, including descendants whose
+group leader already exited. The fixed result is
+`(STARTED TOUCH EXIT-CODE SIGNAL ERROR SHUTDOWN)`. Native list decoding rejects
+atoms, improper or circular lists, malformed environment pairs, non-strings,
+and embedded NUL bytes without moving launch policy into Rust.
+
+Startup-loaded Lisp now owns the concrete no-handler game and reboot effect.
+The existing editable launch plans supply every executable, ordered argument,
+ordered environment entry, label, presentation variable, volume variable, and
+touch decision. Lisp preserves the authoritative starting render/present,
+finishes menu audio exactly once, closes controls, invokes the child, force
+rescans controls, reopens presentation, reloads volume, classifies the result,
+and renders/presents the final status. The specialized terminal boundary remains
+responsible for keymap, mode, touch return, and Wayland console mirroring. Deck
+applications remain unsupervised on fbdev but supervised on Wayland; fbdev
+return marks touch disconnected so the existing timed reconnect path reopens
+it. Injected effect handlers still take priority, including with borrowed fbdev
+presentation. Per explicit owner approval, this replacement does not duplicate
+the C++ ROM-format validator: Lisp passes the selected path to the established
+emulator and lets that emulator reject invalid content. Archive intake behavior
+is unchanged. `RETRODECK:MAIN` remains unchanged and the C++ dashboard stays
+authoritative.
+
+Fresh and named SBCL runs, direct Cargo formatting, test, and all-target checks,
+the complete host suite, ARM/ECL matrix, `nix flake check`, and two independent
+reviews passed. Rust fixtures pinned exact ordered arguments and environment,
+clean exit, exit 7, signal 15, missing executable, shutdown propagation, TERM to
+KILL escalation, and the leader-exits descendant case. Lisp fixtures pinned
+valid and invalid six-field decoding, game/reboot/terminal no-handler dispatch,
+external-handler priority, shutdown completion, one audio finish, exact recovery
+ordering, and fbdev Deck-touch reconnect. ARM/ECL additionally rejected malformed
+native argument and environment lists.
+
+Installed hashes were
+`08171e98195dd0e4d9471a77b643176d508a7907f568fa61be6173bd34f049c5`
+for ABI 18,
+`e8804a8eba9a3bb2d2f35496fe8bc7ae4b7f8bf59f52af6f7b145fcb12a89f93`
+for startup,
+`eb91ede7aeca52c48205865a447ab9742e563505a5ed023fdbdb89e6f90af0d3`
+for process policy,
+`aba4f5e788ea667a737b71494992de88544cb48aa035c4f31407b265e6e73578`
+for launch policy, and
+`6eebbb6721b71f5bb1468688fc7de06ca72680d674bac4f91f0f15b525f43628`
+for the dashboard. Harmless installed `/tmp` fixtures, never `/sbin/reboot` or a
+real emulator, exercised exact argument/environment capture, clean, exit-7,
+signal, missing-executable, game, reboot, and specialized terminal paths. Host
+and Lisp permissions remained `0700` and `0600`; the C++ dashboard retained PID
+2051 and the Deck health check remained healthy.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 10,883
+production lines, including the existing catalog compiler, and 16,951 lines
+with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
+without compressed or generated first-party source.
+
 ## Validation baseline
 
 Updated on 2026-07-24:
@@ -990,6 +1053,11 @@ Updated on 2026-07-24:
 - ABI 17 kept helper execution generic while Lisp matched exact Wi-Fi validation,
   request bytes, success, write failure, process failure, passphrase retention, and
   Confirm cue policy through ARM/ECL and harmless installed `/tmp` helpers while
+  C++ retained PID 2051
+- ABI 18 kept managed-child execution generic while Lisp supplied exact game,
+  reboot, and terminal plans, preserved launch/recovery ordering, recovered fbdev
+  Deck touch, and classified clean, exit-7, signal-15, missing-executable, and
+  shutdown results through ARM/ECL and harmless installed `/tmp` fixtures while
   C++ retained PID 2051
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`

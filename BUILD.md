@@ -97,7 +97,8 @@ path may be supplied for development and smoke tests.
 `lisp/startup.lisp` validates the native ABI, then loads `ui.lisp`,
 `policy.lisp`, `process.lisp`, `settings.lisp`, `wifi.lisp`, `credits.lisp`,
 and `dashboard.lisp`. These editable files own bitmap UI composition, systems,
-labels, colors, applications, launch plans, terminal status and sequencing,
+labels, colors, applications, exact game/reboot/terminal executable routes,
+ordered arguments and environment, launch/return statuses and sequencing,
 timing, settings and Wi-Fi editor state and actions, exact inherited and
 persistent volume policy, exact brightness hardware and state policy, exact
 terminal keymap state policy, Wi-Fi profile validation, helper request bytes,
@@ -109,11 +110,11 @@ overrides without a Rust
 rebuild. Deployment updates the eight standard Lisp files but leaves an
 existing `local.lisp` untouched.
 
-Native ABI 17 retains the widget-side Wayland and direct-fbdev primitives and
+Native ABI 18 retains the widget-side Wayland and direct-fbdev primitives and
 adds only narrow canvas, raster, projected-text, evdev, regular-file, network,
-state-file, control-file, helper-process, audio, terminal-process, and
-aggregate-input mechanisms for Lisp to orchestrate. The bounded state-file
-mechanism distinguishes missing files
+state-file, control-file, helper-process, audio, managed-child,
+terminal-process, and aggregate-input mechanisms for Lisp to orchestrate. The
+bounded state-file mechanism distinguishes missing files
 from exact bytes and performs private atomic replacement; Lisp owns inherited
 volume parsing, defaults, legacy migration, canonical saves, child reload policy,
 and the exact missing/default/canonical terminal keymap state contract. The
@@ -125,6 +126,17 @@ generic helper primitive starts one no-argument child with inherited environment
 and output, writes and closes exact stdin bytes, waits, and reports the start,
 input, wait, exit, or signal result. Lisp owns the Wi-Fi helper path, validation,
 request construction, user-visible status, state update, and confirmation cue.
+The generic managed-child primitive receives an executable, ordered arguments,
+ordered environment pairs, a log label, and a touch-supervision flag. It closes
+direct fbdev presentation, snapshots and restores the TTY, starts a separate
+process group, polls every 40 ms, sends TERM for shutdown or the original
+two-second touch hold, escalates the complete group to KILL after four seconds,
+and reports started, touch, exit, signal, error, and shutdown fields. Lisp owns
+the starting screen, one audio finish, control close, game/reboot dispatch,
+forced control scan, presentation reopen, volume reload, final status, and fbdev
+Deck-touch reconnect. Injected effect handlers retain priority. Per owner
+approval, launch policy passes ROM paths directly to the established emulators
+and lets them reject invalid content rather than duplicating their validation.
 The network primitive reports the current `wlan0` SSID and IPv4 address, the
 `wg0` IPv4 address, and the bounded Wi-Fi selector status while Lisp owns its
 path, refresh timing, result shape, and rendering. One native
@@ -134,9 +146,10 @@ read before touch; the fixed result reports queue counts, touch loss, control
 rescan, and Wayland shutdown while Lisp retains mapping, arbitration, timing,
 and audio quarantine. The control boundary keeps at most two exact THEGamepads
 and four complete keyboards, decodes resynchronization and rising edges, and
-returns raw reports for Lisp policy. The terminal primitive supervises one child
-process group, restores console state, accepts the original two-second touch
-return hold, and mirrors RGB565 console scanout only when the Wayland widget is
+returns raw reports for Lisp policy. The specialized terminal primitive uses the
+same supervisor, accepts the exact keymap and mode boundary, restores console
+state, accepts the original two-second touch return hold, and mirrors RGB565
+console scanout only when the Wayland widget is
 open. The fbdev path validates the device-reported 600x1280 RGB565 geometry and
 stride, rotates the complete 1280x480 logical canvas in ordinary RAM, and
 publishes finished rows. The Lisp runtime adapter now exposes initialization, a
