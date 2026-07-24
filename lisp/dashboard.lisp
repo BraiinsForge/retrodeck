@@ -1879,6 +1879,53 @@
       (when owns-runtime-p
         (dashboard-runtime-shutdown runtime)))))
 
+(defun dashboard-reduced-motion-requested-p ()
+  (not (null (dashboard-environment-value
+              *dashboard-reduced-motion-environment*))))
+
+(defun load-dashboard-candidate-credits (path)
+  (handler-case
+      (values (make-project-credits-crawl (load-project-credits path)) t)
+    (error (condition)
+      (format *error-output*
+              "retrodeck: ~A; the FOSS credits screen will show an error~%"
+              condition)
+      (finish-output *error-output*)
+      (values (make-project-credits-crawl nil) nil))))
+
+(defun load-dashboard-candidate-session
+    (manifest-path palette-path
+     &key (credits-path *dashboard-credits-path*) (runtime nil runtime-p))
+  "Compose non-authoritative candidate state, runtime, palette, and load flags."
+  (check-type manifest-path string)
+  (check-type palette-path string)
+  (check-type credits-path string)
+  (when runtime-p
+    (unless runtime
+      (error "Candidate dashboard runtime cannot be NIL"))
+    (check-type runtime list))
+  (multiple-value-bind (games palette palette-loaded-p)
+      (load-dashboard-bootstrap manifest-path palette-path)
+    (multiple-value-bind (credits-crawl credits-loaded-p)
+        (load-dashboard-candidate-credits credits-path)
+      (let ((reduced-motion (dashboard-reduced-motion-requested-p))
+            (active-runtime
+              (if runtime-p runtime
+                  (make-dashboard-runtime :auto-presentation t))))
+        (values
+         (dashboard-loop-initial-state
+          games :credits-crawl credits-crawl :reduced-motion reduced-motion)
+         active-runtime palette palette-loaded-p credits-loaded-p)))))
+
+(defun dashboard-candidate-session-rehearse
+    (state runtime palette &key iteration-limit stop-predicate)
+  "Run one opt-in candidate session with its startup-loaded palette bound."
+  (check-type palette list)
+  (let ((*dashboard-palette* palette))
+    (dashboard-runtime-rehearse
+     state runtime :iteration-limit iteration-limit
+     :stop-predicate stop-predicate)))
+
 (defun apply-dashboard-touch (games state layout report volume-percent presenter)
   (check-type games list)
   (check-type volume-percent (integer 0 100))

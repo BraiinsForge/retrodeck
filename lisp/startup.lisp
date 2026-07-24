@@ -182,6 +182,7 @@
            #:dashboard-loop-poll-timeout
            #:dashboard-loop-step
            #:dashboard-reduce
+           #:dashboard-candidate-session-rehearse
            #:dashboard-runtime-begin-iteration
            #:dashboard-runtime-controller-quarantined-p
            #:dashboard-runtime-dispatch-input
@@ -218,6 +219,7 @@
            #:load-png-raster
            #:load-dashboard-bootstrap
            #:load-dashboard-brightness
+           #:load-dashboard-candidate-session
            #:load-dashboard-games
            #:load-dashboard-keymap-state
            #:load-dashboard-palette

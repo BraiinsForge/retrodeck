@@ -2058,10 +2058,15 @@ secret!9
            (namestring
             (truename (merge-pathnames "../deploy/menu/palette.tsv"
                                        *load-truename*))))
+         (credits-path
+           (namestring
+            (truename (merge-pathnames "../deploy/menu/credits.tsv"
+                                       *load-truename*))))
          (*regular-file-result* nil)
          (*regular-file-results*
            (list (cons manifest-path (test-file-string manifest-path))
-                 (cons palette-path (test-file-string palette-path))))
+                 (cons palette-path (test-file-string palette-path))
+                 (cons credits-path (test-file-string credits-path))))
          (*regular-file-calls* nil))
     (multiple-value-bind (games palette loaded-p)
         (retrodeck:load-dashboard-bootstrap manifest-path palette-path)
@@ -2080,7 +2085,66 @@ secret!9
     (assert
      (equal (reverse *regular-file-calls*)
             (list (list manifest-path 1 65536)
-                  (list palette-path 1 4096)))))
+                  (list palette-path 1 4096))))
+    (setf *regular-file-calls* nil)
+    (let ((retrodeck:*dashboard-reduced-motion-environment* "PATH")
+          (retrodeck:*dashboard-wayland-display-environment* "PATH"))
+      (multiple-value-bind
+            (state runtime palette palette-loaded-p credits-loaded-p)
+          (retrodeck:load-dashboard-candidate-session
+           manifest-path palette-path :credits-path credits-path)
+        (assert palette-loaded-p)
+        (assert credits-loaded-p)
+        (assert (= (length (getf state :games)) 22))
+        (assert (getf state :reduced-motion))
+        (assert (= (length (getf (getf state :credits-crawl) :static-lines))
+                   32))
+        (assert (getf runtime :auto-presentation))
+        (assert (string= (getf runtime :wayland-display)
+                         (retrodeck::dashboard-environment-value "PATH")))
+        (assert (not (getf runtime :wayland)))
+        (assert (equal palette retrodeck:*dashboard-palette*))))
+    (assert
+     (equal (reverse *regular-file-calls*)
+            (list (list manifest-path 1 65536)
+                  (list palette-path 1 4096)
+                  (list credits-path 1 32768))))
+    (let ((retrodeck:*dashboard-reduced-motion-environment*
+            "RETRODECK_TEST_REDUCED_MOTION_MUST_BE_MISSING"))
+      (assert (not (retrodeck::dashboard-reduced-motion-requested-p))))
+    (setf *regular-file-calls* nil)
+    (assert
+     (signals-error-p
+      (lambda ()
+        (retrodeck:load-dashboard-candidate-session
+         manifest-path palette-path :credits-path credits-path :runtime nil))))
+    (assert (null *regular-file-calls*))
+    (setf *regular-file-calls* nil)
+    (let ((*regular-file-results*
+            (list (cons manifest-path (test-file-string manifest-path))
+                  (cons palette-path (test-file-string palette-path))))
+          (retrodeck:*dashboard-reduced-motion-environment*
+            "RETRODECK_TEST_REDUCED_MOTION_MUST_BE_MISSING")
+          (errors (make-string-output-stream)))
+      (let ((*error-output* errors))
+        (multiple-value-bind
+              (state runtime ignored-palette palette-loaded-p credits-loaded-p)
+            (retrodeck:load-dashboard-candidate-session
+             manifest-path palette-path :credits-path credits-path)
+          (declare (ignore ignored-palette))
+          (assert palette-loaded-p)
+          (assert (not credits-loaded-p))
+          (assert (not (getf state :reduced-motion)))
+          (assert (null (getf (getf state :credits-crawl) :lines)))
+          (assert (zerop (getf (getf state :credits-crawl) :content-height)))
+          (assert (getf runtime :auto-presentation))))
+      (assert (search "the FOSS credits screen will show an error"
+                      (get-output-stream-string errors))))
+    (assert
+     (equal (reverse *regular-file-calls*)
+            (list (list manifest-path 1 65536)
+                  (list palette-path 1 4096)
+                  (list credits-path 1 32768)))))
 
   (let* ((title (bytes #xc5 #xbd #x6c #x75 #xc5 #xa5))
          (contents
@@ -4065,34 +4129,60 @@ secret!9
            (namestring
             (truename (merge-pathnames "../deploy/menu/palette.tsv"
                                        *load-truename*))))
+         (credits-path
+           (namestring
+            (truename (merge-pathnames "../deploy/menu/credits.tsv"
+                                       *load-truename*))))
          (*regular-file-result* nil)
          (*regular-file-results*
            (list (cons manifest-path (test-file-string manifest-path))
-                 (cons palette-path (test-file-string palette-path)))))
-    (multiple-value-bind (games palette loaded-p)
-        (retrodeck:load-dashboard-bootstrap manifest-path palette-path)
-      (assert loaded-p)
-      (exercise
-       '(0 0 0 0 0 0) '(100 101 102 103 104)
-       (lambda (state runtime)
-         (multiple-value-bind (final returned-runtime traces reason)
-             (retrodeck:dashboard-runtime-rehearse
-              state runtime :iteration-limit 2)
-           (assert (eq returned-runtime runtime))
-           (assert (equal traces '(((:reap-sound)) ((:reap-sound)))))
-           (assert (eq reason :limit))
-           (assert (= (length (getf final :games)) 22))
-           (assert (string= (getf (first (getf final :games)) :id) "mario"))
-           (assert (= (getf (getf final :settings) :volume) 37))
-           (assert (= *active-count* 2))
-           (assert (= *fbdev-open-count* 1))
-           (assert (= *fbdev-close-count* 1))
-           (assert (= *evdev-open-count* 1))
-           (assert (= *evdev-close-count* 1))
-           (assert (= *evdev-controls-close-count* 1))
-           (assert (not (getf runtime :initialized-p)))
-           (assert (not (retrodeck:dashboard-runtime-running-p runtime)))))
-       games palette)))
+                 (cons palette-path (test-file-string palette-path))
+                 (cons credits-path (test-file-string credits-path))))
+         (*regular-file-calls* nil)
+         (retrodeck:*dashboard-reduced-motion-environment*
+           "RETRODECK_TEST_REDUCED_MOTION_MUST_BE_MISSING"))
+    (exercise
+     '(0 0 0 0 0 0) '(100 101 102 103 104)
+     (lambda (ignored-state runtime)
+       (declare (ignore ignored-state))
+       (multiple-value-bind
+             (state candidate-runtime palette palette-loaded-p credits-loaded-p)
+           (retrodeck:load-dashboard-candidate-session
+            manifest-path palette-path :credits-path credits-path
+            :runtime runtime)
+         (assert (eq candidate-runtime runtime))
+         (assert palette-loaded-p)
+         (assert credits-loaded-p)
+         (assert (not (getf state :reduced-motion)))
+         (assert (= (length (getf (getf state :credits-crawl) :static-lines))
+                    32))
+         (let ((candidate-palette (copy-tree palette)))
+           (setf (cdr (assoc :background candidate-palette)) #x010203)
+           (multiple-value-bind (final returned-runtime traces reason)
+               (retrodeck:dashboard-candidate-session-rehearse
+                state runtime candidate-palette :iteration-limit 2)
+             (assert (eq returned-runtime runtime))
+             (assert (equal traces '(((:reap-sound)) ((:reap-sound)))))
+             (assert (eq reason :limit))
+             (assert (= (length (getf final :games)) 22))
+             (assert (string= (getf (first (getf final :games)) :id)
+                              "mario"))
+             (assert (= (getf (getf final :settings) :volume) 37))
+             (assert (= *canvas-clear-color* #x010203))
+             (assert (= *active-count* 2))
+             (assert (= *fbdev-open-count* 1))
+             (assert (= *fbdev-close-count* 1))
+             (assert (= *evdev-open-count* 1))
+             (assert (= *evdev-close-count* 1))
+             (assert (= *evdev-controls-close-count* 1))
+             (assert (not (getf runtime :initialized-p)))
+             (assert
+              (not (retrodeck:dashboard-runtime-running-p runtime))))))))
+    (assert
+     (equal (reverse *regular-file-calls*)
+            (list (list manifest-path 1 65536)
+                  (list palette-path 1 4096)
+                  (list credits-path 1 32768)))))
   (exercise
    '(0 0 0 0 0 0) '(200)
    (lambda (state runtime)
