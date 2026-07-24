@@ -110,13 +110,19 @@ overrides without a Rust
 rebuild. Deployment updates the eight standard Lisp files but leaves an
 existing `local.lisp` untouched.
 
-Native ABI 18 retains the widget-side Wayland and direct-fbdev primitives and
-adds only narrow canvas, raster, projected-text, evdev, regular-file, network,
-state-file, control-file, helper-process, audio, managed-child,
-terminal-process, and aggregate-input mechanisms for Lisp to orchestrate. The
-bounded state-file mechanism distinguishes missing files
-from exact bytes and performs private atomic replacement; Lisp owns inherited
-volume parsing, defaults, legacy migration, canonical saves, child reload policy,
+Native ABI 19 retains the widget-side Wayland and direct-fbdev primitives and
+adds one exact-display Wayland open plus only narrow canvas, raster,
+projected-text, evdev, regular-file, network, state-file, control-file,
+helper-process, audio, managed-child, terminal-process, and aggregate-input
+mechanisms for Lisp to orchestrate. The exact-display primitive connects an
+absolute socket path directly or a relative name below absolute
+`XDG_RUNTIME_DIR` through `wayland-client`; the existing environment-based open
+remains unchanged for explicit mode. Lisp snapshots the policy-named
+`WAYLAND_DISPLAY`, owns Wayland-first selection and fbdev fallback, and tracks
+adoption and cleanup ownership. The bounded state-file mechanism distinguishes
+missing files from exact bytes and performs private atomic replacement; Lisp
+owns inherited volume parsing, defaults, legacy migration, canonical saves,
+child reload policy,
 and the exact missing/default/canonical terminal keymap state contract. The
 control-file mechanism follows existing links, reads at most 63 exact bytes, and
 writes bounded exact bytes to an existing path. Lisp owns brightness parsing,

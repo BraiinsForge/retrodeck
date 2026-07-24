@@ -1083,6 +1083,59 @@ production lines, including the existing catalog compiler, and 17,628 lines
 with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
 without compressed or generated first-party source.
 
+## Lisp-owned presentation selection checkpoint
+
+Native ABI 19 adds one narrow `WAYLAND-OPEN-WIDGET-AT` mechanism. Lisp passes
+the exact display string captured when it constructs a runtime; Rust resolves an
+absolute display as the socket path itself or appends a relative display to an
+absolute `XDG_RUNTIME_DIR`, opens one Unix stream, and hands it to maintained
+`wayland-client` connection handling. Embedded NUL and empty display inputs
+fail, as do relative displays when the runtime directory is missing or not
+absolute, without protocol reimplementation. The existing zero-argument
+environment-based Wayland open is unchanged for explicit backend mode.
+
+Startup-loaded policy names `WAYLAND_DISPLAY`. Automatic presentation snapshots
+that value once, requests Wayland only when the snapshot is nonempty, adopts an
+already-open Wayland widget when present, and otherwise opens the exact captured
+display. A failed Wayland open reports its native reason, logs the existing
+fallback transition, and then adopts or opens fbdev. Missing or explicitly empty
+displays select fbdev directly without a false Wayland failure. Runtime backend
+state and ownership continue to determine the matching close operation. Supplying
+`:WAYLAND`, including explicit `NIL`, together with enabled
+`:AUTO-PRESENTATION` is rejected rather than silently overriding explicit mode.
+`RETRODECK:MAIN`, the launcher, and C++ dashboard authority remain unchanged.
+
+Named and fresh SBCL, `cargo fmt --check`, locked Cargo test and all-target
+checks, the complete host suite, targeted ARM/ECL smoke, the complete ARM build
+matrix, `nix flake check`, and independent review passed. Rust unit coverage pins
+absolute and relative socket resolution and invalid runtime directories. ARM/ECL
+called the real ABI with relative and absolute missing sockets and an embedded
+NUL, while host Lisp fixtures pin the exact captured argument, Wayland adoption,
+Wayland-to-fbdev fallback, total failure, explicit-mode primitive, conflicting
+keywords, and cleanup ownership. Commit `fa4dd22` was pushed immediately.
+
+The Deck now has ABI 19 at
+`e302dc0a7f5a5e3e1fc370c4d1f2af52d4384c9bc1bd590524ae2ee8a672bcd1`,
+`startup.lisp` at
+`d13924303d72ebe6269dde3a6d3e7409ed62938e52c32d1a949dea168d217dd9`,
+`policy.lisp` at
+`e1846bde839066e39b5723046148ff9c3f3e5fd86b7f7b3e7467e9616aea3965`,
+and `dashboard.lisp` at
+`784fe2b95b1c70dab48117b4588061f6078e59e60ff5236b242396490692727c`.
+The host remains mode `0700` and Lisp files mode `0600`. Normal installed
+startup passed. A harmless installed fixture replaced only high-level open,
+size, and close functions and verified the captured `retrodeck-fixture` name,
+failed-Wayland fbdev selection, explicit empty display, unchanged explicit
+Wayland mode, adoption without ownership, conflicting-keyword rejection, and
+matching cleanup without opening real presentation or input devices. The C++
+dashboard retained PID 2051 and the Deck health check remained healthy. Physical
+Wayland acceptance still requires firmware containing the BMC compositor.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 11,280
+production lines, including the existing catalog compiler, and 17,870 lines
+with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
+without compressed or generated first-party source.
+
 ## Validation baseline
 
 Updated on 2026-07-24:
@@ -1146,6 +1199,10 @@ Updated on 2026-07-24:
 - The startup-loaded effective TSV bootstrap preserved generated and uploaded
   game order, exact UTF-8 display fallback, complete palette fallback, and fresh
   policy copies through host and ARM/ECL fixtures while C++ retained PID 2051
+- ABI 19 kept exact Wayland display connection generic while Lisp snapshotted
+  presentation policy, preserved explicit mode, fell back to fbdev only after a
+  requested Wayland open failed, and matched adoption and cleanup through host,
+  ARM/ECL, and a harmless installed fixture while C++ retained PID 2051
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
