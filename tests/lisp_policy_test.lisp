@@ -256,15 +256,20 @@
 (load (truename (merge-pathnames "../lisp/startup.lisp" *load-truename*))
       :verbose nil :print nil)
 
-(defun signals-type-error-p (function)
-  (handler-case
-      (progn (funcall function) nil)
-    (type-error () t)))
+(defmacro signals-p (condition &body body)
+  `(handler-case (progn ,@body nil)
+     (,condition () t)))
 
-(defun signals-error-p (function)
-  (handler-case
-      (progn (funcall function) nil)
-    (error () t)))
+(defmacro assert-signals (condition &body body)
+  `(assert (signals-p ,condition ,@body)))
+
+(defun runtime-test-games (&optional include-beta-p)
+  (let ((games
+          '((:id "alpha" :title "ALPHA" :system :nes
+             :color #x5f87ff :rom "/tmp/alpha.nes")
+            (:id "beta" :title "BETA" :system :nes
+             :color #xafd75f :rom "/tmp/beta.nes"))))
+    (copy-tree (if include-beta-p games (subseq games 0 1)))))
 
 (defun test-file-string (path)
   (with-open-file (input path)
@@ -356,16 +361,13 @@
                      (0 0 256 1 0)
                      (0 0 65 0 0)
                      (0 0 65 #x100000000 0)))
-  (assert (signals-type-error-p
-           (lambda () (apply #'retrodeck:draw-canvas-glyph arguments)))))
+  (assert-signals type-error (apply #'retrodeck:draw-canvas-glyph arguments)))
 (assert (null *canvas-glyph-arguments*))
 (assert (retrodeck:fill-canvas-rect -4 8 12 16 #xfe6c27))
 (assert (equal *canvas-fill-arguments* '(-4 8 12 16 #xfe6c27)))
 (setf *canvas-fill-arguments* nil)
-(assert (signals-type-error-p
-         (lambda () (retrodeck:fill-canvas-rect #x80000000 0 1 1 0))))
-(assert (signals-type-error-p
-         (lambda () (retrodeck:fill-canvas-rect 0 0 #x100000000 1 0))))
+(assert-signals type-error (retrodeck:fill-canvas-rect #x80000000 0 1 1 0))
+(assert-signals type-error (retrodeck:fill-canvas-rect 0 0 #x100000000 1 0))
 (assert (null *canvas-fill-arguments*))
 
 (setf *regular-file-result* "project\trole\tlicense\n")
@@ -373,11 +375,9 @@
                   "/tmp/credits.tsv" 1 32768)
                  *regular-file-result*))
 (assert (equal *regular-file-arguments* '("/tmp/credits.tsv" 1 32768)))
-(assert (signals-type-error-p
-         (lambda () (retrodeck:read-bounded-regular-file "/tmp/x" -1 2))))
-(assert (signals-type-error-p
-         (lambda ()
-           (retrodeck:read-bounded-regular-file "/tmp/x" 1 4194305))))
+(assert-signals type-error (retrodeck:read-bounded-regular-file "/tmp/x" -1 2))
+(assert-signals type-error
+                (retrodeck:read-bounded-regular-file "/tmp/x" 1 4194305))
 
 (setf *control-file-read-result* (format nil "12~%")
       *control-file-read-paths* nil)
@@ -385,10 +385,8 @@
                  (format nil "12~%")))
 (assert (equal *control-file-read-paths* '("/tmp/brightness")))
 (setf *control-file-read-result* nil)
-(assert (signals-error-p
-         (lambda () (retrodeck:read-native-control-file "/tmp/brightness"))))
-(assert (signals-type-error-p
-         (lambda () (retrodeck:read-native-control-file 4))))
+(assert-signals error (retrodeck:read-native-control-file "/tmp/brightness"))
+(assert-signals type-error (retrodeck:read-native-control-file 4))
 (setf *control-file-write-status* 1
       *control-file-write-arguments* nil
       *control-file-write-calls* nil)
@@ -398,8 +396,7 @@
                (list "/tmp/brightness" (format nil "14~%"))))
 (setf *control-file-write-status* 0)
 (assert (not (retrodeck:write-native-control-file "/tmp/brightness" "0")))
-(assert (signals-type-error-p
-         (lambda () (retrodeck:write-native-control-file "/tmp/x" 4))))
+(assert-signals type-error (retrodeck:write-native-control-file "/tmp/x" 4))
 
 (setf *state-file-read-result* '(0))
 (multiple-value-bind (value present-p)
@@ -413,11 +410,9 @@
     (assert (and present-p (string= value contents)))))
 (dolist (invalid '(nil (0 nil) (1) (1 42) (2)))
   (setf *state-file-read-result* invalid)
-  (assert (signals-error-p
-           (lambda ()
-             (retrodeck:read-native-state-file "/tmp/volume.state")))))
-(assert (signals-type-error-p
-         (lambda () (retrodeck:read-native-state-file 4))))
+  (assert-signals error
+                  (retrodeck:read-native-state-file "/tmp/volume.state")))
+(assert-signals type-error (retrodeck:read-native-state-file 4))
 (let ((contents (format nil "37~%")))
   (setf *state-file-write-status* 1)
   (assert (retrodeck:write-native-state-file "/tmp/volume.state" contents))
@@ -425,8 +420,7 @@
                  (list "/tmp/volume.state" contents))))
 (setf *state-file-write-status* 0)
 (assert (not (retrodeck:write-native-state-file "/tmp/volume.state" "0")))
-(assert (signals-type-error-p
-         (lambda () (retrodeck:write-native-state-file "/tmp/x" 4))))
+(assert-signals type-error (retrodeck:write-native-state-file "/tmp/x" 4))
 (dolist (fixture (list (list (format nil "0~%") 0)
                        (list (format nil "5~%") 5)
                        (list (format nil "42~%") 42)
@@ -437,18 +431,15 @@
                        (format nil "042~%") (format nil "101~%") "42"
                        (format nil "42~%0") (format nil "42~%~%")
                        (format nil "-1~%") (format nil "on~%")))
-  (assert (signals-error-p
-           (lambda () (retrodeck:parse-dashboard-volume-state invalid)))))
-(assert (signals-type-error-p
-         (lambda () (retrodeck:parse-dashboard-volume-state 42))))
+  (assert-signals error (retrodeck:parse-dashboard-volume-state invalid)))
+(assert-signals type-error (retrodeck:parse-dashboard-volume-state 42))
 (assert (= (retrodeck:parse-dashboard-inherited-volume nil) 42))
 (dolist (fixture '(("0" 0) ("00" 0) ("042" 42) ("100" 100)))
   (assert (= (retrodeck:parse-dashboard-inherited-volume (first fixture))
              (second fixture))))
 (dolist (invalid '("" "loud" "101" "-1" "1x"))
-  (assert (signals-error-p
-           (lambda ()
-             (retrodeck:parse-dashboard-inherited-volume invalid)))))
+  (assert-signals error
+                  (retrodeck:parse-dashboard-inherited-volume invalid)))
 (let ((retrodeck:*dashboard-volume-default* 0))
   (assert (zerop (retrodeck:parse-dashboard-inherited-volume nil))))
 (assert (= (retrodeck:dashboard-inherited-volume) 42))
@@ -477,23 +468,20 @@
                        (format nil "~D~%" (third fixture))))))
 (setf *state-file-read-result* (list 1 (format nil "042~%"))
       *state-file-write-arguments* nil)
-(assert (signals-error-p
-         (lambda ()
-           (retrodeck:load-dashboard-volume-state "/tmp/volume.state" 42))))
+(assert-signals error
+                (retrodeck:load-dashboard-volume-state "/tmp/volume.state" 42))
 (assert (null *state-file-write-arguments*))
 (setf *state-file-read-result* '(0)
       *state-file-write-status* 0)
-(assert (signals-error-p
-         (lambda ()
-           (retrodeck:load-dashboard-volume-state "/tmp/volume.state" 42))))
+(assert-signals error
+                (retrodeck:load-dashboard-volume-state "/tmp/volume.state" 42))
 (setf *state-file-write-status* 1
       *state-file-write-arguments* nil)
 (assert (retrodeck:save-dashboard-volume-state "/tmp/volume.state" 63))
 (assert (equal *state-file-write-arguments*
                (list "/tmp/volume.state" (format nil "63~%"))))
-(assert (signals-type-error-p
-         (lambda ()
-           (retrodeck:save-dashboard-volume-state "/tmp/volume.state" 101))))
+(assert-signals type-error
+                (retrodeck:save-dashboard-volume-state "/tmp/volume.state" 101))
 (dolist (fixture (list (list (format nil "12~%") 12)
                        (list (format nil "~C~C~C12~C~C~C"
                                           #\Space #\Tab (code-char 11)
@@ -506,10 +494,9 @@
              (second fixture))))
 (dolist (invalid (list "" (format nil " ~C~C~%" #\Tab #\Return)
                        "-1" "12x" "4294967296"))
-  (assert (signals-error-p
-           (lambda ()
-             (retrodeck::parse-dashboard-control-integer
-              invalid "brightness")))))
+  (assert-signals error
+                  (retrodeck::parse-dashboard-control-integer
+                   invalid "brightness")))
 (dolist (fixture (list (list (format nil "10~%") 10)
                        (list (format nil "60~%") 60)
                        (list (format nil "100~%") 100)))
@@ -519,9 +506,8 @@
                        (format nil "05~%") (format nil "55~%")
                        (format nil "110~%") "60"
                        (format nil "60~%~%") (format nil " 60~%")))
-  (assert (signals-error-p
-           (lambda ()
-             (retrodeck:parse-dashboard-brightness-state invalid)))))
+  (assert-signals error
+                  (retrodeck:parse-dashboard-brightness-state invalid)))
 (assert (= (retrodeck::dashboard-brightness-raw-value 10 20) 2))
 (assert (= (retrodeck::dashboard-brightness-raw-value 60 20) 12))
 (assert (= (retrodeck::dashboard-brightness-raw-value 100 20) 20))
@@ -532,9 +518,8 @@
   (assert (= (retrodeck::dashboard-observed-brightness-percent
               (first fixture) (second fixture))
              (third fixture))))
-(assert (signals-error-p
-         (lambda ()
-           (retrodeck::dashboard-observed-brightness-percent 21 20))))
+(assert-signals error
+                (retrodeck::dashboard-observed-brightness-percent 21 20))
 (setf *control-file-write-status* 1
       *state-file-write-status* 1
       *control-file-write-arguments* nil
@@ -550,27 +535,24 @@
 (setf *control-file-write-status* 0
       *state-file-write-arguments* nil
       *storage-write-trace* nil)
-(assert (signals-error-p
-         (lambda ()
-           (retrodeck:set-dashboard-brightness-percent
-            "/tmp/brightness" "/tmp/brightness.state" 20 70))))
+(assert-signals error
+                (retrodeck:set-dashboard-brightness-percent
+                 "/tmp/brightness" "/tmp/brightness.state" 20 70))
 (assert (null *state-file-write-arguments*))
 (assert (equal (mapcar #'first (reverse *storage-write-trace*)) '(:control)))
 (setf *control-file-write-status* 1
       *state-file-write-status* 0
       *storage-write-trace* nil)
-(assert (signals-error-p
-         (lambda ()
-           (retrodeck:set-dashboard-brightness-percent
-            "/tmp/brightness" "/tmp/brightness.state" 20 70))))
+(assert-signals error
+                (retrodeck:set-dashboard-brightness-percent
+                 "/tmp/brightness" "/tmp/brightness.state" 20 70))
 (assert (equal (mapcar #'first (reverse *storage-write-trace*))
                '(:control :state)))
 (setf *state-file-write-status* 1
       *storage-write-trace* nil)
-(assert (signals-error-p
-         (lambda ()
-           (retrodeck:set-dashboard-brightness-percent
-            "/tmp/brightness" "/tmp/brightness.state" 20 65))))
+(assert-signals error
+                (retrodeck:set-dashboard-brightness-percent
+                 "/tmp/brightness" "/tmp/brightness.state" 20 65))
 (assert (null *storage-write-trace*))
 (setf *control-file-read-results*
       (list (cons "/tmp/max_brightness" (format nil "20~%"))
@@ -609,22 +591,20 @@
 (setf *state-file-read-results*
       (list (cons "/tmp/brightness.state" (list 1 (format nil "05~%"))))
       *storage-write-trace* nil)
-(assert (signals-error-p
-         (lambda ()
-           (retrodeck:load-dashboard-brightness
-            "/tmp/brightness" "/tmp/max_brightness"
-            "/tmp/brightness.state"))))
+(assert-signals error
+                (retrodeck:load-dashboard-brightness
+                 "/tmp/brightness" "/tmp/max_brightness"
+                 "/tmp/brightness.state"))
 (assert (null *storage-write-trace*))
 (setf *control-file-read-results*
       (list (cons "/tmp/max_brightness" (format nil "0~%"))
             (cons "/tmp/brightness" (format nil "12~%")))
       *control-file-read-paths* nil
       *state-file-read-paths* nil)
-(assert (signals-error-p
-         (lambda ()
-           (retrodeck:load-dashboard-brightness
-            "/tmp/brightness" "/tmp/max_brightness"
-            "/tmp/brightness.state"))))
+(assert-signals error
+                (retrodeck:load-dashboard-brightness
+                 "/tmp/brightness" "/tmp/max_brightness"
+                 "/tmp/brightness.state"))
 (assert (equal (reverse *control-file-read-paths*) '("/tmp/max_brightness")))
 (assert (null *state-file-read-paths*))
 
@@ -635,8 +615,7 @@
 (dolist (invalid (list "" "us" (format nil "US~%") (format nil "de~%")
                        (format nil "us~%~%") (format nil "us ~%")
                        (format nil "us~C~%" #\Return)))
-  (assert (signals-error-p
-           (lambda () (retrodeck:parse-dashboard-keymap-state invalid)))))
+  (assert-signals error (retrodeck:parse-dashboard-keymap-state invalid)))
 (setf *state-file-read-result* '(0)
       *state-file-write-status* 1
       *state-file-write-arguments* nil)
@@ -650,22 +629,19 @@
                  "cz"))
 (assert (null *state-file-write-arguments*))
 (setf *state-file-read-result* (list 1 (format nil "de~%")))
-(assert (signals-error-p
-         (lambda ()
-           (retrodeck:load-dashboard-keymap-state "/tmp/keymap.state"))))
+(assert-signals error
+                (retrodeck:load-dashboard-keymap-state "/tmp/keymap.state"))
 (setf *state-file-read-result* '(0)
       *state-file-write-status* 0)
-(assert (signals-error-p
-         (lambda ()
-           (retrodeck:load-dashboard-keymap-state "/tmp/keymap.state"))))
+(assert-signals error
+                (retrodeck:load-dashboard-keymap-state "/tmp/keymap.state"))
 (setf *state-file-write-status* 1
       *state-file-write-arguments* nil)
 (assert (retrodeck:save-dashboard-keymap-state "/tmp/keymap.state" "cz"))
 (assert (equal *state-file-write-arguments*
                (list "/tmp/keymap.state" (format nil "cz~%"))))
-(assert (signals-error-p
-         (lambda ()
-           (retrodeck:save-dashboard-keymap-state "/tmp/keymap.state" "de"))))
+(assert-signals error
+                (retrodeck:save-dashboard-keymap-state "/tmp/keymap.state" "de"))
 (setf *control-file-read-result* ""
       *control-file-read-results*
       (list (cons "/sys/class/backlight/display-bl/max_brightness"
@@ -692,11 +668,9 @@
 (assert (string= *network-status-path* "/tmp/wifi-status"))
 (dolist (invalid '(nil ("" "" "") ("" "" "" 4)))
   (setf *network-status-result* invalid)
-  (assert (signals-error-p
-           (lambda ()
-             (retrodeck:read-native-network-status "/tmp/wifi-status")))))
-(assert (signals-type-error-p
-         (lambda () (retrodeck:read-native-network-status 4))))
+  (assert-signals error
+                  (retrodeck:read-native-network-status "/tmp/wifi-status")))
+(assert-signals type-error (retrodeck:read-native-network-status 4))
 (setf *network-status-result* '("" "" "" "STATUS UNAVAILABLE"))
 
 (setf *text-mask-result* 17)
@@ -729,7 +703,7 @@
                  (retrodeck:configure-text-projection
                   -1 1 20 4044 420 4000 56 72 104 210 480 0))
                (lambda () (retrodeck:draw-projected-text 0 0))))
-  (assert (signals-type-error-p function)))
+  (assert-signals type-error (funcall function)))
 
 (setf *raster-cover-result* 17)
 (assert (= (retrodeck:load-cover-raster #P"/tmp/cover.png" #x5f87ff) 17))
@@ -748,7 +722,7 @@
                         (lambda () (retrodeck:load-png-raster "/tmp/x" 0 1))
                         (lambda () (retrodeck:load-png-raster "/tmp/x" 2049 1))
                         (lambda () (retrodeck:draw-canvas-raster 0 0 0 1 1))))
-  (assert (signals-type-error-p function)))
+  (assert-signals type-error (funcall function)))
 
 (assert (string= (retrodeck:display-ascii "AČz") "A?z"))
 (labels ((bytes (&rest values)
@@ -763,12 +737,10 @@
                          (bytes #xed #xa0 #x80)
                          (bytes #x1f)
                          "Č"))
-    (assert (signals-error-p
-             (lambda ()
-               (retrodeck::display-utf8-bytes-ascii invalid 64)))))
-  (assert (signals-error-p
-           (lambda ()
-             (retrodeck::display-utf8-bytes-ascii "AB" 1)))))
+    (assert-signals error
+                    (retrodeck::display-utf8-bytes-ascii invalid 64)))
+  (assert-signals error
+                  (retrodeck::display-utf8-bytes-ascii "AB" 1)))
 (assert (= (retrodeck:bitmap-text-width "" 2) 0))
 (assert (= (retrodeck:bitmap-text-width "AB" 2) 22))
 (assert (= (retrodeck:fit-text-scale "ABCDE" 29 3 1) 1))
@@ -889,10 +861,8 @@
         (assert (equal release-effect '(:close t :cue :back))))))
 
   (setf *regular-file-result* nil)
-  (assert (signals-error-p
-           (lambda () (retrodeck:load-project-credits "/tmp/missing.tsv"))))
-  (assert (signals-error-p
-           (lambda () (retrodeck:load-project-credits "relative.tsv"))))
+  (assert-signals error (retrodeck:load-project-credits "/tmp/missing.tsv"))
+  (assert-signals error (retrodeck:load-project-credits "relative.tsv"))
   (dolist (contents
            (list "# only a comment\n"
                  "bad\trow\n"
@@ -903,9 +873,8 @@
                    (dotimes (index 65)
                      (format output "project-~D\trole\tMIT~%" index)))))
     (setf *regular-file-result* contents)
-    (assert (signals-error-p
-             (lambda ()
-               (retrodeck:load-project-credits "/tmp/invalid.tsv"))))))
+    (assert-signals error
+                    (retrodeck:load-project-credits "/tmp/invalid.tsv"))))
 
 (let* ((network '(:ssid "net1" :wlan-ipv4 "10.249.110.248"
                   :wireguard-ipv4 "10.0.0.10" :selector "CONNECTED"))
@@ -1339,8 +1308,7 @@ secret!9
            (1 0 -1 "start") (1 -1 -1 nil)
            (2 0 15 "pipe") (2 0 -1 nil)
            (3 -1 15 "wait") (3 -1 -1 nil)))
-  (assert (signals-error-p
-           (lambda () (retrodeck::decode-native-helper-result result)))))
+  (assert-signals error (retrodeck::decode-native-helper-result result)))
 
 (let* ((wifi (retrodeck:wifi-initial-state
               :ssid "test net" :passphrase "secret!9"))
@@ -1571,13 +1539,12 @@ secret!9
 (assert (retrodeck:close-evdev-controls))
 (assert (= *evdev-controls-close-count* 1))
 (setf *evdev-controls-scan-result* '(3 0))
-(assert (signals-error-p #'retrodeck:scan-evdev-controls))
+(assert-signals error (retrodeck:scan-evdev-controls))
 (setf *evdev-controls-scan-result* nil
       *evdev-controls-dispatch-result* nil)
 (assert (null (retrodeck:scan-evdev-controls)))
 (assert (null (retrodeck:dispatch-evdev-controls)))
-(assert (signals-type-error-p
-         (lambda () (retrodeck:dispatch-evdev-controls #x100000000))))
+(assert-signals type-error (retrodeck:dispatch-evdev-controls #x100000000))
 
 (setf *input-poll-result* '(1 2 3 1 1 0))
 (assert (equal (retrodeck:poll-native-input nil 25)
@@ -1596,11 +1563,10 @@ secret!9
                    (1 0 -1 0 0 0)
                    (1 0 0 0 0)))
   (setf *input-poll-result* invalid)
-  (assert (signals-error-p (lambda () (retrodeck:poll-native-input nil 0)))))
+  (assert-signals error (retrodeck:poll-native-input nil 0)))
 (setf *input-poll-result* nil)
 (assert (null (retrodeck:poll-native-input nil 0)))
-(assert (signals-type-error-p
-         (lambda () (retrodeck:poll-native-input nil #x100000000))))
+(assert-signals type-error (retrodeck:poll-native-input nil #x100000000))
 (setf *input-poll-result* '(0 0 0 0 0 0))
 
 (assert (equal retrodeck:*dashboard-keyboard-controls*
@@ -1937,8 +1903,8 @@ secret!9
            (let ((*regular-file-result* nil)
                  (*regular-file-results*
                    (and contents (list (cons "/tmp/games.tsv" contents)))))
-             (signals-error-p
-              (lambda () (retrodeck:load-dashboard-games "/tmp/games.tsv")))))
+             (signals-p error
+               (retrodeck:load-dashboard-games "/tmp/games.tsv"))))
          (palette-text (entries &optional legacy-icon)
            (with-output-to-string (output)
              (when legacy-icon
@@ -1952,9 +1918,8 @@ secret!9
            (let ((*regular-file-result* nil)
                  (*regular-file-results*
                    (and contents (list (cons "/tmp/palette.tsv" contents)))))
-             (signals-error-p
-              (lambda ()
-                (retrodeck:load-dashboard-palette "/tmp/palette.tsv"))))))
+             (signals-p error
+               (retrodeck:load-dashboard-palette "/tmp/palette.tsv")))))
   (let* ((manifest-path
            (namestring
             (truename (merge-pathnames "../deploy/menu/games.tsv"
@@ -2018,11 +1983,9 @@ secret!9
             "RETRODECK_TEST_REDUCED_MOTION_MUST_BE_MISSING"))
       (assert (not (retrodeck::dashboard-reduced-motion-requested-p))))
     (setf *regular-file-calls* nil)
-    (assert
-     (signals-error-p
-      (lambda ()
-        (retrodeck:load-dashboard-candidate-session
-         manifest-path palette-path :credits-path credits-path :runtime nil))))
+    (assert-signals error
+                    (retrodeck:load-dashboard-candidate-session
+                     manifest-path palette-path :credits-path credits-path :runtime nil))
     (assert (null *regular-file-calls*))
     (setf *regular-file-calls* nil)
     (let ((*regular-file-results*
@@ -2120,8 +2083,7 @@ secret!9
                    (game-row "overflow" "OVERFLOW" "nes"
                              "/missing/overflow.nes")))))
   (let ((*regular-file-calls* nil))
-    (assert (signals-error-p
-             (lambda () (retrodeck:load-dashboard-games "relative.tsv"))))
+    (assert-signals error (retrodeck:load-dashboard-games "relative.tsv"))
     (assert (null *regular-file-calls*)))
 
   (let* ((original (copy-tree retrodeck:*dashboard-palette*))
@@ -2296,8 +2258,7 @@ secret!9
                   (0 0 -1 -1 nil 1)
                   (1 1 -1 15 nil 1)
                   (1 0 0 -1 7 0)))
-  (assert (signals-error-p
-           (lambda () (retrodeck::decode-native-child-result result)))))
+  (assert-signals error (retrodeck::decode-native-child-result result)))
 
 (let* ((plan (retrodeck:dashboard-launch-plan
               (retrodeck:dashboard-application "terminal") 42 :keymap "cz"))
@@ -2747,12 +2708,10 @@ secret!9
     (assert (equal (getf (getf next :controller-guard) :edge-times) '(175)))
     (assert (null effects)))
 
-  (assert
-   (signals-error-p
-    (lambda ()
-      (retrodeck:dashboard-reduce
-       state (list :controls :gamepad-actions nil :keyboard-actions nil
-                   :layout layout :now 190)))))
+  (assert-signals error
+                  (retrodeck:dashboard-reduce
+                   state (list :controls :gamepad-actions nil :keyboard-actions nil
+                               :layout layout :now 190)))
 
   (let ((suspended (copy-list state)))
     (setf (getf suspended :controller-guard)
@@ -2845,8 +2804,7 @@ secret!9
              (retrodeck:dashboard-reduce
               pressed (list :touch :report (list x y nil nil t)
                             :layout layout :now (1+ now))))))
-  (let* ((games '((:id "alpha" :title "ALPHA" :system :nes
-                   :color #x5f87ff :rom "/tmp/alpha.nes")))
+  (let* ((games (runtime-test-games))
          (dashboard-layout (retrodeck:render-dashboard games :nes 0 ""))
          (state (retrodeck:dashboard-loop-initial-state
                  games :volume 42 :brightness 60 :keymap "us")))
@@ -2871,13 +2829,11 @@ secret!9
             (assert (equal request-effects
                            (list '(:discard-touch)
                                  (list :settings-action plan))))
-            (assert
-             (signals-error-p
-              (lambda ()
-                (retrodeck:dashboard-reduce
-                 requested
-                 (list :touch :report '(0 0 t t nil)
-                       :layout settings-layout :now 1011)))))
+            (assert-signals error
+                            (retrodeck:dashboard-reduce
+                             requested
+                             (list :touch :report '(0 0 t t nil)
+                                   :layout settings-layout :now 1011)))
             (multiple-value-bind (completed complete-effects)
                 (retrodeck:dashboard-reduce
                  requested '(:settings-result :succeeded-p t))
@@ -2945,13 +2901,11 @@ secret!9
                 (assert (eq (getf plan :action) :save))
                 (assert (equal save-effects
                                (list (list :wifi-action plan))))
-                (assert
-                 (signals-error-p
-                  (lambda ()
-                    (retrodeck:dashboard-reduce
-                     saving
-                     (list :touch :report '(20 20 nil nil t)
-                           :layout wifi-layout :now 1122)))))
+                (assert-signals error
+                                (retrodeck:dashboard-reduce
+                                 saving
+                                 (list :touch :report '(20 20 nil nil t)
+                                       :layout wifi-layout :now 1122)))
                 (multiple-value-bind (saved completion-effects)
                     (retrodeck:dashboard-reduce
                      saving '(:wifi-result :succeeded-p t))
@@ -3042,15 +2996,12 @@ secret!9
                        '(:kind :game :game-index 0 :touch-batch nil)))
         (assert (equal effects '((:discard-touch) (:cue :confirm))))))))
 
-(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
-                 :color #x5f87ff :rom "/tmp/alpha.nes")))
+(let* ((games (runtime-test-games))
        (layout (retrodeck:render-dashboard games :nes 0 ""))
        (state (retrodeck:dashboard-loop-initial-state games :now 100)))
   (assert (= (retrodeck:dashboard-loop-poll-timeout state) 250))
-  (assert
-   (signals-error-p
-    (lambda ()
-      (retrodeck:dashboard-reduce state '(:prepare-launch)))))
+  (assert-signals error
+                  (retrodeck:dashboard-reduce state '(:prepare-launch)))
   (multiple-value-bind (touch-pressed ignored)
       (retrodeck:dashboard-reduce
        state (list :touch :report '(640 286 t t nil)
@@ -3083,10 +3034,8 @@ secret!9
         (assert (= (getf refresh :network-refreshed-at) 2100))
         (assert (getf refresh :pending-network))
         (assert (equal refresh-effects '((:network-action))))
-        (assert
-         (signals-error-p
-          (lambda ()
-            (retrodeck:dashboard-reduce refresh '(:tick :now 2101)))))
+        (assert-signals error
+                        (retrodeck:dashboard-reduce refresh '(:tick :now 2101)))
         (multiple-value-bind (unchanged unchanged-effects)
             (retrodeck:dashboard-reduce
              refresh '(:network-result :network nil))
@@ -3133,10 +3082,8 @@ secret!9
                    :keyboard-actions nil :layout layout :now 500
                    :controller-quarantined-p nil))
     (assert (equal request-effects '((:discard-touch) (:cue :confirm))))
-    (assert
-     (signals-error-p
-      (lambda ()
-        (retrodeck:dashboard-reduce requested '(:tick :now 501)))))
+    (assert-signals error
+                    (retrodeck:dashboard-reduce requested '(:tick :now 501)))
     (multiple-value-bind (launching launch-effects)
         (retrodeck:dashboard-reduce
          requested '(:prepare-launch :wayland t
@@ -3152,14 +3099,12 @@ secret!9
         (assert (equal (cdr (assoc "RETRO_DECK_PRESENTATION"
                                    (getf plan :environment) :test #'string=))
                        "layer-shell"))
-        (assert
-         (signals-error-p
-          (lambda ()
-            (retrodeck:dashboard-reduce
-             launching
-             (list :controls :gamepad-actions nil :keyboard-actions '(:right)
-                   :layout layout :now 501
-                   :controller-quarantined-p nil)))))
+        (assert-signals error
+                        (retrodeck:dashboard-reduce
+                         launching
+                         (list :controls :gamepad-actions nil :keyboard-actions '(:right)
+                               :layout layout :now 501
+                               :controller-quarantined-p nil)))
         (multiple-value-bind (returned-child recovery-effects)
             (retrodeck:dashboard-reduce
              launching
@@ -3206,10 +3151,7 @@ secret!9
             (assert (string= (getf (getf stopped :dashboard) :status)
                              "ALPHA STOPPED (SIGNAL 15)"))))))))
 
-(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
-                 :color #x5f87ff :rom "/tmp/alpha.nes")
-                (:id "beta" :title "BETA" :system :nes
-                 :color #xafd75f :rom "/tmp/beta.nes")))
+(let* ((games (runtime-test-games t))
        (state (retrodeck:dashboard-loop-initial-state games))
        (layout (retrodeck:render-dashboard games :nes 0 ""))
        (now 3000))
@@ -3287,10 +3229,7 @@ secret!9
                        :close-controls :launch :scan-controls
                        :open-presentation :reload-volume :render :present))))))
 
-(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
-                 :color #x5f87ff :rom "/tmp/alpha.nes")
-                (:id "beta" :title "BETA" :system :nes
-                 :color #xafd75f :rom "/tmp/beta.nes")))
+(let* ((games (runtime-test-games t))
        (state (retrodeck:dashboard-loop-initial-state
                games :now 1000 :touch-connected-p nil))
        (layout (retrodeck:render-dashboard games :nes 0 ""))
@@ -3334,10 +3273,7 @@ secret!9
                        '((:discard-touch) (:render) (:present)
                          (:cue :next))))))))
 
-(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
-                 :color #x5f87ff :rom "/tmp/alpha.nes")
-                (:id "beta" :title "BETA" :system :nes
-                 :color #xafd75f :rom "/tmp/beta.nes")))
+(let* ((games (runtime-test-games t))
        (state (retrodeck:dashboard-loop-initial-state games :now 1000))
        (layout (retrodeck:render-dashboard games :nes 0 "")))
   (setf (getf state :controller-guard)
@@ -3421,8 +3357,7 @@ secret!9
                            (:render) (:present))))
           (assert (getf restored :touch-connected-p)))))))
 
-(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
-                 :color #x5f87ff :rom "/tmp/alpha.nes")))
+(let* ((games (runtime-test-games))
        (state (retrodeck:dashboard-loop-initial-state games :now 7000))
        (layout (retrodeck:render-dashboard games :nes 0 "")))
   (labels ((current-layout () layout)
@@ -3455,10 +3390,7 @@ secret!9
                          "WAITING FOR TOUCHSCREEN"))
         (assert (equal lost-trace '((:render) (:present))))))))
 
-(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
-                 :color #x5f87ff :rom "/tmp/alpha.nes")
-                (:id "beta" :title "BETA" :system :nes
-                 :color #xafd75f :rom "/tmp/beta.nes")))
+(let* ((games (runtime-test-games t))
        (state (retrodeck:dashboard-loop-initial-state games :now 7100))
        (layout (retrodeck:render-dashboard games :nes 0 ""))
        (rendered-statuses nil))
@@ -3494,8 +3426,7 @@ secret!9
                        '((:render) (:present) (:discard-touch)
                          (:render) (:present) (:cue :next))))))))
 
-(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
-                 :color #x5f87ff :rom "/tmp/alpha.nes")))
+(let* ((games (runtime-test-games))
        (network '(:ssid "LAB" :wlan-ipv4 "10.0.0.2"
                   :wireguard-ipv4 "10.8.0.2" :selector "1"))
        (state (retrodeck:dashboard-loop-initial-state games :now 1000))
@@ -3551,16 +3482,13 @@ secret!9
 (let ((state (retrodeck:dashboard-loop-initial-state nil :now 1))
       (runtime (retrodeck:make-dashboard-runtime)))
   (assert (not (retrodeck:dashboard-runtime-running-p runtime)))
-  (assert (signals-error-p
-           (lambda ()
-             (retrodeck:dashboard-runtime-begin-iteration
-              state runtime '(:now 1)))))
-  (assert (signals-error-p
-           (lambda ()
-             (retrodeck:dashboard-runtime-dispatch-input
-              state runtime '(:now 1 :poll-ready-p nil)))))
-  (assert (signals-error-p
-           (lambda () (retrodeck:dashboard-runtime-poll-input runtime 0)))))
+  (assert-signals error
+                  (retrodeck:dashboard-runtime-begin-iteration
+                   state runtime '(:now 1)))
+  (assert-signals error
+                  (retrodeck:dashboard-runtime-dispatch-input
+                   state runtime '(:now 1 :poll-ready-p nil)))
+  (assert-signals error (retrodeck:dashboard-runtime-poll-input runtime 0)))
 
 (let* ((state (retrodeck:dashboard-loop-initial-state nil :now 1))
        (runtime (retrodeck:make-dashboard-runtime
@@ -3585,9 +3513,8 @@ secret!9
        (*fbdev-open-count* 0)
        (*evdev-open-count* 0)
        (*evdev-controls-scan-count* 0))
-  (assert (signals-error-p
-           (lambda ()
-             (retrodeck:dashboard-runtime-initialize state runtime 1))))
+  (assert-signals error
+                  (retrodeck:dashboard-runtime-initialize state runtime 1))
   (assert (equal (reverse *control-file-read-paths*)
                  '("/tmp/max_brightness" "/tmp/brightness")))
   (assert (equal (reverse *state-file-read-paths*)
@@ -3635,10 +3562,9 @@ secret!9
                 (*fbdev-open-count* 0)
                 (*evdev-open-count* 0)
                 (*evdev-controls-scan-count* 0))
-           (assert (signals-error-p
-                    (lambda ()
-                      (retrodeck:dashboard-runtime-initialize
-                       state runtime 1))))
+           (assert-signals error
+                           (retrodeck:dashboard-runtime-initialize
+                            state runtime 1))
            (assert (equal (reverse *control-file-read-paths*)
                           expected-control-reads))
            (assert (equal (reverse *state-file-read-paths*)
@@ -3916,11 +3842,9 @@ secret!9
           (assert (not (getf runtime :rescan-controls-p))))))
     (setf *input-poll-result* '(1 1 0 0 0 0)
           *evdev-controls* nil)
-    (assert (signals-error-p
-             (lambda () (retrodeck:dashboard-runtime-poll-input runtime 0))))
+    (assert-signals error (retrodeck:dashboard-runtime-poll-input runtime 0))
     (setf *input-poll-result* nil)
-    (assert (signals-error-p
-             (lambda () (retrodeck:dashboard-runtime-poll-input runtime 0))))
+    (assert-signals error (retrodeck:dashboard-runtime-poll-input runtime 0))
     (retrodeck:dashboard-runtime-shutdown runtime)))
 
 (let* ((times '(950 951 952 953 954 955))
@@ -4126,10 +4050,8 @@ secret!9
   (exercise
    nil '(400 401)
    (lambda (state runtime)
-     (assert
-      (signals-error-p
-       (lambda ()
-         (retrodeck:dashboard-runtime-rehearse state runtime))))
+     (assert-signals error
+                     (retrodeck:dashboard-runtime-rehearse state runtime))
      (assert (= *active-count* 1))
      (assert (= *fbdev-close-count* 1))
      (assert (= *evdev-close-count* 1))
@@ -4142,10 +4064,8 @@ secret!9
      (multiple-value-bind (initialized ignored-runtime)
          (retrodeck:dashboard-runtime-initialize state runtime 500)
        (declare (ignore initialized ignored-runtime))
-       (assert
-        (signals-error-p
-         (lambda ()
-           (retrodeck:dashboard-runtime-rehearse state runtime))))
+       (assert-signals error
+                       (retrodeck:dashboard-runtime-rehearse state runtime))
        (assert (getf runtime :initialized-p))
        (assert (retrodeck:dashboard-runtime-running-p runtime))
        (assert (zerop *fbdev-close-count*))
@@ -4192,18 +4112,15 @@ secret!9
   (let ((runtime (retrodeck:make-dashboard-runtime
                   :auto-presentation t :wayland-display "")))
     (assert (not (retrodeck::dashboard-runtime-wayland-requested-p runtime))))
-  (assert (signals-type-error-p
-           (lambda ()
-             (retrodeck:make-dashboard-runtime
-              :auto-presentation t :wayland-display 1))))
-  (assert (signals-error-p
-           (lambda ()
-             (retrodeck:make-dashboard-runtime
-              :wayland t :auto-presentation t))))
-  (assert (signals-error-p
-           (lambda ()
-             (retrodeck:make-dashboard-runtime
-              :wayland nil :auto-presentation t))))
+  (assert-signals type-error
+                  (retrodeck:make-dashboard-runtime
+                   :auto-presentation t :wayland-display 1))
+  (assert-signals error
+                  (retrodeck:make-dashboard-runtime
+                   :wayland t :auto-presentation t))
+  (assert-signals error
+                  (retrodeck:make-dashboard-runtime
+                   :wayland nil :auto-presentation t))
   (multiple-value-bind (result errors) (select-presentation nil)
     (assert (equal result '(t t nil nil 0 1 0 1)))
     (assert (string= errors "")))
@@ -4287,9 +4204,8 @@ secret!9
        (*fbdev-canvas-count* 0)
        (diagnostics (make-string-output-stream)))
   (let ((*error-output* diagnostics))
-    (assert (signals-error-p
-             (lambda ()
-               (retrodeck:dashboard-runtime-initialize state runtime 10)))))
+    (assert-signals error
+                    (retrodeck:dashboard-runtime-initialize state runtime 10)))
   (assert (search "Wayland widget unavailable; trying fbdev"
                   (get-output-stream-string diagnostics)))
   (assert (= *wayland-open-count* 1))
@@ -4319,9 +4235,8 @@ secret!9
        (*evdev-controls-scan-count* 0)
        (*evdev-controls-close-count* 0)
        (*fbdev-canvas-count* 0))
-  (assert (signals-error-p
-           (lambda ()
-             (retrodeck:dashboard-runtime-initialize state runtime 20))))
+  (assert-signals error
+                  (retrodeck:dashboard-runtime-initialize state runtime 20))
   (assert (= *fbdev-open-count* 1))
   (assert (= *fbdev-close-count* 1))
   (assert (= *evdev-open-count* 1))
@@ -4343,9 +4258,8 @@ secret!9
        (*evdev-controls-scan-result* '(0 0))
        (*evdev-controls-scan-count* 0)
        (*evdev-controls-close-count* 0))
-  (assert (signals-error-p
-           (lambda ()
-             (retrodeck:dashboard-runtime-initialize state runtime 30))))
+  (assert-signals error
+                  (retrodeck:dashboard-runtime-initialize state runtime 30))
   (assert (= *wayland-canvas-count* 1))
   (assert (= *wayland-close-count* 1))
   (assert (zerop *evdev-open-count*))
@@ -4368,9 +4282,8 @@ secret!9
        (*evdev-controls-scan-result* '(0 0))
        (*evdev-controls-scan-count* 0)
        (*evdev-controls-close-count* 0))
-  (assert (signals-error-p
-           (lambda ()
-             (retrodeck:dashboard-runtime-initialize state runtime 40))))
+  (assert-signals error
+                  (retrodeck:dashboard-runtime-initialize state runtime 40))
   (assert (zerop *fbdev-open-count*))
   (assert (zerop *fbdev-close-count*))
   (assert (= *fbdev-canvas-count* 1))
@@ -4389,9 +4302,8 @@ secret!9
        (*evdev-controls-scan-result* '(0 0))
        (*evdev-controls-scan-count* 0)
        (*evdev-controls-close-count* 0))
-  (assert (signals-error-p
-           (lambda ()
-             (retrodeck:dashboard-runtime-initialize state runtime 50))))
+  (assert-signals error
+                  (retrodeck:dashboard-runtime-initialize state runtime 50))
   (assert (= *wayland-canvas-count* 1))
   (assert (zerop *wayland-close-count*))
   (assert (= *evdev-controls-scan-count* 1))
@@ -4431,10 +4343,9 @@ secret!9
              '(:external-launch)))
     (assert (= external-calls 1))
     (setf (getf runtime :external-effect-handler) nil)
-    (assert (signals-error-p
-             (lambda ()
-               (retrodeck::dashboard-runtime-handle-effect
-                runtime '(:launch (:executable "/tmp/noop")) initialized))))
+    (assert-signals error
+                    (retrodeck::dashboard-runtime-handle-effect
+                     runtime '(:launch (:executable "/tmp/noop")) initialized))
     (retrodeck:dashboard-runtime-shutdown runtime)
     (assert (zerop *fbdev-open-count*))
     (assert (zerop *fbdev-close-count*))
@@ -4456,9 +4367,8 @@ secret!9
     (declare (ignore ignored-runtime))
     (assert (getf runtime :presentation-owned-p))
     (assert (retrodeck:dashboard-runtime-running-p runtime))
-    (assert (signals-error-p
-             (lambda ()
-               (retrodeck:dashboard-runtime-initialize initialized runtime 57))))
+    (assert-signals error
+                    (retrodeck:dashboard-runtime-initialize initialized runtime 57))
     (assert (getf runtime :presentation-owned-p))
     (retrodeck:dashboard-runtime-shutdown runtime)
     (assert (zerop *fbdev-open-count*))
@@ -4534,8 +4444,7 @@ secret!9
       (assert (= *evdev-open-count* 1))
       (assert (equal trace '((:reap-sound)))))))
 
-(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
-                 :color #x5f87ff :rom "/tmp/alpha.nes")))
+(let* ((games (runtime-test-games))
        (startup-network '(:ssid "OLD" :wlan-ipv4 "10.0.0.1"
                           :wireguard-ipv4 "" :selector "0"))
        (network '(:ssid "LAB" :wlan-ipv4 "10.0.0.2"
@@ -4616,10 +4525,7 @@ secret!9
     (assert (zerop *wayland-close-count*))
     (assert (= *evdev-controls-close-count* 1))))
 
-(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
-                 :color #x5f87ff :rom "/tmp/alpha.nes")
-                (:id "beta" :title "BETA" :system :nes
-                 :color #xafd75f :rom "/tmp/beta.nes")))
+(let* ((games (runtime-test-games t))
        (state (retrodeck:dashboard-loop-initial-state games :now 70))
        (runtime (retrodeck:make-dashboard-runtime))
        (*active-status* 0)
@@ -4669,8 +4575,7 @@ secret!9
           (assert (= *evdev-close-count* 1))
           (assert (= *fbdev-close-count* 1)))))))
 
-(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
-                 :color #x5f87ff :rom "/tmp/alpha.nes")))
+(let* ((games (runtime-test-games))
        (runtime
          (retrodeck:make-dashboard-runtime
           :external-effect-handler
@@ -4718,10 +4623,7 @@ secret!9
                      '(:discard-touch :cue :render :present :finish-sound
                        :close-controls :launch :stop-loop))))))
 
-(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
-                 :color #x5f87ff :rom "/tmp/alpha.nes")
-                (:id "beta" :title "BETA" :system :nes
-                 :color #xafd75f :rom "/tmp/beta.nes")))
+(let* ((games (runtime-test-games t))
        (state (retrodeck:dashboard-loop-initial-state games :now 100))
        (runtime (retrodeck:make-dashboard-runtime
                  :volume-state "/tmp/volume.state")))
@@ -4780,8 +4682,7 @@ secret!9
   (setf *active-status* 0
         retrodeck::*menu-sound-input-until-ms* 0))
 
-(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
-                 :color #x5f87ff :rom "/tmp/alpha.nes")))
+(let* ((games (runtime-test-games))
        (external-trace nil)
        (clock-now 2002)
        (runtime
@@ -4853,8 +4754,7 @@ secret!9
           (assert (= *evdev-controls-scan-count* 2))))))
   (setf retrodeck::*menu-sound-input-until-ms* 0))
 
-(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
-                 :color #x5f87ff :rom "/tmp/alpha.nes")))
+(let* ((games (runtime-test-games))
        (external-trace nil)
        (runtime
          (retrodeck:make-dashboard-runtime
@@ -4898,8 +4798,7 @@ secret!9
                          :cue :render :present))))))
   (setf *play-status* 1))
 
-(let* ((games '((:id "alpha" :title "ALPHA" :system :nes
-                 :color #x5f87ff :rom "/tmp/alpha.nes")))
+(let* ((games (runtime-test-games))
        (runtime (retrodeck:make-dashboard-runtime))
        (state (retrodeck:dashboard-loop-initial-state games :now 4000)))
   (setf *active-status* 0

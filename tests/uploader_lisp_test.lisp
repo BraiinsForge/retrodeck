@@ -3,150 +3,102 @@
                        (uiop:pathname-directory-pathname *load-truename*)))
 (in-package #:retrodeck.uploader)
 
-(defun expect-request-error (thunk fragment)
-  (handler-case
-      (progn (funcall thunk) (error "Expected request error containing ~S" fragment))
-    (request-error (condition)
-      (assert (search fragment (request-error-message condition))))))
-
+(defun expect-request-error (fragment function &rest arguments)
+  (handler-case (progn (apply function arguments)
+                       (error "Expected request error containing ~S" fragment))
+    (request-error (condition) (assert (search fragment (request-error-message condition))))))
 (defun write-bytes (path bytes)
   (ensure-directories-exist path)
-  (with-open-file (stream path :direction :output :if-exists :supersede
-                                :element-type '(unsigned-byte 8))
-    (write-sequence bytes stream)))
-
+  (alexandria:write-byte-vector-into-file
+   (coerce bytes '(vector (unsigned-byte 8))) path :if-exists :supersede)
+  path)
 (defun make-zip (path entries)
   (zip:with-output-to-zipfile (archive path :if-exists :supersede)
     (dolist (entry entries)
       (destructuring-bind (name bytes) entry
-        (let ((source (merge-pathnames
-                       (format nil "zip-source-~36R" (random most-positive-fixnum))
-                       (uiop:pathname-directory-pathname path))))
-          (unwind-protect
-               (progn
-                 (write-bytes source bytes)
-                 (with-open-file (stream source :element-type '(unsigned-byte 8))
-                   (zip:write-zipentry archive name stream :file-write-date nil)))
-            (uiop:delete-file-if-exists source)))))))
+        (with-open-stream (stream (flexi-streams:make-in-memory-input-stream bytes))
+          (zip:write-zipentry archive name stream :file-write-date nil)))))
+  path)
+(defun add-ok (title filename path expected-id)
+  (multiple-value-bind (entry restart-error) (add-rom "chip8" title filename path)
+    (assert (and (null restart-error) (string= expected-id (first entry))
+                 (string= title (second entry)) (probe-file (fourth entry))))))
 
 (let* ((root (uiop:ensure-directory-pathname
-              (format nil "/tmp/retrodeck-uploader-lisp-~36R/"
-                      (random most-positive-fixnum))))
-       (palette-source (merge-pathnames "../deploy/menu/palette.tsv"
-                                        (uiop:pathname-directory-pathname *load-truename*))))
+              (format nil "/tmp/retrodeck-uploader-lisp-~36R/" (random most-positive-fixnum))))
+       (palette-text (uiop:read-file-string
+                      (merge-pathnames "../deploy/menu/palette.tsv" *source-directory*))))
   (unwind-protect
-       (progn
+       (flet ((path (name) (merge-pathnames name root))
+              (file (name bytes) (write-bytes (merge-pathnames name root) bytes)))
          (configure :data-root root :restart-command nil)
          (atomic-text (data-path "nes-deck/menu/games.tsv") "")
-         (atomic-text (data-path "nes-deck/menu/palette.tsv")
-                      (uiop:read-file-string palette-source))
+         (atomic-text (data-path "nes-deck/menu/palette.tsv") palette-text)
 
-         (assert (valid-title-p "Café Racer"))
-         (assert (not (valid-title-p " padded ")))
-         (assert (not (valid-title-p (format nil "~Ctrimmed" (code-char 160)))))
-         (assert (string= "hello-world" (slugify "Hello, World!")))
-         (assert (string= "#12ABEF" (normalize-rgb "#12abef")))
-         (assert (null (normalize-rgb "12ABEF")))
+         (assert (and (valid-title-p "Café Racer") (not (valid-title-p " padded "))
+                      (not (valid-title-p (format nil "~Ctrimmed" (code-char 160))))
+                      (string= "hello-world" (slugify "Hello, World!"))
+                      (string= "#12ABEF" (normalize-rgb "#12abef"))
+                      (null (normalize-rgb "12ABEF"))))
          (clrhash *attempts*)
          (dotimes (attempt 5) (declare (ignore attempt)) (record-login "fixture" nil))
-         (assert (= 300 (blocked-seconds "fixture")))
-         (record-login "fixture" t)
-         (assert (null (blocked-seconds "fixture")))
-
-         (validate-rom "nes" #(78 69 83 26 0 0 0 0 0 0 0 0 0 0 0 0))
-         (validate-rom "zx" #(2 0 0 0))
-         (validate-rom "chip8" #(1))
-         (expect-request-error (lambda () (validate-rom "nes" #(1 2 3 4))) "iNES")
-         (expect-request-error (lambda () (validate-rom "zx" #(2 0 0 1))) "checksum")
+         (assert (and (= 300 (blocked-seconds "fixture"))
+                      (progn (record-login "fixture" t) (null (blocked-seconds "fixture")))))
+         (dolist (case '(("nes" #(78 69 83 26 0 0 0 0 0 0 0 0 0 0 0 0))
+                         ("zx" #(2 0 0 0)) ("chip8" #(1))))
+           (apply #'validate-rom case))
+         (expect-request-error "iNES" #'validate-rom "nes" #(1 2 3 4))
+         (expect-request-error "checksum" #'validate-rom "zx" #(2 0 0 1))
          (let ((output (make-instance 'bounded-zip-output
                                       :buf (make-array 1 :element-type '(unsigned-byte 8)))))
-           (expect-request-error
-            (lambda ()
-              (trivial-gray-streams:stream-write-sequence output #(1 2) 0 2))
-            "read safely"))
+           (expect-request-error "read safely" #'trivial-gray-streams:stream-write-sequence
+                                 output #(1 2) 0 2))
 
-         (let* ((palette-text (uiop:read-file-string palette-source))
+         (let* ((icon (format nil "settings-icon~Cgear~%" #\Tab))
                 (values (parse-palette-tsv palette-text)))
-           (assert (= 22 (hash-table-count values)))
-           (assert (= 22 (hash-table-count
-                          (parse-palette-tsv
-                           (format nil "settings-icon~Cgear~%~A" #\Tab palette-text)))))
-           (expect-request-error
-            (lambda ()
-              (parse-palette-tsv
-               (format nil "settings-icon~Cgear~%settings-icon~Cgear~%~A"
-                       #\Tab #\Tab palette-text)))
-            "invalid settings icon")
+           (assert (= 22 (hash-table-count values)
+                      (hash-table-count (parse-palette-tsv (concatenate 'string icon palette-text)))))
+           (expect-request-error "invalid settings icon" #'parse-palette-tsv
+                                 (concatenate 'string icon icon palette-text))
            (setf (gethash "background" values) "#123ABC")
            (save-palette values)
-           (assert (search ":version 2" (uiop:read-file-string
-                                         (data-path "nes-deck/state/dashboard-palette.sexp"))))
-           (assert (string= "#123ABC" (third (first (current-palette)))))
-           (let ((legacy (substitute #\3 #\2 (encode-palette values) :count 1)))
-             (setf legacy (concatenate 'string "(:version 3 :settings-icon \"gear\" "
-                                       (subseq legacy (length "(:version 2 "))))
-             (assert (= 22 (hash-table-count (parse-palette-override legacy))))))
-
-         (let ((catalog (merge-pathnames "long.tsv" root)))
+           (assert (and (search ":version 2" (uiop:read-file-string
+                                               (data-path "nes-deck/state/dashboard-palette.sexp")))
+                        (string= "#123ABC" (third (first (current-palette))))))
+           (assert (= 22 (hash-table-count
+                          (parse-palette-override
+                           (concatenate 'string "(:version 3 :settings-icon \"gear\" "
+                                        (subseq (encode-palette values) (length "(:version 2 "))))))))
+         (let ((catalog (path "long.tsv")))
            (atomic-text catalog (format nil "#~A~%" (make-string 4094 :initial-element #\x)))
            (assert (null (parse-catalog catalog)))
            (atomic-text catalog (format nil "#~A~%" (make-string 4095 :initial-element #\x)))
-           (expect-request-error (lambda () (parse-catalog catalog)) "token too long"))
+           (expect-request-error "token too long" #'parse-catalog catalog))
+         (let ((raw (file "raw.ch8" #(1 2 3 4))))
+           (add-ok "Raw Game" "RAW.CH8" raw "upload-chip8-raw-game")
+           (expect-request-error "already cataloged" #'add-rom "chip8" "Raw Game" "raw.ch8" raw))
+         (add-ok "Zip Game" "one.zip" (make-zip (path "one.zip") '(("game.ch8" #(9 8 7))))
+                 "upload-chip8-zip-game")
+         (dolist (case '(("many.zip" (("one.ch8" #(1)) ("two.ch8" #(2))))
+                         ("duplicate.zip" (("game.ch8" #(1)) ("game.ch8" #(2))))))
+           (destructuring-bind (name entries) case
+             (expect-request-error "exactly one ROM" #'decode-upload "chip8" name
+                                   (make-zip (path name) entries))))
+         (let* ((archive (make-zip (path "bad-crc.zip") '(("game.ch8" #(1 2 3)))))
+                (bytes (read-bytes archive 10485760))
+                (central (search #(80 75 1 2) bytes)))
+           (assert central)
+           (setf (aref bytes (+ central 16)) (logxor #xff (aref bytes (+ central 16))))
+           (write-bytes archive bytes)
+           (expect-request-error "read safely" #'decode-upload "chip8" "bad-crc.zip" archive))
 
-         (let ((raw (merge-pathnames "raw.ch8" root)))
-           (write-bytes raw #(1 2 3 4))
-           (multiple-value-bind (entry restart-error)
-               (add-rom "chip8" "Raw Game" "RAW.CH8" raw)
-             (assert (null restart-error))
-             (assert (string= "upload-chip8-raw-game" (first entry)))
-             (assert (probe-file (fourth entry))))
-           (expect-request-error
-            (lambda () (add-rom "chip8" "Raw Game" "raw.ch8" raw))
-            "already cataloged"))
-
-         (let ((archive (merge-pathnames "one.zip" root)))
-           (make-zip archive '(("game.ch8" #(9 8 7))))
-           (multiple-value-bind (entry restart-error)
-               (add-rom "chip8" "Zip Game" "one.zip" archive)
-             (assert (null restart-error))
-             (assert (string= "Zip Game" (second entry)))))
-
-         (let ((archive (merge-pathnames "many.zip" root)))
-           (make-zip archive '(("one.ch8" #(1)) ("two.ch8" #(2))))
-           (expect-request-error
-            (lambda () (decode-upload "chip8" "many.zip" archive))
-            "exactly one ROM"))
-
-         (let ((archive (merge-pathnames "duplicate.zip" root)))
-           (make-zip archive '(("game.ch8" #(1)) ("game.ch8" #(2))))
-           (expect-request-error
-            (lambda () (decode-upload "chip8" "duplicate.zip" archive))
-            "exactly one ROM"))
-
-         (let ((archive (merge-pathnames "bad-crc.zip" root)))
-           (make-zip archive '(("game.ch8" #(1 2 3))))
-           (let* ((bytes (read-bytes archive 10485760))
-                  (central (search #(80 75 1 2) bytes)))
-             (assert central)
-             (setf (aref bytes (+ central 16))
-                   (logxor #xff (aref bytes (+ central 16))))
-             (write-bytes archive bytes))
-           (expect-request-error
-            (lambda () (decode-upload "chip8" "bad-crc.zip" archive))
-            "read safely"))
-
-         (let ((left (merge-pathnames "left.ch8" root))
-               (right (merge-pathnames "right.ch8" root)))
-           (write-bytes left #(3))
-           (write-bytes right #(4))
+         (let ((left (file "left.ch8" #(3))) (right (file "right.ch8" #(4))))
            (mapc #'bordeaux-threads:join-thread
                  (list (bordeaux-threads:make-thread
                         (lambda () (add-rom "chip8" "Left Game" "left.ch8" left)))
                        (bordeaux-threads:make-thread
                         (lambda () (add-rom "chip8" "Right Game" "right.ch8" right))))))
-
          (let ((entries (parse-catalog (data-path "nes-deck/uploads/games.tsv"))))
-           (assert (= 4 (length entries)))
            (assert (equal '("Left Game" "Raw Game" "Right Game" "Zip Game")
                           (mapcar #'second entries))))
          (format t "uploader-lisp-test: OK~%"))

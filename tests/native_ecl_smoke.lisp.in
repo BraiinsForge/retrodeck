@@ -2,9 +2,30 @@
 
 (in-package #:retrodeck)
 
+(defmacro check (condition control &rest arguments)
+  `(unless ,condition
+     (error ,control ,@arguments)))
+
+(defmacro signals-p (condition &body body)
+  `(handler-case (progn ,@body nil)
+     (,condition () t)))
+
+(defun check-native-state-file (path expected control)
+  (multiple-value-bind (value present-p) (read-native-state-file path)
+    (check (if expected
+               (and present-p (string= value expected))
+               (not (or value present-p)))
+           control)))
+
+(defun terminal-fixture-plan (&optional
+                              (executable "@terminal_fixture@")
+                              (arguments '("shell")))
+  (list :executable executable :arguments arguments
+        :environment '(("RETRO_DECK_KEYMAP" . "cz")) :label "terminal"
+        :touch-supervision t :mirror-console t))
+
 (defun main ()
-  (unless (= (retrodeck.native:abi-version) 19)
-    (error "Native ABI mismatch"))
+  (check (= (retrodeck.native:abi-version) 19) "Native ABI mismatch")
   (unless (zerop (retrodeck.native:wayland-open-widget-at
                   (coerce "retrodeck-no-wayland-smoke" 'base-string)))
     (error "Relative Wayland display unexpectedly opened"))
@@ -24,12 +45,9 @@
                   :auto-presentation t :wayland-display "")))
     (when (dashboard-runtime-wayland-requested-p runtime)
       (error "Explicit empty Wayland display requested Wayland")))
-  (unless (handler-case
-              (progn
-                (make-dashboard-runtime :wayland nil :auto-presentation t)
-                nil)
-            (error () t))
-    (error "Explicit presentation conflicted silently with automatic mode"))
+  (check (signals-p error
+           (make-dashboard-runtime :wayland nil :auto-presentation t))
+         "Explicit presentation conflicted silently with automatic mode")
   (multiple-value-bind
         (state runtime palette palette-loaded-p credits-loaded-p)
       (load-dashboard-candidate-session
@@ -70,10 +88,9 @@
                  (string= (getf (first games) :title) "?lu?")
                  (string= (getf (first games) :rom) "/missing/upload.gb"))
       (error "Combined UTF-8 dashboard manifest diverged")))
-  (unless (handler-case
-              (progn (load-dashboard-games "@invalid_games@") nil)
-            (error () t))
-    (error "Invalid dashboard manifest UTF-8 was accepted"))
+  (check (signals-p error
+           (load-dashboard-games "@invalid_games@"))
+         "Invalid dashboard manifest UTF-8 was accepted")
   (let ((*error-output* (make-broadcast-stream)))
     (multiple-value-bind (games palette loaded-p)
         (load-dashboard-bootstrap "@games@" "/no/such/retrodeck-palette.tsv")
@@ -155,14 +172,12 @@
     (error "Canvas glyph callback accepted a zero scale"))
   (unless (= (retrodeck.native:canvas-fill-rect -4 8 12 16 #xfe6c27) 1)
     (error "Canvas rectangle callback did not accept five arguments"))
-  (unless (handler-case
-              (progn (fill-canvas-rect #x80000000 0 1 1 0) nil)
-            (type-error () t))
-    (error "Canvas x coordinate exceeded the native signed range"))
-  (unless (handler-case
-              (progn (fill-canvas-rect 0 0 #x100000000 1 0) nil)
-            (type-error () t))
-    (error "Canvas width exceeded the native unsigned range"))
+  (check (signals-p type-error
+           (fill-canvas-rect #x80000000 0 1 1 0))
+         "Canvas x coordinate exceeded the native signed range")
+  (check (signals-p type-error
+           (fill-canvas-rect 0 0 #x100000000 1 0))
+         "Canvas width exceeded the native unsigned range")
   (let ((credits (read-bounded-regular-file "@credits@" 1 32768)))
       (unless (and credits (search "FCEUmm" credits))
         (error "Bounded regular-file callback did not read credits")))
@@ -187,10 +202,8 @@
           (load-dashboard-brightness device-path maximum-path state-path)
         (unless (and (= percent 60) (= maximum 20))
           (error "Missing brightness state did not adopt hardware")))
-      (multiple-value-bind (value present-p)
-          (read-native-state-file state-path)
-        (unless (and present-p (string= value (format nil "60~%")))
-          (error "Missing brightness state did not become canonical")))
+      (check-native-state-file state-path (format nil "60~%")
+                               "Missing brightness state did not become canonical")
       (unless (write-native-state-file state-path (format nil "70~%"))
         (error "Existing brightness fixture write failed"))
       (multiple-value-bind (percent maximum)
@@ -201,13 +214,10 @@
           (error "Existing brightness state did not apply to hardware")))
       (unless (write-native-state-file state-path (format nil "05~%"))
         (error "Malformed brightness fixture write failed"))
-      (unless (handler-case
-                  (progn
-                    (load-dashboard-brightness
-                     device-path maximum-path state-path)
-                    nil)
-                (error () t))
-        (error "Malformed brightness state was accepted"))
+      (check (signals-p error
+               (load-dashboard-brightness
+                device-path maximum-path state-path))
+             "Malformed brightness state was accepted")
       (multiple-value-bind (value present-p)
           (read-native-state-file state-path)
         (unless (and present-p (string= value (format nil "05~%"))
@@ -232,35 +242,23 @@
                                 (format nil "14~%")))
             (error "Brightness settings effect wrote incorrect bytes")))))
     (let ((path "@state_file@"))
-      (multiple-value-bind (value present-p) (read-native-state-file path)
-        (when (or value present-p)
-          (error "Missing state file crossed the native boundary incorrectly")))
+      (check-native-state-file path nil
+                               "Missing state file crossed the native boundary incorrectly")
       (unless (= (load-dashboard-volume-state path 37) 37)
         (error "Missing volume state did not initialize from Lisp policy"))
-      (multiple-value-bind (value present-p) (read-native-state-file path)
-        (unless (and present-p (string= value (format nil "37~%")))
-          (error "Missing volume state did not become canonical")))
-      (unless (write-native-state-file path "37")
-        (error "Exact state write failed"))
-      (multiple-value-bind (value present-p) (read-native-state-file path)
-        (unless (and present-p (string= value "37"))
-          (error "Exact state read appended bytes")))
-      (unless (write-native-state-file path (format nil "on~%"))
-        (error "Legacy on fixture write failed"))
-      (unless (= (load-dashboard-volume-state path 42) 42)
-        (error "Legacy on volume did not migrate"))
-      (unless (write-native-state-file path (format nil "off~%"))
-        (error "Legacy off fixture write failed"))
-      (unless (= (load-dashboard-volume-state path 42) 0)
-        (error "Legacy off volume did not migrate"))
+      (check-native-state-file path (format nil "37~%")
+                               "Missing volume state did not become canonical")
+      (check (write-native-state-file path "37") "Exact state write failed")
+      (check-native-state-file path "37" "Exact state read appended bytes")
+      (check (write-native-state-file path (format nil "on~%")) "Legacy on fixture write failed")
+      (check (= (load-dashboard-volume-state path 42) 42) "Legacy on volume did not migrate")
+      (check (write-native-state-file path (format nil "off~%")) "Legacy off fixture write failed")
+      (check (= (load-dashboard-volume-state path 42) 0) "Legacy off volume did not migrate")
       (unless (= (parse-dashboard-volume-state (format nil "100~%")) 100)
         (error "Canonical volume parser failed"))
-      (unless (handler-case
-                  (progn
-                    (parse-dashboard-volume-state (format nil "042~%"))
-                    nil)
-                (error () t))
-        (error "Noncanonical volume parser input succeeded"))
+      (check (signals-p error
+               (parse-dashboard-volume-state (format nil "042~%")))
+             "Noncanonical volume parser input succeeded")
       (let* ((state (dashboard-loop-initial-state nil :volume 42))
              (runtime (make-dashboard-runtime :volume-state path))
              (plan (settings-activation-plan
@@ -287,29 +285,22 @@
                          '(:child-complete :volume 0))
             (error "Child legacy volume lost the startup default")))))
     (let ((path (concatenate 'string "@state_file@" ".keymap")))
-      (multiple-value-bind (value present-p) (read-native-state-file path)
-        (when (or value present-p)
-          (error "Missing keymap state crossed the native boundary incorrectly")))
+      (check-native-state-file path nil
+                               "Missing keymap state crossed the native boundary incorrectly")
       (unless (string= (load-dashboard-keymap-state path) "us")
         (error "Missing keymap state did not default in Lisp policy"))
-      (multiple-value-bind (value present-p) (read-native-state-file path)
-        (unless (and present-p (string= value (format nil "us~%")))
-          (error "Missing keymap state did not become canonical")))
-      (unless (write-native-state-file path (format nil "cz~%"))
-        (error "Czech keymap fixture write failed"))
-      (unless (string= (load-dashboard-keymap-state path) "cz")
-        (error "Czech keymap state did not load"))
+      (check-native-state-file path (format nil "us~%")
+                               "Missing keymap state did not become canonical")
+      (check (write-native-state-file path (format nil "cz~%")) "Czech keymap fixture write failed")
+      (check (string= (load-dashboard-keymap-state path) "cz") "Czech keymap state did not load")
       (unless (write-native-state-file path (format nil "de~%"))
         (error "Malformed keymap fixture write failed"))
-      (unless (handler-case
-                  (progn (load-dashboard-keymap-state path) nil)
-                (error () t))
-        (error "Malformed keymap state was accepted"))
-      (multiple-value-bind (value present-p) (read-native-state-file path)
-        (unless (and present-p (string= value (format nil "de~%")))
-          (error "Malformed keymap state was not preserved")))
-      (unless (write-native-state-file path (format nil "us~%"))
-        (error "US keymap fixture write failed"))
+      (check (signals-p error
+               (load-dashboard-keymap-state path))
+             "Malformed keymap state was accepted")
+      (check-native-state-file path (format nil "de~%")
+                               "Malformed keymap state was not preserved")
+      (check (write-native-state-file path (format nil "us~%")) "US keymap fixture write failed")
       (let* ((state (dashboard-loop-initial-state nil :keymap "us"))
              (runtime (make-dashboard-runtime :keymap-state path))
              (plan (settings-activation-plan
@@ -319,9 +310,8 @@
                         runtime (list :settings-action plan) state)
                        '(:settings-result :succeeded-p t))
           (error "Keymap settings effect did not save through Lisp"))
-        (multiple-value-bind (value present-p) (read-native-state-file path)
-          (unless (and present-p (string= value (format nil "cz~%")))
-            (error "Keymap settings effect did not write canonical bytes")))))
+        (check-native-state-file path (format nil "cz~%")
+                                 "Keymap settings effect did not write canonical bytes")))
     (let ((network (read-native-network-status "@wifi_status@")))
       (unless (and (every #'stringp
                           (list (getf network :ssid)
@@ -331,15 +321,12 @@
                    (string= (getf network :selector) "CONNECTED"))
         (error "Network status crossed the native boundary incorrectly")))
     (let ((mask (load-text-mask "HHHHHHHHHH" 4)))
-      (unless mask
-        (error "Projected text mask callback did not load text"))
+      (check mask "Projected text mask callback did not load text")
       (unless (configure-text-projection
                1000 1 20 4044 420 4000 56 72 104 210 480 #xffffaf)
         (error "Projected text callback rejected reference geometry"))
-      (unless (draw-projected-text mask 0)
-        (error "Projected text callback rejected its mask")))
-    (unless (clear-text-mask-cache)
-      (error "Projected text mask cache did not clear"))
+      (check (draw-projected-text mask 0) "Projected text callback rejected its mask"))
+    (check (clear-text-mask-cache) "Projected text mask cache did not clear")
     (unless (zerop (retrodeck.native:canvas-draw-projected-text 1 0))
       (error "Cleared projected text mask remained available"))
     (let* ((credits (load-project-credits "@credits@"))
@@ -356,8 +343,7 @@
                           crawl reduced-motion elapsed-ms)
                          '(:close (1212 12 56 56)))
             (error "Credits layout crossed the native boundary incorrectly"))
-          (unless (= (canvas-rgb565-hash) expected)
-            (error "Credits frame mismatch at ~D ms" elapsed-ms))))
+          (check (= (canvas-rgb565-hash) expected) "Credits frame mismatch at ~D ms" elapsed-ms)))
       (clear-credits-text-mask-cache))
     (let ((network '(:ssid "net1" :wlan-ipv4 "10.249.110.248"
                      :wireguard-ipv4 "10.0.0.10" :selector "CONNECTED")))
@@ -387,8 +373,7 @@
                            :terminal (792 208 112 104)
                            :keymap (1036 208 112 104)))
             (error "Settings layout crossed the native boundary incorrectly"))
-          (unless (= (canvas-rgb565-hash) expected)
-            (error "Settings frame mismatch for ~S" selected)))))
+          (check (= (canvas-rgb565-hash) expected) "Settings frame mismatch for ~S" selected))))
     (dolist (fixture
              '(("" "" :ssid nil nil 30 #\q #\- #xd6be2f43c4faf0e6)
                ("" "" :ssid t nil 30 #\Q #\- #x7682dc83b0062730)
@@ -426,12 +411,7 @@
             (error "Wi-Fi frame mismatch for ~S/~S"
                    field (if symbols :symbols
                              (if uppercase :uppercase :lowercase)))))))
-    (let ((plan '(:executable "@terminal_fixture@"
-                  :arguments ("shell")
-                  :environment (("RETRO_DECK_KEYMAP" . "cz"))
-                  :label "terminal"
-                  :touch-supervision t
-                  :mirror-console t)))
+    (let ((plan (terminal-fixture-plan)))
       (unless (string= (dashboard-terminal-starting-status plan)
                        "STARTING TERMINAL")
         (error "Terminal starting status changed"))
@@ -449,23 +429,13 @@
                        ("signal" :signal 15
                          "TERMINAL STOPPED (SIGNAL 15)")))
       (destructuring-bind (mode field expected-value expected-status) fixture
-        (let* ((plan (list :executable "@terminal_fixture@"
-                           :arguments (list mode)
-                           :environment '(("RETRO_DECK_KEYMAP" . "cz"))
-                           :label "terminal"
-                           :touch-supervision t
-                           :mirror-console t))
+        (let* ((plan (terminal-fixture-plan "@terminal_fixture@" (list mode)))
                (result (run-dashboard-terminal plan)))
           (unless (and (eql (getf result field) expected-value)
                        (string= (dashboard-terminal-result-status plan result)
                                 expected-status))
             (error "Terminal ~A result changed: ~S" mode result)))))
-    (let* ((plan '(:executable "/no/such/retrodeck-terminal"
-                   :arguments ("shell")
-                   :environment (("RETRO_DECK_KEYMAP" . "cz"))
-                   :label "terminal"
-                   :touch-supervision t
-                   :mirror-console t))
+    (let* ((plan (terminal-fixture-plan "/no/such/retrodeck-terminal"))
            (result (run-dashboard-terminal plan)))
       (unless (and (not (getf result :started))
                    (stringp (getf result :error))
@@ -548,23 +518,15 @@
        :reboot
        '(:executable "@reboot_fixture@" :arguments nil :environment nil
          :label "reboot" :touch-supervision t :mirror-console nil))
-      (exercise-launch
-       :terminal
-       '(:executable "@terminal_fixture@" :arguments ("shell")
-         :environment (("RETRO_DECK_KEYMAP" . "cz"))
-         :label "terminal" :touch-supervision t :mirror-console t)))
+      (exercise-launch :terminal (terminal-fixture-plan)))
     (let ((icon (load-png-raster "@settings_icon@" 23 23)))
-      (unless icon
-        (error "PNG raster callback did not load the settings asset"))
+      (check icon "PNG raster callback did not load the settings asset")
       (unless (draw-canvas-raster icon 3 5 50 50)
         (error "Canvas raster callback did not accept five arguments")))
     (let ((cover (load-cover-raster "@settings_icon@" #x5f87ff)))
-      (unless cover
-        (error "Cover raster callback did not load a PNG"))
-      (unless (draw-canvas-raster cover 60 5 50 50)
-        (error "Cover raster did not draw")))
-    (unless (clear-dashboard-raster-cache)
-      (error "Native raster cache did not clear"))
+      (check cover "Cover raster callback did not load a PNG")
+      (check (draw-canvas-raster cover 60 5 50 50) "Cover raster did not draw"))
+    (check (clear-dashboard-raster-cache) "Native raster cache did not clear")
     (when (load-png-raster "/no/such/retrodeck-raster.png" 23 23)
       (error "Missing PNG raster unexpectedly loaded"))
     (retrodeck.native:evdev-controls-close)
@@ -630,14 +592,10 @@
   (retrodeck.native:wayland-close)
   (unless (= (retrodeck.native:play-tones 659 25 0 0 0) 0)
     (error "Invalid audio request crossed the native boundary"))
-  (unless (play-menu-sound :confirm 42)
-    (error "Native audio worker did not start"))
-  (unless (menu-sound-blocks-input-p :controller)
-    (error "Controller quarantine was not active"))
-  (when (menu-sound-blocks-input-p :touch)
-    (error "Menu sound blocked touch"))
+  (check (play-menu-sound :confirm 42) "Native audio worker did not start")
+  (check (menu-sound-blocks-input-p :controller) "Controller quarantine was not active")
+  (check (not (menu-sound-blocks-input-p :touch)) "Menu sound blocked touch")
   (stop-menu-sound)
-  (unless (= (retrodeck.native:audio-active-p) 0)
-    (error "Native audio worker did not stop"))
+  (check (= (retrodeck.native:audio-active-p) 0) "Native audio worker did not stop")
   (finish-menu-sound)
   0)
