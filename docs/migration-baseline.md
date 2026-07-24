@@ -1181,6 +1181,29 @@ production lines, including the existing catalog compiler, and 18,035 lines with
 focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
 compressed or generated first-party source.
 
+## Uploader policy checkpoint
+
+Startup-loaded Lisp now exposes a complete non-authoritative snapshot of the Go
+uploader's editable policy. It records installed paths, HTTP routes, request
+forms, host and origin checks, response headers, authentication bounds and
+session behavior, ROM title and slug rules, raw and single-ROM ZIP intake,
+per-system format validation, catalog parsing and persistence outcomes, palette
+fallback and save ordering, systems, colors, labels, and dashboard restart
+contracts. Focused tests compare the snapshot with exact Go source fragments so
+a later Go change must update the Lisp inventory deliberately.
+
+The Go uploader remains authoritative and continues to serve every request.
+`RETRODECK:MAIN`, the dashboard, and the launcher are unchanged. Named and fresh
+SBCL, the complete host suite including Go tests, targeted ARM/ECL smoke, and an
+independent final review passed. Commits `9ada14a` and `7d235e4` were pushed
+immediately. Device deployment remains pending recovery of the Deck after its
+BMC compositor initialization.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 11,505
+production lines, including the existing catalog compiler, and 18,432 lines with
+focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
+compressed or generated first-party source.
+
 ## Validation baseline
 
 Updated on 2026-07-24:

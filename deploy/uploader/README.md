@@ -3,8 +3,9 @@
 The native `rom-uploader` service accepts owner-supplied ROMs at the Deck's
 active Wi-Fi or WireGuard IPv4 address on port 8080. Deployment writes
 `0.0.0.0:8080` to `/mnt/data/nes-deck/uploader/address.conf`, so the listener
-accepts connections on every IPv4 interface. Requests must use an IPv4 literal
-host on port 8080, and form origins must match that exact address.
+accepts connections on every IPv4 interface. Requests must use an IPv4 or
+IPv4-mapped literal host on port 8080, and form origins must match that exact
+address.
 
 The service uses a PBKDF2-HMAC-SHA256 password record, bounded login attempts,
 eight-hour same-site sessions, CSRF tokens, strict origin and host checks, and
@@ -20,6 +21,12 @@ S-expression to `/mnt/data/nes-deck/state/dashboard-palette.sexp` and restarts
 the dashboard. Existing version-3 overrides remain readable: their colors are
 preserved and their retired settings-icon choice is ignored. Built-in defaults
 remain available when the optional override is malformed.
+
+The Go service remains authoritative. Startup-loaded `lisp/policy.lisp` now
+exposes a non-authoritative copy of its editable HTTP, authentication, ROM,
+catalog, palette, persistence, system, color, label, and restart policy. Focused
+tests pin that snapshot to the current Go sources. This does not change the
+server, dashboard, launcher, or `RETRODECK:MAIN`.
 
 `ops/configure-deck.sh` asks for the uploader password during setup and stores
 it in the local, Git-ignored `deck.conf` with mode `0600`. Each deployment
