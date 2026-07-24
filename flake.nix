@@ -961,6 +961,10 @@
           printf '12\n' > state-file.control
           printf '12\n' > state-file.brightness
           printf '20\n' > state-file.brightness-max
+          printf '%b' 'id\ttitle\tsystem\trom\t#RRGGBB\r\nupload-one\t\0305\0275lu\0305\0245\tgb\t/missing/upload.gb\t#87AFAF\r\n' \
+            > combined-games.tsv
+          printf '%b' 'bad-utf8\t\0300\0257\tnes\t/missing/bad.nes\t#D78787\n' \
+            > invalid-games.tsv
           substitute ${./tests/native_ecl_smoke.lisp.in} smoke.lisp \
             --subst-var-by startup "$PWD/startup.lisp" \
             --subst-var-by state_file "$PWD/state-file" \
@@ -974,6 +978,10 @@
             --subst-var-by helper_signal_fixture "$PWD/helper-signal-fixture" \
             --subst-var-by helper_reject_fixture "$PWD/helper-reject-fixture" \
             --subst-var-by helper_capture "$PWD/helper-capture" \
+            --subst-var-by games ${./deploy/menu/games.tsv} \
+            --subst-var-by palette ${./deploy/menu/palette.tsv} \
+            --subst-var-by combined_games "$PWD/combined-games.tsv" \
+            --subst-var-by invalid_games "$PWD/invalid-games.tsv" \
             --subst-var-by credits ${./deploy/menu/credits.tsv}
           RETRO_DECK_VOLUME_PERCENT=0 \
             ECLDIR=${eclArm}/lib/ecl/ \
