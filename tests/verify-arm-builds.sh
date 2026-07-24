@@ -88,8 +88,8 @@ echo "ecl-arm-network-smoke: OK"
 verify_package uploader-lisp-libraries
 build_flake .#checks.x86_64-linux.uploader-lisp-policy >/dev/null
 echo "uploader-lisp-policy: OK"
-build_flake .#checks.x86_64-linux.uploader-hunchentoot-smoke >/dev/null
-echo "uploader-hunchentoot-smoke: OK"
+build_flake .#checks.x86_64-linux.uploader-lisp-http-smoke >/dev/null
+echo "uploader-lisp-http-smoke: OK"
 
 runtime_licenses=$(build_flake .#runtime-licenses)
 verify_closure_free runtime-licenses "$runtime_licenses"

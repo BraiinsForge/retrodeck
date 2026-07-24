@@ -43,9 +43,15 @@
 
          (assert (valid-title-p "Café Racer"))
          (assert (not (valid-title-p " padded ")))
+         (assert (not (valid-title-p (format nil "~Ctrimmed" (code-char 160)))))
          (assert (string= "hello-world" (slugify "Hello, World!")))
          (assert (string= "#12ABEF" (normalize-rgb "#12abef")))
          (assert (null (normalize-rgb "12ABEF")))
+         (clrhash *attempts*)
+         (dotimes (attempt 5) (declare (ignore attempt)) (record-login "fixture" nil))
+         (assert (= 300 (blocked-seconds "fixture")))
+         (record-login "fixture" t)
+         (assert (null (blocked-seconds "fixture")))
 
          (validate-rom "nes" #(78 69 83 26 0 0 0 0 0 0 0 0 0 0 0 0))
          (validate-rom "zx" #(2 0 0 0))
@@ -80,6 +86,12 @@
              (setf legacy (concatenate 'string "(:version 3 :settings-icon \"gear\" "
                                        (subseq legacy (length "(:version 2 "))))
              (assert (= 22 (hash-table-count (parse-palette-override legacy))))))
+
+         (let ((catalog (merge-pathnames "long.tsv" root)))
+           (atomic-text catalog (format nil "#~A~%" (make-string 4094 :initial-element #\x)))
+           (assert (null (parse-catalog catalog)))
+           (atomic-text catalog (format nil "#~A~%" (make-string 4095 :initial-element #\x)))
+           (expect-request-error (lambda () (parse-catalog catalog)) "token too long"))
 
          (let ((raw (merge-pathnames "raw.ch8" root)))
            (write-bytes raw #(1 2 3 4))

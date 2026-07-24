@@ -1093,107 +1093,27 @@
           touch $out
         '';
 
-        uploader-hunchentoot-smoke =
-          pkgs.runCommand "uploader-hunchentoot-smoke" { } ''
-            cat > smoke.lisp <<'EOF'
-            (pushnew :hunchentoot-no-ssl *features*)
-            (require 'asdf)
-            (asdf:operate 'asdf:load-source-op :hunchentoot)
-            (asdf:operate 'asdf:load-source-op :zip)
-            (zip:with-zipfile (archive "one.zip")
-              (let ((entry (zip:get-zipfile-entry "rom.ch8" archive)))
-                (unless (and (= 1 (hash-table-count (zip:zipfile-entries archive)))
-                             (equalp #(1 2 3 4)
-                                     (zip:zipfile-entry-contents entry)))
-                  (error "ZIP source probe diverged"))))
-
-            ;; ECL bytecode lacks USOCKET's FDSET-ALLOC wait-list helper.
-            ;; The uploader deliberately accepts on the blocking listener instead.
-            (defclass uploader-smoke-acceptor (hunchentoot:easy-acceptor) ())
-
-            (defmethod hunchentoot:accept-connections
-                ((acceptor uploader-smoke-acceptor))
-              (usocket:with-server-socket
-                  (listener (hunchentoot::acceptor-listen-socket acceptor))
-                (loop
-                  (bordeaux-threads:with-lock-held
-                      ((hunchentoot::acceptor-shutdown-lock acceptor))
-                    (when (hunchentoot::acceptor-shutdown-p acceptor)
-                      (return)))
-                  (let ((client
-                          (handler-case (usocket:socket-accept listener)
-                            (usocket:connection-aborted-error () nil))))
-                    (when client
-                      (hunchentoot::set-timeouts
-                       client (hunchentoot:acceptor-read-timeout acceptor)
-                       (hunchentoot:acceptor-write-timeout acceptor))
-                      (hunchentoot:handle-incoming-connection
-                       (hunchentoot::acceptor-taskmaster acceptor) client))))))
-
-            (hunchentoot:define-easy-handler (health :uri "/health") ()
-              (setf (hunchentoot:content-type*) "text/plain")
-              "OK")
-
-            (let ((acceptor
-                    (make-instance 'uploader-smoke-acceptor
-                                   :address "127.0.0.1" :port 0)))
-              (unwind-protect
-                  (progn
-                    (hunchentoot:start acceptor)
-                    (format t "hunchentoot-smoke: READY ~D~%"
-                            (hunchentoot:acceptor-port acceptor))
-                    (finish-output)
-                    (loop until (probe-file "stop") do (sleep 0.05)))
-                (hunchentoot:stop acceptor)))
-            (format t "hunchentoot-smoke: STOPPED~%")
-            (ext:quit 0)
-            EOF
-
-            printf '\001\002\003\004' > rom.ch8
-            ${pkgs.zip}/bin/zip -q one.zip rom.ch8
-            mkdir home
-            HOME=$PWD/home \
-              XDG_CACHE_HOME=$PWD/home/cache \
-              CL_SOURCE_REGISTRY=${uploaderLispLibraries}/share/common-lisp/source//: \
-              ECLDIR=${eclArmNetwork}/lib/ecl/ \
-              ${pkgs.qemu-user}/bin/qemu-arm \
-              ${eclArmNetwork}/bin/ecl.bin -norc -load smoke.lisp \
-              > server.log 2>&1 &
-            server=$!
-            cleanup() {
-              kill "$server" 2>/dev/null || true
-              wait "$server" 2>/dev/null || true
-            }
-            trap cleanup EXIT
-
-            port=
-            for attempt in $(seq 1 240); do
-              port=$(sed -n \
-                's/^hunchentoot-smoke: READY \([0-9][0-9]*\)$/\1/p' \
-                server.log | tail -n 1)
-              [ -n "$port" ] && break
-              kill -0 "$server" 2>/dev/null || break
-              sleep 0.25
-            done
-            if [ -z "$port" ]; then
-              cat server.log
-              exit 1
-            fi
-
-            response=$(${pkgs.curl}/bin/curl --fail --silent --show-error \
-              --max-time 5 "http://127.0.0.1:$port/health")
-            [ "$response" = OK ] || {
-              printf 'unexpected response: %s\n' "$response" >&2
-              exit 1
-            }
-
-            touch stop
-            timeout 20 tail --pid="$server" -f /dev/null
-            wait "$server"
-            trap - EXIT
-            grep -q '^hunchentoot-smoke: STOPPED$' server.log
-            touch $out
-          '';
+        uploader-lisp-http-smoke = pkgs.runCommand "uploader-lisp-http-smoke" {
+          nativeBuildInputs = [ pkgs.bash pkgs.curl pkgs.sbcl pkgs.zip ];
+        } ''
+          export CL_SOURCE_REGISTRY=${uploaderLispLibraries}/share/common-lisp/source//:
+          export UPLOADER_SOURCE=${./lisp/uploader.lisp}
+          export UPLOADER_SERVER=${./tests/uploader_http_smoke.lisp}
+          export UPLOADER_ASSET_ROOT=${./lisp}
+          export UPLOADER_PALETTE=${./deploy/menu/palette.tsv}
+          export UPLOADER_SHELL=${pkgs.bash}/bin/bash
+          { printf '\n'; sed -n '87,274p' ${./uploader/ui.go}; } | \
+            cmp - ${./lisp/uploader-paper.css}
+          { printf '\n'; sed -n '278,298p' ${./uploader/ui.go}; } | \
+            cmp - ${./lisp/uploader-palette.js}
+          ${pkgs.bash}/bin/bash ${./tests/uploader-http-smoke.sh} host \
+            ${pkgs.sbcl}/bin/sbcl --noinform --disable-debugger --script
+          ECLDIR=${eclArmNetwork}/lib/ecl/ \
+            ${pkgs.bash}/bin/bash ${./tests/uploader-http-smoke.sh} arm-ecl \
+            ${pkgs.qemu-user}/bin/qemu-arm \
+            ${eclArmNetwork}/bin/ecl.bin -norc -load
+          touch $out
+        '';
       };
 
       devShells.${system}.default = pkgs.mkShell {

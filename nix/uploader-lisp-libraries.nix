@@ -45,6 +45,13 @@ pkgs.runCommand "retrodeck-uploader-lisp-libraries" {
   (asdf:defsystem #:sb-bsd-sockets)
   EOF
 
+  # RFC2388 otherwise rewrites uploaded binary octets through ECL's UTF-8 default.
+  substituteInPlace "$source/rfc2388/rfc2388.lisp" \
+    --replace-fail '#+(or :sbcl :lispworks :allegro :openmcl :clisp)' \
+                   '#+(or :sbcl :lispworks :allegro :openmcl :clisp :ecl)' \
+    --replace-fail '#+sbcl :latin-1' \
+                   '#+sbcl :latin-1 #+ecl :latin-1'
+
   # ECL accepts numeric protocols without consulting /etc/protocols.
   substituteInPlace "$source/usocket/backend/sbcl.lisp" \
     --replace-fail '#+(or ecl mkcl clasp) :tcp' \
