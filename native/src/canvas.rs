@@ -276,16 +276,21 @@ mod tests {
         &data[offset..offset + 4]
     }
 
+    fn right(offset: usize) -> usize {
+        WIDTH as usize - offset
+    }
+
+    fn bottom(offset: usize) -> usize {
+        HEIGHT as usize - offset
+    }
+
     #[test]
     fn clears_to_opaque_policy_colors() {
         clear(0xfe6c27);
         with_pixels(|data| {
             assert_eq!(data.len(), WIDTH as usize * HEIGHT as usize * 4);
             assert_eq!(pixel(data, 0, 0), &[0xfe, 0x6c, 0x27, 0xff]);
-            assert_eq!(
-                pixel(data, WIDTH as usize - 1, HEIGHT as usize - 1),
-                &[0xfe, 0x6c, 0x27, 0xff]
-            );
+            assert_eq!(pixel(data, right(1), bottom(1)), &[0xfe, 0x6c, 0x27, 0xff]);
         });
     }
 
@@ -297,14 +302,8 @@ mod tests {
         with_pixels(|data| {
             assert_eq!(pixel(data, 0, 0), &[0xff, 0xff, 0xff, 0xff]);
             assert_eq!(pixel(data, 1, 0), &[0x00, 0x00, 0x00, 0xff]);
-            assert_eq!(
-                pixel(data, WIDTH as usize - 1, HEIGHT as usize - 1),
-                &[0xec, 0xb6, 0xe7, 0xff]
-            );
-            assert_eq!(
-                pixel(data, WIDTH as usize - 2, HEIGHT as usize - 1),
-                &[0x00, 0x00, 0x00, 0xff]
-            );
+            assert_eq!(pixel(data, right(1), bottom(1)), &[0xec, 0xb6, 0xe7, 0xff]);
+            assert_eq!(pixel(data, right(2), bottom(1)), &[0x00, 0x00, 0x00, 0xff]);
         });
     }
 
@@ -340,24 +339,15 @@ mod tests {
         with_pixels(|data| {
             assert_eq!(pixel(data, 6, 0), &[0xfe, 0x6c, 0x27, 0xff]);
             assert_eq!(pixel(data, 5, 0), &[0x00, 0x00, 0x00, 0xff]);
-            assert_eq!(
-                pixel(data, WIDTH as usize - 2, HEIGHT as usize - 4),
-                &[0xec, 0xb6, 0xe7, 0xff]
-            );
-            assert_eq!(
-                pixel(data, WIDTH as usize - 5, HEIGHT as usize - 4),
-                &[0x00, 0x00, 0x00, 0xff]
-            );
+            assert_eq!(pixel(data, right(2), bottom(4)), &[0xec, 0xb6, 0xe7, 0xff]);
+            assert_eq!(pixel(data, right(5), bottom(4)), &[0x00, 0x00, 0x00, 0xff]);
         });
 
         clear(0x000000);
         draw_glyph(0, 0, b'B', u32::MAX, 0xffffaf);
         with_pixels(|data| {
             assert_eq!(pixel(data, 0, 0), &[0xff, 0xff, 0xaf, 0xff]);
-            assert_eq!(
-                pixel(data, WIDTH as usize - 1, HEIGHT as usize - 1),
-                &[0xff, 0xff, 0xaf, 0xff]
-            );
+            assert_eq!(pixel(data, right(1), bottom(1)), &[0xff, 0xff, 0xaf, 0xff]);
         });
     }
 }

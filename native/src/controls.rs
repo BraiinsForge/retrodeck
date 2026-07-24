@@ -661,6 +661,16 @@ mod tests {
         event(EventType::SYNCHRONIZATION, code.0, 0)
     }
 
+    fn report_boundary() -> InputEvent {
+        syn(SynchronizationCode::SYN_REPORT)
+    }
+
+    macro_rules! assert_handle {
+        ($state:expr, $event:expr, $expected:expr) => {
+            assert_eq!($state.handle($event), $expected)
+        };
+    }
+
     fn axis(code: AbsoluteAxisCode, value: i32) -> InputEvent {
         event(EventType::ABSOLUTE, code.0, value)
     }
@@ -696,61 +706,49 @@ mod tests {
     #[test]
     fn keyboard_tracks_shift_and_accepts_only_arrow_repeats() {
         let mut state = KeyboardState::default();
-        assert_eq!(
-            state.handle(key(KeyCode::KEY_TAB, 1)),
+        assert_handle!(
+            state,
+            key(KeyCode::KEY_TAB, 1),
             keyboard_report(KeyCode::KEY_TAB, 0)
         );
-        assert_eq!(
-            state.handle(key(KeyCode::KEY_LEFTSHIFT, 1)),
-            ControlAction::Ignore
-        );
-        assert_eq!(
-            state.handle(key(KeyCode::KEY_TAB, 1)),
+        assert_handle!(state, key(KeyCode::KEY_LEFTSHIFT, 1), ControlAction::Ignore);
+        assert_handle!(
+            state,
+            key(KeyCode::KEY_TAB, 1),
             keyboard_report(KeyCode::KEY_TAB, KEYBOARD_SHIFT)
         );
-        assert_eq!(
-            state.handle(key(KeyCode::KEY_TAB, 2)),
-            ControlAction::Ignore
-        );
-        assert_eq!(
-            state.handle(key(KeyCode::KEY_RIGHT, 2)),
+        assert_handle!(state, key(KeyCode::KEY_TAB, 2), ControlAction::Ignore);
+        assert_handle!(
+            state,
+            key(KeyCode::KEY_RIGHT, 2),
             keyboard_report(KeyCode::KEY_RIGHT, KEYBOARD_SHIFT | KEYBOARD_REPEAT)
         );
         state.handle(key(KeyCode::KEY_RIGHTSHIFT, 1));
         state.handle(key(KeyCode::KEY_LEFTSHIFT, 0));
-        assert_eq!(
-            state.handle(key(KeyCode::KEY_ENTER, 1)),
+        assert_handle!(
+            state,
+            key(KeyCode::KEY_ENTER, 1),
             keyboard_report(KeyCode::KEY_ENTER, KEYBOARD_SHIFT)
         );
         state.handle(key(KeyCode::KEY_RIGHTSHIFT, 0));
-        assert_eq!(
-            state.handle(key(KeyCode::KEY_ENTER, 0)),
-            ControlAction::Ignore
-        );
+        assert_handle!(state, key(KeyCode::KEY_ENTER, 0), ControlAction::Ignore);
     }
 
     #[test]
     fn keyboard_drop_waits_for_report_and_resynchronizes_without_an_edge() {
         let mut state = KeyboardState::default();
-        assert_eq!(
-            state.handle(syn(SynchronizationCode::SYN_DROPPED)),
+        assert_handle!(
+            state,
+            syn(SynchronizationCode::SYN_DROPPED),
             ControlAction::Ignore
         );
-        assert_eq!(
-            state.handle(key(KeyCode::KEY_LEFTSHIFT, 1)),
-            ControlAction::Ignore
-        );
-        assert_eq!(
-            state.handle(key(KeyCode::KEY_TAB, 1)),
-            ControlAction::Ignore
-        );
-        assert_eq!(
-            state.handle(syn(SynchronizationCode::SYN_REPORT)),
-            ControlAction::Resynchronize
-        );
+        assert_handle!(state, key(KeyCode::KEY_LEFTSHIFT, 1), ControlAction::Ignore);
+        assert_handle!(state, key(KeyCode::KEY_TAB, 1), ControlAction::Ignore);
+        assert_handle!(state, report_boundary(), ControlAction::Resynchronize);
         state.resynchronize(false, true);
-        assert_eq!(
-            state.handle(key(KeyCode::KEY_TAB, 1)),
+        assert_handle!(
+            state,
+            key(KeyCode::KEY_TAB, 1),
             keyboard_report(KeyCode::KEY_TAB, KEYBOARD_SHIFT)
         );
     }
@@ -767,21 +765,20 @@ mod tests {
         let mut state = GamepadState::new(gamepad_snapshot(127, 127, 0));
         state.handle(axis(AbsoluteAxisCode::ABS_X, 255));
         state.handle(key(KeyCode::BTN_THUMB2, 1));
-        assert_eq!(
-            state.handle(syn(SynchronizationCode::SYN_REPORT)),
+        assert_handle!(
+            state,
+            report_boundary(),
             gamepad_report(
                 GAMEPAD_X_POSITIVE | (1 << (KeyCode::BTN_THUMB2.0 - KeyCode::BTN_TRIGGER.0))
             )
         );
-        assert_eq!(
-            state.handle(syn(SynchronizationCode::SYN_REPORT)),
-            ControlAction::Ignore
-        );
+        assert_handle!(state, report_boundary(), ControlAction::Ignore);
         state.handle(key(KeyCode::BTN_THUMB2, 0));
-        state.handle(syn(SynchronizationCode::SYN_REPORT));
+        state.handle(report_boundary());
         state.handle(key(KeyCode::BTN_THUMB2, 1));
-        assert_eq!(
-            state.handle(syn(SynchronizationCode::SYN_REPORT)),
+        assert_handle!(
+            state,
+            report_boundary(),
             gamepad_report(1 << (KeyCode::BTN_THUMB2.0 - KeyCode::BTN_TRIGGER.0))
         );
     }
@@ -789,16 +786,15 @@ mod tests {
     #[test]
     fn keyboard_emits_unknown_presses_but_filters_non_arrow_repeats() {
         let mut state = KeyboardState::default();
-        assert_eq!(
-            state.handle(key(KeyCode::KEY_KPENTER, 1)),
+        assert_handle!(
+            state,
+            key(KeyCode::KEY_KPENTER, 1),
             keyboard_report(KeyCode::KEY_KPENTER, 0)
         );
-        assert_eq!(
-            state.handle(key(KeyCode::KEY_KPENTER, 2)),
-            ControlAction::Ignore
-        );
-        assert_eq!(
-            state.handle(key(KeyCode::KEY_A, 1)),
+        assert_handle!(state, key(KeyCode::KEY_KPENTER, 2), ControlAction::Ignore);
+        assert_handle!(
+            state,
+            key(KeyCode::KEY_A, 1),
             keyboard_report(KeyCode::KEY_A, 0)
         );
     }
@@ -848,17 +844,11 @@ mod tests {
         for index in 0..8 {
             let mut state = GamepadState::new(gamepad_snapshot(127, 127, 0));
             state.handle(key(KeyCode(KeyCode::BTN_TRIGGER.0 + index), 1));
-            assert_eq!(
-                state.handle(syn(SynchronizationCode::SYN_REPORT)),
-                gamepad_report(1 << index)
-            );
+            assert_handle!(state, report_boundary(), gamepad_report(1 << index));
         }
         let mut state = GamepadState::new(gamepad_snapshot(127, 127, 0));
         state.handle(key(KeyCode::BTN_DEAD, 1));
-        assert_eq!(
-            state.handle(syn(SynchronizationCode::SYN_REPORT)),
-            ControlAction::Ignore
-        );
+        assert_handle!(state, report_boundary(), ControlAction::Ignore);
     }
 
     #[test]
@@ -867,21 +857,12 @@ mod tests {
         state.handle(syn(SynchronizationCode::SYN_DROPPED));
         state.handle(axis(AbsoluteAxisCode::ABS_Y, 255));
         state.handle(key(KeyCode::BTN_BASE, 1));
-        assert_eq!(
-            state.handle(syn(SynchronizationCode::SYN_REPORT)),
-            ControlAction::Resynchronize
-        );
+        assert_handle!(state, report_boundary(), ControlAction::Resynchronize);
         state.resynchronize(gamepad_snapshot(127, 255, 1 << 6));
-        assert_eq!(
-            state.handle(syn(SynchronizationCode::SYN_REPORT)),
-            ControlAction::Ignore
-        );
+        assert_handle!(state, report_boundary(), ControlAction::Ignore);
         state.handle(axis(AbsoluteAxisCode::ABS_Y, 127));
-        state.handle(syn(SynchronizationCode::SYN_REPORT));
+        state.handle(report_boundary());
         state.handle(axis(AbsoluteAxisCode::ABS_Y, 255));
-        assert_eq!(
-            state.handle(syn(SynchronizationCode::SYN_REPORT)),
-            gamepad_report(GAMEPAD_Y_POSITIVE)
-        );
+        assert_handle!(state, report_boundary(), gamepad_report(GAMEPAD_Y_POSITIVE));
     }
 }
