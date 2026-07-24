@@ -1136,6 +1136,51 @@ production lines, including the existing catalog compiler, and 17,870 lines
 with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
 without compressed or generated first-party source.
 
+## Candidate dashboard session checkpoint
+
+Startup-loaded Lisp now exposes one compact, non-authoritative candidate-session
+composition boundary. The caller supplies the launcher's exact effective manifest
+and palette paths plus an optional credits path. Manifest failure remains fatal,
+palette failure preserves the complete all-or-nothing startup fallback, and a
+credits failure logs the existing diagnostic and constructs the empty
+credits-unavailable crawl. The boundary snapshots reduced-motion environment
+presence, builds the initial dashboard state, and creates an automatic-presentation
+runtime that captures the current Wayland display. It returns the state, runtime,
+effective palette, and both optional load flags. Tests may inject a non-NIL runtime;
+an explicit NIL runtime is rejected before any file read.
+
+`DASHBOARD-CANDIDATE-SESSION-REHEARSE` dynamically binds that effective palette
+around the existing bounded, unwind-protected lifecycle rehearsal. This keeps
+render policy consistent with the selected startup files without adding another
+runtime or configuration format. `RETRODECK:MAIN`, the launcher, and C++ dashboard
+authority remain unchanged.
+
+Named and fresh SBCL loads, the complete host suite, targeted ARM/ECL smoke, the
+complete ARM build matrix, `nix flake check`, and two independent review rounds
+passed. Host coverage pins 22 applications, 32 credit rows, reduced-motion
+presence and absence, automatic presentation and Wayland snapshots, exact
+credits-failure diagnostics, injected runtime identity, effective palette binding
+during rendering, bounded cleanup, and ownership counts. ARM/ECL repeats the
+checked-in composition and credits fallback through the real regular-file ABI.
+Commits `3de6971` and `6ac8e95` were pushed immediately.
+
+The Deck now has `startup.lisp` at
+`05748a11445e5885a7bcff895b018e452b50aeb35ee0d46e2f5b6c509ad41161` and
+`dashboard.lisp` at
+`f22d63704e005f8993785154b2a2d77462c9ab36f2513d1b8a1df5ffc74899fa`, both mode
+`0600`. Normal installed startup passed. A harmless installed fixture loaded the
+launcher's effective `/mnt/data/nes-deck/state/games.tsv` and `palette.tsv`, all
+22 applications, all 32 credit rows, reduced-motion policy, and the captured
+`retrodeck-smoke` display. It stubbed only high-level device operations, completed
+a zero-iteration palette-bound rehearsal with matching render, present, and
+cleanup counts, and opened no real presentation or input devices. The C++
+dashboard retained PID 2051 and the Deck health check remained healthy.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 11,329
+production lines, including the existing catalog compiler, and 18,035 lines with
+focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
+compressed or generated first-party source.
+
 ## Validation baseline
 
 Updated on 2026-07-24:
@@ -1203,6 +1248,9 @@ Updated on 2026-07-24:
   presentation policy, preserved explicit mode, fell back to fbdev only after a
   requested Wayland open failed, and matched adoption and cleanup through host,
   ARM/ECL, and a harmless installed fixture while C++ retained PID 2051
+- The candidate-session boundary composed launcher-selected games, palette,
+  credits, reduced-motion, and automatic presentation policy through host,
+  ARM/ECL, and a harmless installed bounded fixture while C++ retained PID 2051
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
