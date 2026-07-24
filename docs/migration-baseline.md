@@ -1003,6 +1003,41 @@ production lines, including the existing catalog compiler, and 16,951 lines
 with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
 without compressed or generated first-party source.
 
+## Full-loop rehearsal checkpoint
+
+Startup-loaded Lisp now exposes one explicitly opt-in, non-authoritative
+`dashboard-runtime-rehearse` lifecycle wrapper. It initializes an already-built
+state and runtime once, assigns every state returned by the existing iteration
+coordinator, preserves reducer-selected poll timeouts, records one effect trace
+per completed iteration, and returns the final state, runtime, traces, and
+`:limit`, `:operator-stop`, or `:shutdown` reason. A finite iteration limit and
+an operator stop predicate make host and device rehearsals bounded without
+adding policy to Rust.
+
+The wrapper guarantees owned-resource cleanup with `unwind-protect` after
+successful initialization. It rejects an already initialized runtime before
+reading its clock or entering that cleanup boundary, so an accidental rehearsal
+cannot close caller-owned controls, touch, audio, or presentation. Initialization
+failure retains the adapter's existing rollback, while poll, render, effect, or
+predicate failures propagate after cleanup. `RETRODECK:MAIN` remains unchanged
+and the C++ dashboard stays authoritative.
+
+Named and fresh SBCL runs, the complete host suite, ARM build matrix,
+`nix flake check`, and two review rounds passed. A first review found and the
+final regression test fixed the initialized caller-ownership edge. Updated
+`startup.lisp` and `dashboard.lisp` were installed at hashes
+`56dfefecb2c3aebdceda017c30470691ec06825afc6f6d3433bbc6e2e0b75342` and
+`4bd9baf92dccbca849ce5400a799a5de13219db2d6e39f6cfd4f0fca3f6269fd`.
+A harmless alternate installed ARM/ECL fixture exercised two bounded iterations,
+operator stop before polling, runtime shutdown, and poll-failure cleanup without
+opening the real display or input devices. The C++ dashboard retained PID 2051
+and the Deck health check remained healthy.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 10,930
+production lines, including the existing catalog compiler, and 17,128 lines
+with focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets
+without compressed or generated first-party source.
+
 ## Validation baseline
 
 Updated on 2026-07-24:
@@ -1059,6 +1094,10 @@ Updated on 2026-07-24:
   Deck touch, and classified clean, exit-7, signal-15, missing-executable, and
   shutdown results through ARM/ECL and harmless installed `/tmp` fixtures while
   C++ retained PID 2051
+- The opt-in full-loop rehearsal wrapper retained returned state across bounded
+  iterations, distinguished limit, operator, and runtime shutdown, collected
+  iteration traces, and cleaned up normal and failure paths through a harmless
+  installed ARM/ECL fixture while C++ retained PID 2051
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 
