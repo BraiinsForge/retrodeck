@@ -25,7 +25,11 @@ remain available when the optional override is malformed.
 The Go service remains authoritative. Startup-loaded `lisp/policy.lisp` now
 exposes a non-authoritative copy of its editable HTTP, authentication, ROM,
 catalog, palette, persistence, system, color, label, and restart policy. Focused
-tests pin that snapshot to the current Go sources. This does not change the
+tests pin that snapshot to the current Go sources. Lisp also exposes an opt-in
+palette save plan that accepts decoded color fields, rejects unknown, repeated,
+missing, or malformed values with the existing response policy, normalizes RGB
+to uppercase, emits the exact version-2 override bytes, and returns the private
+atomic-write and timed dashboard-restart contract. This does not change the Go
 server, dashboard, launcher, or `RETRODECK:MAIN`.
 
 `ops/configure-deck.sh` asks for the uploader password during setup and stores

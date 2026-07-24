@@ -1204,6 +1204,29 @@ production lines, including the existing catalog compiler, and 18,432 lines with
 focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
 compressed or generated first-party source.
 
+## Lisp-owned uploader palette save-plan checkpoint
+
+Startup-loaded Lisp now owns one opt-in, non-authoritative palette submission
+boundary. It accepts decoded color fields in any order, rejects unknown,
+repeated, missing, and malformed values with the current HTTP status and message
+policy, normalizes lowercase or uppercase input to canonical `#RRGGBB`, and
+emits the exact ordered version-2 S-expression bytes written by Go. The returned
+plan supplies the installed override path, mode `0600`, write and restart error
+prefixes, successful notice, `/etc/init.d/nes-deck restart`, and its 20-second
+timeout. Plan strings and nested lists are fresh copies.
+
+The Go handler remains authoritative and does not call this boundary.
+`RETRODECK:MAIN`, the dashboard, and the launcher are unchanged. Named and fresh
+SBCL, exact Go-source fragment checks, the complete host suite, targeted and
+complete ARM/ECL verification, `nix flake check`, and independent review passed.
+Commit `ba67617` was pushed immediately. Device deployment remains pending Deck
+recovery.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 11,562
+production lines, including the existing catalog compiler, and 18,573 lines with
+focused Rust and Lisp tests. This remains below the 15,909/18,584 budgets without
+compressed or generated first-party source.
+
 ## Validation baseline
 
 Updated on 2026-07-24:
