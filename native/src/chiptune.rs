@@ -14,13 +14,54 @@ const MAXIMUM_FILE_SIZE: u64 = 16 * 1024 * 1024;
 // private storage here rather than adding a first-party C shim.
 const VORBIS_STATE_BYTES: usize = 8192;
 
-static PLAYER: Mutex<Option<OggPlayer>> = Mutex::new(None);
+static PLAYER: Mutex<Option<Player>> = Mutex::new(None);
 
 #[repr(C)]
 struct VorbisInfo {
     version: c_int,
     channels: c_int,
     rate: c_long,
+}
+
+#[repr(C)]
+struct GmeInfo {
+    length: c_int,
+    intro_length: c_int,
+    loop_length: c_int,
+    play_length: c_int,
+    fade_length: c_int,
+    reserved_integers: [c_int; 11],
+    system: *const c_char,
+    game: *const c_char,
+    song: *const c_char,
+    author: *const c_char,
+    copyright: *const c_char,
+    comment: *const c_char,
+    dumper: *const c_char,
+    reserved_strings: [*const c_char; 9],
+}
+
+#[link(name = "gme")]
+#[link(name = "stdc++")]
+unsafe extern "C" {
+    fn gme_open_data(
+        data: *const c_void,
+        size: c_long,
+        out: *mut *mut c_void,
+        sample_rate: c_int,
+    ) -> *const c_char;
+    fn gme_track_count(emulator: *const c_void) -> c_int;
+    fn gme_start_track(emulator: *mut c_void, index: c_int) -> *const c_char;
+    fn gme_track_info(
+        emulator: *const c_void,
+        out: *mut *mut GmeInfo,
+        track: c_int,
+    ) -> *const c_char;
+    fn gme_free_info(info: *mut GmeInfo);
+    fn gme_play(emulator: *mut c_void, count: c_int, out: *mut i16) -> *const c_char;
+    fn gme_track_ended(emulator: *const c_void) -> c_int;
+    fn gme_tell(emulator: *const c_void) -> c_int;
+    fn gme_delete(emulator: *mut c_void);
 }
 
 #[link(name = "vorbisfile")]
@@ -72,7 +113,11 @@ pub struct DecodeBlock {
 pub struct Metadata {
     pub title: Vec<u8>,
     pub artist: Vec<u8>,
+    pub author: Vec<u8>,
+    pub system: Vec<u8>,
     pub length_ms: i32,
+    pub track_count: i32,
+    pub track_index: i32,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -242,14 +287,224 @@ impl Drop for OggPlayer {
     }
 }
 
+pub struct GmePlayer {
+    emulator: NonNull<c_void>,
+    info: *mut GmeInfo,
+    track_index: i32,
+    track_count: i32,
+    samples: Vec<i16>,
+}
+
+// PLAYER serializes every access to the movable emulator handle.
+unsafe impl Send for GmePlayer {}
+
+impl GmePlayer {
+    pub fn open(path: &Path) -> Result<Self, String> {
+        let bytes = read_chiptune_bytes(path)?;
+        let mut emulator = std::ptr::null_mut();
+        let result = unsafe {
+            gme_open_data(
+                bytes.as_ptr().cast(),
+                bytes.len() as c_long,
+                &mut emulator,
+                44100,
+            )
+        };
+        if !result.is_null() || emulator.is_null() {
+            return Err(gme_error(result, "cannot create emulator"));
+        }
+        let mut player = Self {
+            emulator: NonNull::new(emulator).unwrap(),
+            info: std::ptr::null_mut(),
+            track_index: 0,
+            track_count: unsafe { gme_track_count(emulator) }.max(1),
+            samples: vec![0; FRAMES_PER_TICK * 2],
+        };
+        player.start_track(0)?;
+        Ok(player)
+    }
+
+    pub fn start_track(&mut self, track: i32) -> Result<(), String> {
+        if !(0..self.track_count).contains(&track) {
+            return Err(format!("chiptune has no track {track}"));
+        }
+        let result = unsafe { gme_start_track(self.emulator.as_ptr(), track) };
+        if !result.is_null() {
+            return Err(gme_error(result, "cannot start track"));
+        }
+        self.free_info();
+        let mut info = std::ptr::null_mut();
+        if !unsafe { gme_track_info(self.emulator.as_ptr(), &mut info, track) }.is_null() {
+            info = std::ptr::null_mut();
+        }
+        self.info = info;
+        self.track_index = track;
+        Ok(())
+    }
+
+    pub fn decode(&mut self) -> Result<DecodeBlock, String> {
+        self.samples.fill(0);
+        let result = unsafe {
+            gme_play(
+                self.emulator.as_ptr(),
+                self.samples.len() as c_int,
+                self.samples.as_mut_ptr(),
+            )
+        };
+        if !result.is_null() {
+            return Err(gme_error(result, "cannot play track"));
+        }
+        Ok(DecodeBlock {
+            ended: unsafe { gme_track_ended(self.emulator.as_ptr()) } != 0,
+            frames: FRAMES_PER_TICK,
+        })
+    }
+
+    pub fn position_ms(&self) -> i32 {
+        unsafe { gme_tell(self.emulator.as_ptr()) }
+    }
+
+    pub fn metadata(&self) -> Metadata {
+        let field = |value: *const c_char| {
+            if value.is_null() {
+                Vec::new()
+            } else {
+                unsafe { CStr::from_ptr(value) }.to_bytes().to_vec()
+            }
+        };
+        let info = unsafe { self.info.as_ref() };
+        Metadata {
+            title: info.map_or_else(Vec::new, |info| field(info.song)),
+            artist: info.map_or_else(Vec::new, |info| field(info.game)),
+            author: info.map_or_else(Vec::new, |info| field(info.author)),
+            system: info.map_or_else(Vec::new, |info| field(info.system)),
+            length_ms: info.map_or(-1, |info| info.play_length),
+            track_count: self.track_count,
+            track_index: self.track_index,
+        }
+    }
+
+    fn free_info(&mut self) {
+        if !self.info.is_null() {
+            unsafe { gme_free_info(self.info) };
+            self.info = std::ptr::null_mut();
+        }
+    }
+}
+
+impl Drop for GmePlayer {
+    fn drop(&mut self) {
+        self.free_info();
+        unsafe { gme_delete(self.emulator.as_ptr()) };
+    }
+}
+
+pub enum Player {
+    Ogg(OggPlayer),
+    Gme(GmePlayer),
+}
+
+impl Player {
+    pub fn open(path: &Path) -> Result<Self, String> {
+        if has_ogg_extension(path) {
+            Ok(Self::Ogg(OggPlayer::open(path)?))
+        } else {
+            Ok(Self::Gme(GmePlayer::open(path)?))
+        }
+    }
+
+    pub fn decode(&mut self) -> Result<DecodeBlock, String> {
+        match self {
+            Self::Ogg(player) => player.decode(),
+            Self::Gme(player) => player.decode(),
+        }
+    }
+
+    pub fn rewind(&mut self) -> Result<(), String> {
+        match self {
+            Self::Ogg(player) => player.rewind(),
+            Self::Gme(player) => player.start_track(player.track_index),
+        }
+    }
+
+    pub fn start_track(&mut self, track: i32) -> Result<Metadata, String> {
+        match self {
+            Self::Ogg(_) => Err("Ogg Vorbis chiptunes have one track".to_owned()),
+            Self::Gme(player) => {
+                player.start_track(track)?;
+                Ok(player.metadata())
+            }
+        }
+    }
+
+    pub fn position_ms(&self) -> i32 {
+        match self {
+            Self::Ogg(player) => player.position_ms(),
+            Self::Gme(player) => player.position_ms(),
+        }
+    }
+
+    pub fn samples(&self) -> &[i16] {
+        match self {
+            Self::Ogg(player) => player.samples(),
+            Self::Gme(player) => &player.samples,
+        }
+    }
+
+    pub fn metadata(&self) -> Metadata {
+        match self {
+            Self::Ogg(player) => Metadata {
+                title: player.title().to_vec(),
+                artist: player.artist().to_vec(),
+                author: Vec::new(),
+                system: Vec::new(),
+                length_ms: player.length_ms(),
+                track_count: 1,
+                track_index: 0,
+            },
+            Self::Gme(player) => player.metadata(),
+        }
+    }
+}
+
+fn has_ogg_extension(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("ogg"))
+}
+
+fn gme_error(result: *const c_char, fallback: &str) -> String {
+    if result.is_null() {
+        fallback.to_owned()
+    } else {
+        unsafe { CStr::from_ptr(result) }
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
+fn read_chiptune_bytes(path: &Path) -> Result<Vec<u8>, String> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|error| format!("cannot open chiptune: {error}"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("cannot inspect chiptune: {error}"))?;
+    if !metadata.is_file() || !(1..=MAXIMUM_FILE_SIZE).contains(&metadata.len()) {
+        return Err("chiptune must be a nonempty regular file up to 16 MiB".to_owned());
+    }
+    let mut bytes = Vec::new();
+    let mut file = file;
+    std::io::Read::read_to_end(&mut file, &mut bytes)
+        .map_err(|error| format!("cannot read chiptune: {error}"))?;
+    Ok(bytes)
+}
+
 pub fn open(path: &Path) -> Result<Metadata, String> {
     *lock_player()? = None;
-    let player = OggPlayer::open(path)?;
-    let metadata = Metadata {
-        title: player.title().to_vec(),
-        artist: player.artist().to_vec(),
-        length_ms: player.length_ms(),
-    };
+    let player = Player::open(path)?;
+    let metadata = player.metadata();
     *lock_player()? = Some(player);
     Ok(metadata)
 }
@@ -258,7 +513,7 @@ pub fn step() -> Result<Snapshot, String> {
     let mut guard = lock_player()?;
     let player = guard
         .as_mut()
-        .ok_or_else(|| "no Ogg Vorbis chiptune is open".to_owned())?;
+        .ok_or_else(|| "no chiptune is open".to_owned())?;
     let block = player.decode()?;
     Ok(Snapshot {
         samples: player.samples().to_vec(),
@@ -271,8 +526,15 @@ pub fn step() -> Result<Snapshot, String> {
 pub fn rewind() -> Result<(), String> {
     lock_player()?
         .as_mut()
-        .ok_or_else(|| "no Ogg Vorbis chiptune is open".to_owned())?
+        .ok_or_else(|| "no chiptune is open".to_owned())?
         .rewind()
+}
+
+pub fn start_track(track: i32) -> Result<Metadata, String> {
+    lock_player()?
+        .as_mut()
+        .ok_or_else(|| "no chiptune is open".to_owned())?
+        .start_track(track)
 }
 
 pub fn close() -> Result<(), String> {
@@ -280,34 +542,59 @@ pub fn close() -> Result<(), String> {
     Ok(())
 }
 
-fn lock_player() -> Result<MutexGuard<'static, Option<OggPlayer>>, String> {
+fn lock_player() -> Result<MutexGuard<'static, Option<Player>>, String> {
     PLAYER
         .lock()
-        .map_err(|_| "Ogg Vorbis chiptune lock is poisoned".to_owned())
+        .map_err(|_| "chiptune lock is poisoned".to_owned())
 }
 
 pub fn probe(path: &Path) -> Result<Probe, String> {
-    let mut player = OggPlayer::open(path)?;
-    let mut peak = 0;
-    for _ in 0..60 {
-        let block = player.decode()?;
-        peak = peak.max(
-            player
-                .samples()
-                .iter()
-                .map(|sample| i32::from(*sample).abs())
-                .max()
-                .unwrap_or(0),
-        );
-        if block.ended {
-            player.rewind()?;
+    match Player::open(path)? {
+        Player::Ogg(mut player) => {
+            let mut peak = 0;
+            for _ in 0..60 {
+                let block = player.decode()?;
+                peak = peak.max(
+                    player
+                        .samples()
+                        .iter()
+                        .map(|sample| i32::from(*sample).abs())
+                        .max()
+                        .unwrap_or(0),
+                );
+                if block.ended {
+                    player.rewind()?;
+                }
+            }
+            Ok(Probe {
+                tracks: 1,
+                samples: 60 * FRAMES_PER_TICK * 2,
+                peak,
+            })
+        }
+        Player::Gme(player) => {
+            let mut samples = vec![0_i16; 44100 * 2];
+            let result = unsafe {
+                gme_play(
+                    player.emulator.as_ptr(),
+                    samples.len() as c_int,
+                    samples.as_mut_ptr(),
+                )
+            };
+            if !result.is_null() {
+                return Err(gme_error(result, "cannot play track"));
+            }
+            Ok(Probe {
+                tracks: player.track_count as usize,
+                samples: samples.len(),
+                peak: samples
+                    .iter()
+                    .map(|sample| i32::from(*sample).abs())
+                    .max()
+                    .unwrap_or(0),
+            })
         }
     }
-    Ok(Probe {
-        tracks: 1,
-        samples: 60 * FRAMES_PER_TICK * 2,
-        peak,
-    })
 }
 
 fn comment(comments: *mut c_void, tag: &[u8]) -> Vec<u8> {
@@ -335,6 +622,73 @@ mod tests {
 
     fn fixture() -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../chiptunes/crazy.ogg")
+    }
+
+    fn nsf_fixture() -> std::path::PathBuf {
+        let mut header = vec![0_u8; 128];
+        header[..5].copy_from_slice(b"NESM\x1a");
+        header[5] = 1;
+        header[6] = 2;
+        header[7] = 1;
+        header[8..10].copy_from_slice(&0x8000_u16.to_le_bytes());
+        header[10..12].copy_from_slice(&0x8000_u16.to_le_bytes());
+        header[12..14].copy_from_slice(&0x8001_u16.to_le_bytes());
+        header[14..21].copy_from_slice(b"SILENCE");
+        header[46..55].copy_from_slice(b"RETRODECK");
+        header[110..112].copy_from_slice(&16666_u16.to_le_bytes());
+        header[120..122].copy_from_slice(&20000_u16.to_le_bytes());
+        header.extend_from_slice(&[0x60, 0x60]);
+        let path = crate::test_support::fixture_directory("chiptune-nsf").join("silence.nsf");
+        std::fs::write(&path, header).unwrap();
+        path
+    }
+
+    #[test]
+    fn decodes_gme_tracks_through_the_maintained_library() {
+        let path = nsf_fixture();
+        let mut player = match Player::open(&path).unwrap() {
+            Player::Gme(player) => Player::Gme(player),
+            Player::Ogg(_) => panic!("NSF must use the game-music-emu backend"),
+        };
+        let metadata = player.metadata();
+        assert_eq!(
+            (metadata.artist, metadata.author, metadata.system),
+            (
+                b"SILENCE".to_vec(),
+                b"RETRODECK".to_vec(),
+                b"Nintendo NES".to_vec()
+            )
+        );
+        assert_eq!(
+            (metadata.length_ms, metadata.track_count, metadata.track_index),
+            (150000, 2, 0)
+        );
+        let block = player.decode().unwrap();
+        assert_eq!((block.frames, player.samples().len()), (FRAMES_PER_TICK, 1470));
+        assert!(player.position_ms() > 0);
+        assert_eq!(player.start_track(1).unwrap().track_index, 1);
+        assert!(player.start_track(2).is_err());
+        player.rewind().unwrap();
+        assert_eq!(player.position_ms(), 0);
+    }
+
+    #[test]
+    fn matches_cpp_gme_probe() {
+        assert_eq!(
+            probe(&nsf_fixture()).unwrap(),
+            Probe {
+                tracks: 2,
+                samples: 88200,
+                peak: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn routes_only_ogg_extensions_to_vorbis() {
+        assert!(has_ogg_extension(Path::new("/tmp/song.OGG")));
+        assert!(!has_ogg_extension(Path::new("/tmp/song.nsf")));
+        assert!(open(Path::new("/tmp/retrodeck-missing.spc")).is_err());
     }
 
     #[test]

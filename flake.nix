@@ -64,6 +64,15 @@
 
       waylandNativeInputs = [ pkgs.wayland-scanner ];
       waylandStaticInputs = [ staticCross.wayland staticCross.libffi ];
+      # chiptune-deck also builds libgme.a from this source with the glibc
+      # cross toolchain; pkgsStatic would mix musl objects into a glibc link.
+      gmeStaticCross = pkgsCross.stdenv.mkDerivation {
+        pname = "gme-static";
+        version = pkgs.game-music-emu.version;
+        src = pkgs.game-music-emu.src;
+        nativeBuildInputs = [ pkgs.cmake ];
+        cmakeFlags = [ "-DBUILD_SHARED_LIBS=OFF" "-DENABLE_UBSAN=OFF" ];
+      };
       # Keep each local build input narrow. Referencing ./src as an include
       # directory would make every source edit invalidate every native runtime.
       sourceTree = files: pkgs.lib.fileset.toSource {
@@ -159,7 +168,11 @@
             pkgsCross.stdenv.cc
             pkgs.nukeReferences
           ];
-          buildInputs = [ pkgsCross.glibc.static staticCross.libvorbis ];
+          buildInputs = [
+            pkgsCross.glibc.static
+            staticCross.libvorbis
+            gmeStaticCross
+          ];
           allowedReferences = [ ];
 
           buildPhase = ''
