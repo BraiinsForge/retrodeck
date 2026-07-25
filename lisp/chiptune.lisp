@@ -1,5 +1,7 @@
 (in-package #:retrodeck)
 
+(defconstant +chiptune-block-nanoseconds+ 16666666)
+
 (defparameter *chiptune-colors*
   '((:background . #x000000) (:orange . #xfe6c27) (:active . #x4d372d)
     (:text . #xffffff) (:green . #x87af87) (:red . #xaf8787)
@@ -462,3 +464,378 @@
           when (and (<= left x) (< x (+ left width))
                     (<= top y) (< y (+ top height)))
             return name)))
+
+(defun chiptune-runtime-volume (&optional (text nil supplied-p))
+  (handler-case
+      (if supplied-p (parse-dashboard-inherited-volume text)
+          (dashboard-inherited-volume))
+    (error ()
+      (format *error-output*
+              "chiptune-deck: volume must be an integer from 0 through 100; playing muted~%")
+      (finish-output *error-output*)
+      0)))
+
+(defun make-chiptune-runtime
+    (&key (directory "/mnt/data/chiptunes")
+       (presentation (dashboard-environment-value "RETRO_DECK_PRESENTATION"))
+       (wayland-display
+         (dashboard-environment-value *dashboard-wayland-display-environment*))
+       (volume-state (dashboard-environment-value "RETRO_DECK_VOLUME_STATE"))
+       (clock #'monotonic-nanoseconds))
+  (check-type directory string)
+  (check-type volume-state (or null string))
+  (check-type clock function)
+  (let* ((wayland (ten-seconds-wayland-requested-p presentation wayland-display))
+         (runtime (make-dashboard-runtime :wayland wayland
+                                          :wayland-display wayland-display
+                                          :default-volume 42 :clock clock)))
+    (setf (getf runtime :chiptune-directory) directory
+          (getf runtime :chiptune-volume-state)
+          (and volume-state (plusp (length volume-state)) volume-state)
+          (getf runtime :next-block-at) 0
+          (getf runtime :chiptune-blocks) 0
+          (getf runtime :volume) nil
+          (getf runtime :dirty) t)
+    runtime))
+
+(defun make-chiptune-player-state (files &key (random-seed 0) (status ""))
+  (check-type files list)
+  (check-type random-seed (unsigned-byte 32))
+  (check-type status string)
+  (list :files files :file-index 0 :metadata nil :paused nil
+        :playback-mode :loop-all :random-state random-seed
+        :status status :visual nil :position 0 :pending-pcm nil))
+
+(defun chiptune-state-path (state)
+  (elt (getf state :files) (getf state :file-index)))
+
+(defun chiptune-state-note-track (state metadata)
+  (setf (getf state :metadata) metadata
+        (getf state :paused) nil
+        (getf state :visual) nil
+        (getf state :position) 0
+        (getf state :pending-pcm) nil)
+  metadata)
+
+(defun chiptune-open-index (state index)
+  (let ((metadata (open-chiptune-file (elt (getf state :files) index))))
+    (when metadata
+      (setf (getf state :file-index) index)
+      (chiptune-state-note-track state metadata))))
+
+(defun chiptune-open-any (state candidates)
+  (loop for index in candidates
+          thereis (chiptune-open-index state index)))
+
+(defun chiptune-state-start-track (state track)
+  (let ((metadata (start-chiptune-track (chiptune-state-path state) track)))
+    (when metadata
+      (chiptune-state-note-track state metadata))))
+
+(defun chiptune-state-draw-random (state)
+  (setf (getf state :random-state)
+        (chiptune-next-random (getf state :random-state))))
+
+(defun chiptune-shuffle-jump (state)
+  (let* ((count (length (getf state :files)))
+         (random (chiptune-state-draw-random state))
+         (opened (or (chiptune-open-any
+                      state (chiptune-shuffle-candidates
+                             count (getf state :file-index) random))
+                     (chiptune-open-index state (getf state :file-index)))))
+    (when opened
+      (let ((track-count (getf opened :track-count)))
+        (if (> track-count 1)
+            (chiptune-state-start-track
+             state (mod (chiptune-state-draw-random state) track-count))
+            opened)))))
+
+(defun chiptune-playback-failed (state reason)
+  (close-chiptune-file)
+  (setf (getf state :metadata) nil
+        (getf state :pending-pcm) nil
+        (getf state :visual) nil
+        (getf state :status) (format nil "PLAYBACK ERROR: ~A" reason))
+  nil)
+
+(defun chiptune-state-advance (state)
+  (let* ((metadata (getf state :metadata))
+         (plan (chiptune-advance-plan (getf state :playback-mode)
+                                      (getf metadata :track-index)
+                                      (getf metadata :track-count))))
+    (or (ecase (first plan)
+          (:restart (and (rewind-chiptune-file)
+                         (setf (getf state :position) 0)
+                         metadata))
+          (:track (chiptune-state-start-track state (second plan)))
+          (:shuffle (chiptune-shuffle-jump state))
+          (:next-file
+           (chiptune-open-any
+            state (chiptune-file-candidates (length (getf state :files))
+                                            (getf state :file-index) 1))))
+        (chiptune-playback-failed state "cannot advance to the next track"))))
+
+(defun chiptune-runtime-set-volume (runtime requested)
+  (if (open-chiptune-audio requested)
+      (let ((path (getf runtime :chiptune-volume-state)))
+        (setf (getf runtime :volume) requested
+              (getf runtime :audio-owned-p) t
+              (getf runtime :dirty) t)
+        (when (and path (not (save-dashboard-volume-state path requested)))
+          (format *error-output* "chiptune-deck: cannot save volume state~%")
+          (finish-output *error-output*))
+        t)
+      (progn
+        (format *error-output* "chiptune-deck: cannot change volume~%")
+        (finish-output *error-output*)
+        nil)))
+
+(defun chiptune-apply-commands (state runtime commands)
+  (flet ((dirty () (setf (getf runtime :dirty) t))
+         (navigate (direction)
+           (let ((count (length (getf state :files))))
+             (when (and (plusp count)
+                        (chiptune-open-any
+                         state (chiptune-file-candidates
+                                count (getf state :file-index) direction)))
+               (setf (getf runtime :dirty) t))))
+         (switch-track (direction)
+           (let ((metadata (getf state :metadata)))
+             (when (and metadata
+                        (not (chiptune-ogg-path-p (chiptune-state-path state))))
+               (let* ((count (getf metadata :track-count))
+                      (next (mod (+ (getf metadata :track-index) count direction)
+                                 count)))
+                 (when (chiptune-state-start-track state next)
+                   (setf (getf runtime :dirty) t)))))))
+    (when (member :back commands) (setf (getf runtime :running) nil))
+    (when (member :previous-file commands) (navigate -1))
+    (when (member :next-file commands) (navigate 1))
+    (when (member :previous-track commands) (switch-track -1))
+    (when (member :next-track commands) (switch-track 1))
+    (when (member :toggle-pause commands)
+      (setf (getf state :paused) (not (getf state :paused)))
+      (dirty))
+    (when (member :playback-mode commands)
+      (setf (getf state :playback-mode)
+            (chiptune-next-playback-mode (getf state :playback-mode)))
+      (dirty))
+    (let ((volume (getf runtime :volume)))
+      (when (and volume (or (member :volume-up commands)
+                            (member :volume-down commands)))
+        (let ((requested (chiptune-volume-step
+                          volume (if (member :volume-up commands) 1 -1))))
+          (when (/= requested volume)
+            (chiptune-runtime-set-volume runtime requested)))))))
+
+(defun chiptune-flush-block (state runtime pcm)
+  "Queue PCM unless audio is off; keep the block pending while the queue is full."
+  (cond
+    ((not (and (getf runtime :audio-owned-p)
+               (plusp (or (getf runtime :volume) 0))))
+     (setf (getf state :pending-pcm) nil)
+     t)
+    ((write-chiptune-audio pcm)
+     (setf (getf state :pending-pcm) nil)
+     t)
+    (t
+     (setf (getf state :pending-pcm) pcm)
+     nil)))
+
+(defun chiptune-runtime-generate (state runtime now)
+  "Decode and queue one 44.1 kHz block per 60 Hz tick; drive end-of-track policy."
+  (let ((pending (getf state :pending-pcm)))
+    (cond
+      ((or (null (getf state :metadata)) (getf state :paused)) nil)
+      (pending
+       (chiptune-flush-block state runtime pending)
+       nil)
+      ((>= now (getf runtime :next-block-at))
+       (multiple-value-bind (visual ended frames position pcm)
+           (step-chiptune-file)
+         (declare (ignore frames))
+         (cond
+           ((null visual)
+            (chiptune-playback-failed state "native playback step failed")
+            (setf (getf runtime :dirty) t)
+            nil)
+           (t
+            (setf (getf state :visual) visual
+                  (getf state :position) position)
+            (chiptune-flush-block state runtime pcm)
+            (when ended (chiptune-state-advance state))
+            (incf (getf runtime :chiptune-blocks))
+            (let ((target (+ (getf runtime :next-block-at)
+                             +chiptune-block-nanoseconds+)))
+              (setf (getf runtime :next-block-at)
+                    (if (> now target) now target)))
+            t)))))))
+
+(defun chiptune-render-plist (state runtime)
+  (let ((metadata (getf state :metadata)))
+    (append (list :ready (not (null metadata))
+                  :paused (getf state :paused)
+                  :playback-mode (getf state :playback-mode)
+                  :volume (or (getf runtime :volume) 0)
+                  :status (getf state :status)
+                  :position (getf state :position)
+                  :visual (getf state :visual)
+                  :file-index (getf state :file-index)
+                  :file-count (length (getf state :files)))
+            (when metadata
+              (list :title (getf metadata :title)
+                    :subtitle (getf metadata :subtitle)
+                    :system (getf metadata :system)
+                    :length (getf metadata :length)
+                    :track-index (getf metadata :track-index)
+                    :track-count (getf metadata :track-count))))))
+
+(defun chiptune-runtime-random-seed (runtime files)
+  (logand #xffffffff
+          (logxor #x9e3779b9 (dashboard-runtime-read-clock runtime)
+                  (length files))))
+
+(defun chiptune-runtime-present (runtime)
+  (ten-seconds-runtime-present runtime))
+
+(defun chiptune-runtime-shutdown (runtime)
+  (unwind-protect
+      (unwind-protect
+          (dashboard-runtime-shutdown runtime #'close-chiptune-audio)
+        (close-chiptune-file))
+    (setf (getf runtime :dirty) nil))
+  runtime)
+
+(defun chiptune-runtime-initialize (runtime)
+  (check-type runtime list)
+  (when (getf runtime :initialized-p)
+    (error "Chiptune runtime is already initialized"))
+  (let ((completed nil))
+    (with-ten-seconds-cleanup
+        ((unless completed (chiptune-runtime-shutdown runtime)))
+      (unless (getf runtime :wayland)
+        (unless (open-fbdev)
+          (error "Chiptune presentation did not open"))
+        (setf (getf runtime :presentation-owned-p) t))
+      (unless (open-evdev-touch)
+        (error "Chiptune touchscreen did not open"))
+      (setf (getf runtime :touch-owned-p) t
+            (getf runtime :controls-owned-p) t)
+      (multiple-value-bind (gamepads error) (scan-evdev-gamepads)
+        (when error
+          (format *error-output*
+                  "chiptune-deck: controller input unavailable: ~A~%" error))
+        (format *error-output*
+                "chiptune-deck: ~D THEGamepad controller(s) ready~%" gamepads)
+        (finish-output *error-output*))
+      (let* ((directory (getf runtime :chiptune-directory))
+             (files (scan-chiptune-files directory))
+             (volume (chiptune-runtime-volume)))
+        (format *error-output*
+                "chiptune-deck: found ~D supported file(s) in ~A~%"
+                (length files) directory)
+        (finish-output *error-output*)
+        (setf (getf runtime :volume) volume)
+        (if (open-chiptune-audio volume)
+            (setf (getf runtime :audio-owned-p) t)
+            (progn
+              (format *error-output*
+                      "chiptune-deck: cannot open audio; continuing muted~%")
+              (finish-output *error-output*)))
+        (let ((state (make-chiptune-player-state
+                      files
+                      :random-seed (chiptune-runtime-random-seed runtime files)
+                      :status (concatenate 'string "ADD MUSIC TO " directory))))
+          (when (and files
+                     (not (chiptune-open-any
+                           state (chiptune-file-candidates
+                                  (length files) (1- (length files)) 1))))
+            (setf (getf state :status) "CANNOT PLAY FILES")
+            (format *error-output*
+                    "chiptune-deck: cannot play any scanned file~%")
+            (finish-output *error-output*))
+          (setf (getf runtime :next-block-at)
+                (dashboard-runtime-read-clock runtime)
+                (getf runtime :chiptune-blocks) 0
+                (getf runtime :dirty) t
+                (getf runtime :initialized-p) t
+                (getf runtime :running) t
+                completed t)
+          state)))))
+
+(defun chiptune-runtime-run-iteration (state runtime)
+  (unless (and (getf runtime :initialized-p) (getf runtime :running))
+    (error "Chiptune runtime is not running"))
+  (when (= (process-shutdown-p) 1)
+    (setf (getf runtime :running) nil)
+    (return-from chiptune-runtime-run-iteration
+      (values state runtime '((:shutdown)))))
+  (let ((trace nil))
+    (flet ((record (item) (push item trace)))
+      (let* ((now (dashboard-runtime-read-clock runtime))
+             (decoded (chiptune-runtime-generate state runtime now)))
+        (record (list :generate :now now :decoded (and decoded t)))
+        (when (or (getf runtime :dirty) decoded)
+          (unless (render-chiptune (chiptune-render-plist state runtime))
+            (error "Chiptune render failed"))
+          (record '(:render))
+          (unless (chiptune-runtime-present runtime)
+            (error "Chiptune presentation failed"))
+          (record '(:present))
+          (setf (getf runtime :dirty) nil))
+        (let* ((poll (or (poll-native-input nil 8)
+                         (error "Chiptune native input poll failed")))
+               (control-count (getf poll :control-count))
+               (touch-count (getf poll :touch-count))
+               (commands nil))
+          (record (list :poll :controls control-count :touches touch-count))
+          (dotimes (index control-count)
+            (let ((report (or (next-evdev-control)
+                              (error "Chiptune control queue ended early"))))
+              (dolist (command (chiptune-control-commands report))
+                (pushnew command commands))))
+          (loop repeat touch-count
+                for report = (or (next-evdev-touch)
+                                 (error "Chiptune touch queue ended early"))
+                do (when (fourth report)
+                     (let ((action (chiptune-touch-action
+                                    (first report) (second report))))
+                       (when action
+                         (pushnew (chiptune-touch-command action) commands)))))
+          (cond
+            ((getf poll :touch-lost-p)
+             (error "Chiptune touchscreen disconnected"))
+            ((getf poll :shutdown-p)
+             (setf (getf runtime :running) nil)
+             (record '(:shutdown)))
+            (commands
+             (setf commands (nreverse commands))
+             (record (list :commands commands))
+             (chiptune-apply-commands state runtime commands))))
+        (values state runtime (nreverse trace))))))
+
+(defun chiptune-candidate-rehearse
+    (runtime &key (iteration-limit 1) stop-predicate)
+  "Run an opt-in bounded chiptune candidate and return iteration traces."
+  (check-type iteration-limit (integer 0 *))
+  (when stop-predicate (check-type stop-predicate function))
+  (when (getf runtime :initialized-p)
+    (error "Chiptune runtime is already initialized"))
+  (let ((current nil) (iteration 0) (traces nil) (reason nil) (owned nil))
+    (with-ten-seconds-cleanup ((when owned (chiptune-runtime-shutdown runtime)))
+      (setf current (chiptune-runtime-initialize runtime) owned t)
+      (loop
+        (cond
+          ((not (getf runtime :running)) (setf reason :shutdown) (return))
+          ((>= iteration iteration-limit) (setf reason :limit) (return))
+          ((and stop-predicate
+                (funcall stop-predicate current runtime iteration))
+           (setf reason :operator-stop)
+           (return)))
+        (multiple-value-bind (next ignored-runtime trace)
+            (chiptune-runtime-run-iteration current runtime)
+          (declare (ignore ignored-runtime))
+          (setf current next)
+          (push trace traces)
+          (incf iteration)))
+      (values current runtime (nreverse traces) reason))))

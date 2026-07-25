@@ -128,6 +128,7 @@
            #:*chiptune-maximum-files*
            #:chiptune-advance-plan
            #:chiptune-base-name
+           #:chiptune-candidate-rehearse
            #:chiptune-control-commands
            #:chiptune-display-text
            #:chiptune-file-accepted-p
@@ -135,13 +136,18 @@
            #:chiptune-format-time
            #:chiptune-next-playback-mode
            #:chiptune-next-random
+           #:chiptune-runtime-initialize
+           #:chiptune-runtime-run-iteration
+           #:chiptune-runtime-shutdown
            #:chiptune-shuffle-candidates
            #:chiptune-touch-action
            #:chiptune-touch-command
            #:chiptune-volume-step
            #:close-chiptune-audio
            #:close-chiptune-file
+           #:make-chiptune-player-state
            #:make-chiptune-render-state
+           #:make-chiptune-runtime
            #:open-chiptune-audio
            #:open-chiptune-file
            #:render-chiptune
@@ -755,13 +761,14 @@
 (let ((startup *load-truename*))
   (load (merge-pathnames "ui.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "policy.lisp" startup) :verbose nil :print nil)
-  (load (merge-pathnames "chiptune.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "process.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "settings.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "wifi.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "credits.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "dashboard.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "timer.lisp" startup) :verbose nil :print nil)
+  ;; The chiptune runtime reuses timer.lisp gameplay-runtime macros.
+  (load (merge-pathnames "chiptune.lisp" startup) :verbose nil :print nil)
   (let ((local (merge-pathnames "local.lisp" startup)))
     (when (probe-file local)
       (load local :verbose nil :print nil))))
