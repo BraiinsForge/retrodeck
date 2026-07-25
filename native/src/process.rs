@@ -536,43 +536,33 @@ mod tests {
                     libc::pause();
                 }
             },
-            "leader-exits" => unsafe {
-                let grandchild = libc::fork();
-                if grandchild == 0 {
-                    libc::signal(libc::SIGTERM, libc::SIG_IGN);
-                    loop {
-                        libc::pause();
-                    }
-                }
-                assert!(grandchild > 0);
-                std::fs::write(
-                    env::var_os("RETRODECK_PROCESS_PIDS").unwrap(),
-                    format!("{} {grandchild}\n", std::process::id()),
-                )
-                .unwrap();
-                loop {
-                    libc::pause();
-                }
-            },
-            "group" => unsafe {
-                libc::signal(libc::SIGTERM, libc::SIG_IGN);
-                let grandchild = libc::fork();
-                if grandchild == 0 {
-                    loop {
-                        libc::pause();
-                    }
-                }
-                assert!(grandchild > 0);
-                std::fs::write(
-                    env::var_os("RETRODECK_PROCESS_PIDS").unwrap(),
-                    format!("{} {grandchild}\n", std::process::id()),
-                )
-                .unwrap();
-                loop {
-                    libc::pause();
-                }
-            },
+            "leader-exits" => wait_with_grandchild(false),
+            "group" => wait_with_grandchild(true),
             other => panic!("unknown fixture {other}"),
+        }
+    }
+
+    fn wait_with_grandchild(leader_ignores_term: bool) -> ! {
+        unsafe {
+            if leader_ignores_term {
+                libc::signal(libc::SIGTERM, libc::SIG_IGN);
+            }
+            let grandchild = libc::fork();
+            if grandchild == 0 {
+                libc::signal(libc::SIGTERM, libc::SIG_IGN);
+                loop {
+                    libc::pause();
+                }
+            }
+            assert!(grandchild > 0);
+            std::fs::write(
+                env::var_os("RETRODECK_PROCESS_PIDS").unwrap(),
+                format!("{} {grandchild}\n", std::process::id()),
+            )
+            .unwrap();
+            loop {
+                libc::pause();
+            }
         }
     }
 
@@ -657,20 +647,31 @@ mod tests {
         assert!(result.error.is_some());
     }
 
-    fn run_fixture(action: &str) -> ChildResult {
-        let (executable, arguments, environment) = fixture_command(action, &[]);
+    fn supervise_fixture(
+        executable: &Path,
+        arguments: &[OsString],
+        environment: &[(OsString, OsString)],
+        request: StopRequest,
+    ) -> ChildResult {
         spawn_and_supervise(
-            &executable,
-            &arguments,
-            &environment,
+            executable,
+            arguments,
+            environment,
             "fixture",
             |timeout| {
-                thread::sleep(timeout);
-                StopRequest::None
+                if request == StopRequest::None {
+                    thread::sleep(timeout);
+                }
+                request
             },
             Duration::from_millis(5),
             Duration::from_millis(50),
         )
+    }
+
+    fn run_fixture(action: &str) -> ChildResult {
+        let (executable, arguments, environment) = fixture_command(action, &[]);
+        supervise_fixture(&executable, &arguments, &environment, StopRequest::None)
     }
 
     #[test]
@@ -690,18 +691,7 @@ mod tests {
             ),
             (OsString::from("RETRODECK_BETA"), OsString::from("beta")),
         ];
-        let result = spawn_and_supervise(
-            &child,
-            &arguments,
-            &environment,
-            "generic fixture",
-            |timeout| {
-                thread::sleep(timeout);
-                StopRequest::None
-            },
-            Duration::from_millis(5),
-            Duration::from_millis(50),
-        );
+        let result = supervise_fixture(&child, &arguments, &environment, StopRequest::None);
         assert_eq!(result.exit_code, Some(0));
         assert_eq!(
             std::fs::read_to_string(&capture).unwrap(),
@@ -732,15 +722,8 @@ mod tests {
     #[test]
     fn reports_shutdown_requests() {
         let (executable, arguments, environment) = fixture_command("wait", &[]);
-        let result = spawn_and_supervise(
-            &executable,
-            &arguments,
-            &environment,
-            "fixture",
-            |_| StopRequest::Shutdown,
-            Duration::from_millis(5),
-            Duration::from_millis(50),
-        );
+        let result =
+            supervise_fixture(&executable, &arguments, &environment, StopRequest::Shutdown);
         assert!(result.started);
         assert!(!result.exited_for_touch);
         assert!(result.shutdown_requested);
