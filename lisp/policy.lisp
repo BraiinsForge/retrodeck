@@ -5,7 +5,6 @@
     (:gb "GAME BOY")
     (:gbc "GBC")
     (:zx "ZX SPECTRUM")
-    (:chip8 "CHIP-8")
     (:deck "DECK")))
 
 (defparameter *dashboard-palette*
@@ -36,7 +35,6 @@
   '((:nes . "/mnt/data/nes-deck/nes-deck")
     (:gb . "/mnt/data/nes-deck/gb-deck")
     (:zx . "/mnt/data/nes-deck/zx-deck")
-    (:chip8 . "/mnt/data/nes-deck/chip8-deck")
     (:deck . "/mnt/data/nes-deck/ten-seconds-deck")
     (:chiptunes . "/mnt/data/nes-deck/chiptune-deck")
     (:terminal . "/mnt/data/nes-deck/terminal/retro-terminal")
@@ -128,7 +126,7 @@
 
 (defun dashboard-manifest-system (name line-number)
   (or (cdr (assoc name '(("nes" . :nes) ("gb" . :gb) ("gbc" . :gbc)
-                         ("zx" . :zx) ("chip8" . :chip8) ("deck" . :deck))
+                         ("zx" . :zx) ("deck" . :deck))
                   :test #'string=))
       (error "Invalid system on manifest line ~D" line-number)))
 
@@ -511,7 +509,8 @@
     (:deck (if (dashboard-application-id-p application "chiptunes")
                :chiptunes
                :deck))
-    (otherwise :chip8)))
+    (otherwise
+     (error "Unknown application system ~S" (getf application :system)))))
 
 (defun dashboard-launch-plan (application volume-percent
                               &key (keymap "us") wayland volume-state)

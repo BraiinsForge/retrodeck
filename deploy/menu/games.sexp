@@ -87,16 +87,6 @@
    :system :zx
    :rom "/mnt/data/roms/zx/knight-lore.tap"
    :color "#D7AF5F")
-  (:id "outlaw"
-   :title "OUTLAW"
-   :system :chip8
-   :rom "/mnt/data/roms/chip8/outlaw.ch8"
-   :color "#AF875F")
-  (:id "space-racer"
-   :title "SPACE RACER"
-   :system :chip8
-   :rom "/mnt/data/roms/chip8/spaceracer.ch8"
-   :color "#E4E4E4")
   (:id "ten-seconds"
    :title "10 SECONDS"
    :system :deck
