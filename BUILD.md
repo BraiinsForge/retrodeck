@@ -95,9 +95,10 @@ argument it loads `/mnt/data/nes-deck/lisp/startup.lisp`; one alternate startup
 path may be supplied for development and smoke tests.
 
 `lisp/startup.lisp` validates the native ABI, then loads `ui.lisp`,
-`policy.lisp`, `process.lisp`, `settings.lisp`, `wifi.lisp`, `credits.lisp`,
-`dashboard.lisp`, and `timer.lisp`. These editable files own bitmap UI and
-10 Seconds composition and policy, systems, labels, colors, applications,
+`policy.lisp`, `chiptune.lisp`, `process.lisp`, `settings.lisp`, `wifi.lisp`,
+`credits.lisp`, `dashboard.lisp`, and `timer.lisp`. These editable files own
+bitmap UI, chiptune composition, and 10 Seconds composition and policy, systems,
+labels, colors, applications,
 exact game/reboot/terminal executable routes,
 ordered arguments and environment, launch/return statuses and sequencing,
 timing, settings and Wi-Fi editor state and actions, exact inherited and
@@ -108,18 +109,22 @@ touch policy, keyboard and THEGamepad mapping, modal command priority,
 controller burst recovery, input scan timing, and the Wi-Fi selector status path.
 Startup finally loads an optional `local.lisp` beside them for device-local
 overrides without a Rust
-rebuild. Deployment updates the nine standard Lisp files but leaves an
+rebuild. Deployment updates the ten standard Lisp files but leaves an
 existing `local.lisp` untouched.
 
-Native ABI 21 retains the widget-side Wayland and direct-fbdev primitives and
+Native ABI 22 retains the widget-side Wayland and direct-fbdev primitives and
 adds exact-display widget and gameplay Wayland opens plus only narrow canvas,
 raster, projected-text, evdev, regular-file, network, state-file, control-file,
-helper-process, audio, managed-child, terminal-process, aggregate-input,
-process-shutdown, and monotonic-clock mechanisms for Lisp to orchestrate. Audio
-now accepts a bounded
+helper-process, audio, Ogg Vorbis decode, managed-child, terminal-process,
+aggregate-input, process-shutdown, and monotonic-clock mechanisms for Lisp to
+orchestrate. Audio now accepts a bounded
 one-to-three-note Lisp sequence without changing the existing two-note menu
 primitive, and the clock returns `CLOCK_MONOTONIC` nanoseconds as four portable
-16-bit words for Lisp reconstruction. The exact-display primitive connects an
+16-bit words for Lisp reconstruction. The Ogg boundary keeps one decoder handle,
+returns title, artist, and duration metadata, and produces one exact 735-frame
+little-endian stereo PCM block per Lisp step; Lisp owns filename fallback,
+labels, rendering, rewind policy, and eventual track sequencing. The
+exact-display primitive connects an
 absolute socket path directly or a relative name below absolute
 `XDG_RUNTIME_DIR` through `wayland-client`; the existing environment-based open
 remains unchanged for explicit mode. The gameplay open mirrors the original

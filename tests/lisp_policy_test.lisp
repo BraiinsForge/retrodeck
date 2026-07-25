@@ -10,6 +10,7 @@
   (1 *play-status* *canvas-clear-status* *canvas-glyph-status*
      *canvas-fill-status* *projection-status* *projected-text-status*
      *control-file-write-status* *state-file-write-status*
+     *chiptune-rewind-status* *chiptune-close-status*
      *canvas-raster-status* *evdev-open-status* *fbdev-open-status*
      *fbdev-canvas-status* *fbdev-present-status* *wayland-open-status*
      *wayland-canvas-status* *wayland-present-status*)
@@ -41,7 +42,8 @@
        *wayland-open-display* *wayland-open-kind* *wayland-present-color*
        *wayland-dispatch-timeout* *wayland-touch* *wayland-touch-queue*
        *wayland-size* *helper-arguments* *terminal-arguments*
-       *child-arguments*)
+       *child-arguments* *chiptune-open-result* *chiptune-step-result*
+       *chiptune-open-path*)
   ("" *control-file-read-result*)
   ('(1 2 3 4) *canvas-hash-words* *monotonic-words*)
   ('(0) *state-file-read-result*)
@@ -106,8 +108,14 @@
     (push :sound *interaction-trace*))
   *play-status*)
 (define-native-test-functions
-  (abi-version () 21)
+  (abi-version () 22)
   (audio-active-p () (incf *active-count*) *active-status*)
+  (chiptune-open (path)
+    (setf *chiptune-open-path* path)
+    *chiptune-open-result*)
+  (chiptune-step () *chiptune-step-result*)
+  (chiptune-rewind () *chiptune-rewind-status*)
+  (chiptune-close () *chiptune-close-status*)
   (process-shutdown-p () *process-shutdown-status*)
   (play-tones (&rest arguments) (record-native-play arguments))
   (play-tone-sequence (&rest arguments) (record-native-play arguments))
@@ -889,6 +897,44 @@
                       ((446 370) :previous-file) ((650 370) :pause)
                       ((854 370) :next-file) ((242 370) :playback-mode)
                       ((1248 22) nil) ((1124 90) nil)))
+(let ((pcm (make-string 2940 :initial-element (code-char 0))))
+  (flet ((sample (index value)
+           (let ((unsigned (ldb (byte 16 0) value))
+                 (offset (* index 2)))
+             (setf (char pcm offset) (code-char (ldb (byte 8 0) unsigned))
+                   (char pcm (1+ offset))
+                   (code-char (ldb (byte 8 8) unsigned))))))
+    (sample 0 -32768)
+    (sample 1 32767)
+    (sample 1469 -1))
+  (let ((*chiptune-open-result* '("" "artist" 50851))
+        (*chiptune-step-result* (list pcm 0 735 66))
+        (*chiptune-open-path* nil))
+    (assert (equal (retrodeck:open-chiptune-file "/tmp/crazy.ogg")
+                   '(:title "crazy" :subtitle "artist" :system "OGG VORBIS"
+                     :length 50851 :track-index 0 :track-count 1)))
+    (assert (and (typep *chiptune-open-path* 'base-string)
+                 (string= *chiptune-open-path* "/tmp/crazy.ogg")))
+    (multiple-value-bind (visual ended frames position)
+        (retrodeck:step-chiptune-file)
+      (assert (and (typep visual '(simple-array (signed-byte 16) (1470)))
+                   (not ended) (= frames 735) (= position 66)
+                   (= (aref visual 0) -32768)
+                   (= (aref visual 1) 32767)
+                   (zerop (aref visual 2))
+                   (= (aref visual 1469) -1))))
+    (assert (and (retrodeck:rewind-chiptune-file)
+                 (retrodeck:close-chiptune-file)))))
+(let ((*chiptune-open-result* nil) (*chiptune-step-result* nil)
+      (*chiptune-rewind-status* 0) (*chiptune-close-status* 0))
+  (assert (and (null (retrodeck:open-chiptune-file "/tmp/missing.ogg"))
+               (null (retrodeck:step-chiptune-file))
+               (not (retrodeck:rewind-chiptune-file))
+               (not (retrodeck:close-chiptune-file)))))
+(let ((*chiptune-open-result* '("bad"))
+      (*chiptune-step-result* '("short" 0 735 0)))
+  (assert-signals error (retrodeck:open-chiptune-file "/tmp/bad.ogg"))
+  (assert-signals error (retrodeck:step-chiptune-file)))
 (let ((ready (retrodeck:make-chiptune-render-state
               :ready t :title "crazy" :system "ogg vorbis"
               :position 25000 :length 50000 :file-index 1 :file-count 3

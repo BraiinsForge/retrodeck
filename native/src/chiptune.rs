@@ -5,6 +5,7 @@ use std::os::fd::IntoRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::ptr::NonNull;
+use std::sync::{Mutex, MutexGuard};
 
 pub const FRAMES_PER_TICK: usize = 735;
 const MAXIMUM_FILE_SIZE: u64 = 16 * 1024 * 1024;
@@ -12,6 +13,8 @@ const MAXIMUM_FILE_SIZE: u64 = 16 * 1024 * 1024;
 // 720 bytes on ARM. calloc supplies its required alignment; keep oversized
 // private storage here rather than adding a first-party C shim.
 const VORBIS_STATE_BYTES: usize = 8192;
+
+static PLAYER: Mutex<Option<OggPlayer>> = Mutex::new(None);
 
 #[repr(C)]
 struct VorbisInfo {
@@ -57,9 +60,27 @@ pub struct OggPlayer {
     samples: Vec<i16>,
 }
 
+// PLAYER serializes every access to the movable decoder handle.
+unsafe impl Send for OggPlayer {}
+
 pub struct DecodeBlock {
     pub ended: bool,
     pub frames: usize,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Metadata {
+    pub title: Vec<u8>,
+    pub artist: Vec<u8>,
+    pub length_ms: i32,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Snapshot {
+    pub samples: Vec<i16>,
+    pub ended: bool,
+    pub frames: usize,
+    pub position_ms: i32,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -221,6 +242,50 @@ impl Drop for OggPlayer {
     }
 }
 
+pub fn open(path: &Path) -> Result<Metadata, String> {
+    *lock_player()? = None;
+    let player = OggPlayer::open(path)?;
+    let metadata = Metadata {
+        title: player.title().to_vec(),
+        artist: player.artist().to_vec(),
+        length_ms: player.length_ms(),
+    };
+    *lock_player()? = Some(player);
+    Ok(metadata)
+}
+
+pub fn step() -> Result<Snapshot, String> {
+    let mut guard = lock_player()?;
+    let player = guard
+        .as_mut()
+        .ok_or_else(|| "no Ogg Vorbis chiptune is open".to_owned())?;
+    let block = player.decode()?;
+    Ok(Snapshot {
+        samples: player.samples().to_vec(),
+        ended: block.ended,
+        frames: block.frames,
+        position_ms: player.position_ms(),
+    })
+}
+
+pub fn rewind() -> Result<(), String> {
+    lock_player()?
+        .as_mut()
+        .ok_or_else(|| "no Ogg Vorbis chiptune is open".to_owned())?
+        .rewind()
+}
+
+pub fn close() -> Result<(), String> {
+    *lock_player()? = None;
+    Ok(())
+}
+
+fn lock_player() -> Result<MutexGuard<'static, Option<OggPlayer>>, String> {
+    PLAYER
+        .lock()
+        .map_err(|_| "Ogg Vorbis chiptune lock is poisoned".to_owned())
+}
+
 pub fn probe(path: &Path) -> Result<Probe, String> {
     let mut player = OggPlayer::open(path)?;
     let mut peak = 0;
@@ -297,5 +362,22 @@ mod tests {
         assert!(player.position_ms() > 0);
         player.rewind().unwrap();
         assert_eq!(player.position_ms(), 0);
+    }
+
+    #[test]
+    fn owns_one_decoder_through_the_global_boundary() {
+        close().unwrap();
+        let metadata = open(&fixture()).unwrap();
+        assert_eq!((metadata.title, metadata.artist), (Vec::new(), Vec::new()));
+        assert!(metadata.length_ms >= 50000);
+        let snapshot = step().unwrap();
+        assert_eq!((snapshot.ended, snapshot.frames), (false, FRAMES_PER_TICK));
+        assert_eq!(snapshot.samples.len(), FRAMES_PER_TICK * 2);
+        assert!(snapshot.position_ms > 0);
+        rewind().unwrap();
+        assert_eq!(step().unwrap().position_ms, snapshot.position_ms);
+        assert!(open(Path::new("/no/such/retrodeck-chiptune.ogg")).is_err());
+        assert!(step().is_err());
+        close().unwrap();
     }
 }

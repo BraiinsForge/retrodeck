@@ -1,8 +1,8 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use pbkdf2::pbkdf2_hmac_array;
 use retrodeck_native::{
-    audio, canvas, control_file, controls, fbdev, input, network, polling, process, regular_file,
-    state_file, wayland,
+    audio, canvas, chiptune, control_file, controls, fbdev, input, network, polling, process,
+    regular_file, state_file, wayland,
 };
 use sha2::Sha256;
 use std::env;
@@ -44,7 +44,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 21;
+const ABI_VERSION: ClFixnum = 22;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -234,6 +234,12 @@ impl Ecl {
 
         for (name, function) in [
             ("AUDIO-ACTIVE-P", native_audio_active as EclFixedFunction),
+            ("CHIPTUNE-STEP", native_chiptune_step as EclFixedFunction),
+            (
+                "CHIPTUNE-REWIND",
+                native_chiptune_rewind as EclFixedFunction,
+            ),
+            ("CHIPTUNE-CLOSE", native_chiptune_close as EclFixedFunction),
             (
                 "PROCESS-SHUTDOWN-P",
                 native_process_shutdown as EclFixedFunction,
@@ -313,6 +319,10 @@ impl Ecl {
         }
 
         for (name, function) in [
+            (
+                "CHIPTUNE-OPEN",
+                native_chiptune_open as EclOneArgumentFunction,
+            ),
             (
                 "CANVAS-CLEAR",
                 native_canvas_clear as EclOneArgumentFunction,
@@ -400,12 +410,58 @@ impl Drop for Ecl {
         input::close_touch();
         wayland::close();
         audio::stop();
+        let _ = chiptune::close();
         unsafe { cl_shutdown() };
     }
 }
 
 unsafe extern "C" fn native_abi_version() -> ClObject {
     unsafe { ecl_make_integer(ABI_VERSION) }
+}
+
+unsafe extern "C" fn native_chiptune_open(path: ClObject) -> ClObject {
+    let result = decode_path(path, "chiptune path").and_then(|path| chiptune::open(&path));
+    match result {
+        Ok(metadata) => make_object_list(&[
+            make_base_string(&metadata.title, "chiptune title"),
+            make_base_string(&metadata.artist, "chiptune artist"),
+            unsafe { ecl_make_integer(metadata.length_ms as ClFixnum) },
+        ]),
+        Err(error) => {
+            eprintln!("retrodeck: {error}");
+            ECL_NIL
+        }
+    }
+}
+
+unsafe extern "C" fn native_chiptune_step() -> ClObject {
+    match chiptune::step() {
+        Ok(snapshot) => {
+            let pcm = snapshot
+                .samples
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>();
+            make_object_list(&[
+                make_base_string(&pcm, "chiptune PCM"),
+                unsafe { ecl_make_integer(boolean_fixnum(snapshot.ended)) },
+                unsafe { ecl_make_integer(snapshot.frames as ClFixnum) },
+                unsafe { ecl_make_integer(snapshot.position_ms as ClFixnum) },
+            ])
+        }
+        Err(error) => {
+            eprintln!("retrodeck: {error}");
+            ECL_NIL
+        }
+    }
+}
+
+unsafe extern "C" fn native_chiptune_rewind() -> ClObject {
+    native_status(chiptune::rewind())
+}
+
+unsafe extern "C" fn native_chiptune_close() -> ClObject {
+    native_status(chiptune::close())
 }
 
 unsafe extern "C" fn native_run_helper(executable: ClObject, input: ClObject) -> ClObject {

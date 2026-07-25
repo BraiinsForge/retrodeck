@@ -904,6 +904,7 @@
           cp ${./lisp/timer.lisp} timer.lisp
           cp ${./lisp/policy.lisp} policy.lisp
           cp ${./lisp/chiptune.lisp} chiptune.lisp
+          cp ${./chiptunes/crazy.ogg} crazy.ogg
           cp ${./lisp/process.lisp} process.lisp
           cp ${./lisp/settings.lisp} settings.lisp
           cp ${./lisp/wifi.lisp} wifi.lisp
@@ -993,7 +994,8 @@
             --subst-var-by palette ${./deploy/menu/palette.tsv} \
             --subst-var-by combined_games "$PWD/combined-games.tsv" \
             --subst-var-by invalid_games "$PWD/invalid-games.tsv" \
-            --subst-var-by credits ${./deploy/menu/credits.tsv}
+            --subst-var-by credits ${./deploy/menu/credits.tsv} \
+            --subst-var-by chiptune "$PWD/crazy.ogg"
           WAYLAND_DISPLAY=retrodeck-smoke \
             XDG_RUNTIME_DIR=/tmp \
             RETRO_DECK_VOLUME_PERCENT=0 \

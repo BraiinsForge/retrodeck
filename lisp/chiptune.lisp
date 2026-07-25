@@ -181,6 +181,48 @@
       (and (typep visual 'sequence) (= (length visual) 1470)
            (every (lambda (sample) (typep sample '(signed-byte 16))) visual))))
 
+(defun open-chiptune-file (path)
+  (check-type path string)
+  (let ((result (retrodeck.native:chiptune-open (native-path-string path))))
+    (when result
+      (unless (and (listp result) (= (length result) 3)
+                   (stringp (first result)) (stringp (second result))
+                   (typep (third result) '(integer -1 *)))
+        (error "Malformed native chiptune metadata ~S" result))
+      (destructuring-bind (title artist length) result
+        (list :title (if (plusp (length title)) title (chiptune-base-name path))
+              :subtitle artist :system "OGG VORBIS" :length length
+              :track-index 0 :track-count 1)))))
+
+(defun chiptune-decode-pcm (pcm)
+  (unless (and (stringp pcm) (= (length pcm) 2940))
+    (error "Native chiptune PCM must contain 2940 bytes"))
+  (let ((visual (make-array 1470 :element-type '(signed-byte 16))))
+    (dotimes (index 1470 visual)
+      (let* ((offset (* index 2))
+             (unsigned (logior (char-code (char pcm offset))
+                               (ash (char-code (char pcm (1+ offset))) 8))))
+        (setf (aref visual index)
+              (if (logbitp 15 unsigned) (- unsigned #x10000) unsigned))))))
+
+(defun step-chiptune-file ()
+  (let ((result (retrodeck.native:chiptune-step)))
+    (when result
+      (unless (and (listp result) (= (length result) 4)
+                   (stringp (first result))
+                   (member (second result) '(0 1))
+                   (typep (third result) '(integer 0 735))
+                   (typep (fourth result) '(integer 0 *)))
+        (error "Malformed native chiptune snapshot ~S" result))
+      (values (chiptune-decode-pcm (first result))
+              (= (second result) 1) (third result) (fourth result)))))
+
+(defun rewind-chiptune-file ()
+  (= (retrodeck.native:chiptune-rewind) 1))
+
+(defun close-chiptune-file ()
+  (= (retrodeck.native:chiptune-close) 1))
+
 (defun make-chiptune-render-state
     (&key ready (title "") (subtitle "") (system "") (position 0) (length -1)
        (file-index 0) (file-count 0) (track-index 0) (track-count 0)
