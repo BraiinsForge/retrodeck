@@ -159,7 +159,7 @@
             pkgsCross.stdenv.cc
             pkgs.nukeReferences
           ];
-          buildInputs = [ pkgsCross.glibc.static ];
+          buildInputs = [ pkgsCross.glibc.static staticCross.libvorbis ];
           allowedReferences = [ ];
 
           buildPhase = ''
