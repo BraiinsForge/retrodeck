@@ -691,6 +691,10 @@ mod tests {
         ControlAction::Report(report(KEYBOARD_REPORT, u32::from(code.0), flags))
     }
 
+    fn assert_keyboard_report(state: &mut KeyboardState, code: KeyCode, value: i32, flags: u32) {
+        assert_eq!(state.handle(key(code, value)), keyboard_report(code, flags));
+    }
+
     fn gamepad_report(value: u32) -> ControlAction {
         ControlAction::Report(report(GAMEPAD_REPORT, value, 0))
     }
@@ -706,30 +710,19 @@ mod tests {
     #[test]
     fn keyboard_tracks_shift_and_accepts_only_arrow_repeats() {
         let mut state = KeyboardState::default();
-        assert_handle!(
-            state,
-            key(KeyCode::KEY_TAB, 1),
-            keyboard_report(KeyCode::KEY_TAB, 0)
-        );
+        assert_keyboard_report(&mut state, KeyCode::KEY_TAB, 1, 0);
         assert_handle!(state, key(KeyCode::KEY_LEFTSHIFT, 1), ControlAction::Ignore);
-        assert_handle!(
-            state,
-            key(KeyCode::KEY_TAB, 1),
-            keyboard_report(KeyCode::KEY_TAB, KEYBOARD_SHIFT)
-        );
+        assert_keyboard_report(&mut state, KeyCode::KEY_TAB, 1, KEYBOARD_SHIFT);
         assert_handle!(state, key(KeyCode::KEY_TAB, 2), ControlAction::Ignore);
-        assert_handle!(
-            state,
-            key(KeyCode::KEY_RIGHT, 2),
-            keyboard_report(KeyCode::KEY_RIGHT, KEYBOARD_SHIFT | KEYBOARD_REPEAT)
+        assert_keyboard_report(
+            &mut state,
+            KeyCode::KEY_RIGHT,
+            2,
+            KEYBOARD_SHIFT | KEYBOARD_REPEAT,
         );
         state.handle(key(KeyCode::KEY_RIGHTSHIFT, 1));
         state.handle(key(KeyCode::KEY_LEFTSHIFT, 0));
-        assert_handle!(
-            state,
-            key(KeyCode::KEY_ENTER, 1),
-            keyboard_report(KeyCode::KEY_ENTER, KEYBOARD_SHIFT)
-        );
+        assert_keyboard_report(&mut state, KeyCode::KEY_ENTER, 1, KEYBOARD_SHIFT);
         state.handle(key(KeyCode::KEY_RIGHTSHIFT, 0));
         assert_handle!(state, key(KeyCode::KEY_ENTER, 0), ControlAction::Ignore);
     }
@@ -746,11 +739,7 @@ mod tests {
         assert_handle!(state, key(KeyCode::KEY_TAB, 1), ControlAction::Ignore);
         assert_handle!(state, report_boundary(), ControlAction::Resynchronize);
         state.resynchronize(false, true);
-        assert_handle!(
-            state,
-            key(KeyCode::KEY_TAB, 1),
-            keyboard_report(KeyCode::KEY_TAB, KEYBOARD_SHIFT)
-        );
+        assert_keyboard_report(&mut state, KeyCode::KEY_TAB, 1, KEYBOARD_SHIFT);
     }
 
     #[test]
@@ -786,17 +775,9 @@ mod tests {
     #[test]
     fn keyboard_emits_unknown_presses_but_filters_non_arrow_repeats() {
         let mut state = KeyboardState::default();
-        assert_handle!(
-            state,
-            key(KeyCode::KEY_KPENTER, 1),
-            keyboard_report(KeyCode::KEY_KPENTER, 0)
-        );
+        assert_keyboard_report(&mut state, KeyCode::KEY_KPENTER, 1, 0);
         assert_handle!(state, key(KeyCode::KEY_KPENTER, 2), ControlAction::Ignore);
-        assert_handle!(
-            state,
-            key(KeyCode::KEY_A, 1),
-            keyboard_report(KeyCode::KEY_A, 0)
-        );
+        assert_keyboard_report(&mut state, KeyCode::KEY_A, 1, 0);
     }
 
     #[test]
