@@ -26,8 +26,7 @@
   '(("nes" ".nes" "#FF5F00" 8388608 :nes)
     ("gb" ".gb" "#87AF87" 8388608 :gb)
     ("gbc" ".gbc" "#5F87D7" 8388608 :gbc)
-    ("zx" ".tap" "#AF87D7" 8388608 :zx)
-    ("chip8" ".ch8" "#5FD7D7" 65024 :chip8)))
+    ("zx" ".tap" "#AF87D7" 8388608 :zx)))
 (defparameter *palette-specs*
   '(("background" . "Background") ("text-dark" . "Dark text")
     ("field" . "Field") ("surface" . "Surface")
@@ -220,8 +219,7 @@
                                                                           (unless (zerop checksum) (fail "the TAP file has an invalid block checksum")))
                                                                         (incf offset block)
                                                                         (incf blocks)))
-         (when (zerop blocks) (fail "the TAP file contains no blocks"))))
-      (:chip8 nil))
+         (when (zerop blocks) (fail "the TAP file contains no blocks")))))
     bytes))
 (defun file-extension (name)
   (let ((dot (and (stringp name) (position #\. name :from-end t))))
@@ -412,7 +410,7 @@
 (defparameter *page-head*
   "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><meta name=\"robots\" content=\"noindex, nofollow\"><title>Retro Deck ROM uploader</title><link rel=\"stylesheet\" href=\"/assets/paper.css\"><script src=\"/assets/palette.js\" defer></script></head><body><a class=\"skip-link\" href=\"#main-content\">Skip to content</a><main id=\"main-content\"><header><h1>ROM uploader</h1>")
 (defparameter *upload-form*
-  "<form action=\"/upload\" method=\"post\" enctype=\"multipart/form-data\"><input type=\"hidden\" name=\"csrf\" value=\"~A\"><label><span>Console</span><select name=\"system\" required><option value=\"nes\">NES</option><option value=\"gb\">Game Boy</option><option value=\"gbc\">Game Boy Color</option><option value=\"zx\">ZX Spectrum</option><option value=\"chip8\">CHIP-8</option></select></label><label><span>Game name</span><input type=\"text\" name=\"title\" minlength=\"1\" maxlength=\"64\" autocomplete=\"off\" required></label><label><span>ROM or ZIP</span><input type=\"file\" name=\"rom\" accept=\".nes,.gb,.gbc,.tap,.ch8,.zip\" required></label><button type=\"submit\" class=\"primary-button\">Upload game</button></form>")
+  "<form action=\"/upload\" method=\"post\" enctype=\"multipart/form-data\"><input type=\"hidden\" name=\"csrf\" value=\"~A\"><label><span>Console</span><select name=\"system\" required><option value=\"nes\">NES</option><option value=\"gb\">Game Boy</option><option value=\"gbc\">Game Boy Color</option><option value=\"zx\">ZX Spectrum</option></select></label><label><span>Game name</span><input type=\"text\" name=\"title\" minlength=\"1\" maxlength=\"64\" autocomplete=\"off\" required></label><label><span>ROM or ZIP</span><input type=\"file\" name=\"rom\" accept=\".nes,.gb,.gbc,.tap,.zip\" required></label><button type=\"submit\" class=\"primary-button\">Upload game</button></form>")
 (defparameter *login-form* "<form action=\"/login\" method=\"post\"><label><span>Password</span><input type=\"password\" name=\"password\" minlength=\"8\" maxlength=\"128\" autocomplete=\"current-password\" required autofocus></label><button type=\"submit\" class=\"primary-button\">Sign in</button></form>")
 (defun page (session &key error notice palette)
   (flet ((escape (value)

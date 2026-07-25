@@ -54,11 +54,11 @@ cp "$UPLOADER_ASSET_ROOT/uploader-paper.css" "$work/assets/"
 cp "$UPLOADER_ASSET_ROOT/uploader-palette.js" "$work/assets/"
 printf 'fixture\n' > "$work/data/nes-deck/uploader/password.conf"
 chmod 600 "$work/data/nes-deck/uploader/password.conf"
-printf '\001\200\377\004' > "$work/raw-game.ch8"
-printf '\011\200\377' > "$work/zip-game.ch8"
+printf '\002\000\252\252' > "$work/raw-game.tap"
+printf '\002\000\125\125' > "$work/zip-game.tap"
 mkdir "$work/zip-source"
-cp "$work/zip-game.ch8" "$work/zip-source/zip-game.ch8"
-(cd "$work/zip-source" && zip -q "$work/one.zip" zip-game.ch8)
+cp "$work/zip-game.tap" "$work/zip-source/zip-game.tap"
+(cd "$work/zip-source" && zip -q "$work/one.zip" zip-game.tap)
 
 printf '#!%s\n' "$UPLOADER_SHELL" > "$work/password-helper"
 cat >> "$work/password-helper" <<'EOF'
@@ -163,36 +163,36 @@ request 403 -b "$work/cookies" -H "Origin: $origin" \
 request 403 -b "$work/cookies" -H "Origin: $origin" \
   --data 'background=%23123456' "$origin/palette"
 request 403 -b "$work/cookies" -H "Origin: $origin" \
-  -F csrf=wrong -F system=chip8 -F 'title=Rejected Game' \
-  -F "rom=@$work/raw-game.ch8;filename=rejected.ch8" "$origin/upload"
+  -F csrf=wrong -F system=zx -F 'title=Rejected Game' \
+  -F "rom=@$work/raw-game.tap;filename=rejected.tap" "$origin/upload"
 
 request 200 -b "$work/cookies" -H "Origin: $origin" \
-  -F "csrf=$csrf" -F system=chip8 -F 'title=Raw Game' \
-  -F "rom=@$work/raw-game.ch8;filename=raw-game.ch8" "$origin/upload"
+  -F "csrf=$csrf" -F system=zx -F 'title=Raw Game' \
+  -F "rom=@$work/raw-game.tap;filename=raw-game.tap" "$origin/upload"
 grep -q 'Raw Game was validated, filed, and added to the dashboard.' \
   "$work/response.body"
-cmp "$work/raw-game.ch8" "$work/data/roms/chip8/raw-game.ch8"
-[[ $(stat -c '%a' "$work/data/roms/chip8/raw-game.ch8") == 600 ]]
+cmp "$work/raw-game.tap" "$work/data/roms/zx/raw-game.tap"
+[[ $(stat -c '%a' "$work/data/roms/zx/raw-game.tap") == 600 ]]
 
 request 200 -b "$work/cookies" -H "Origin: $origin" \
-  -F "csrf=$csrf" -F system=chip8 -F 'title=Zip Game' \
+  -F "csrf=$csrf" -F system=zx -F 'title=Zip Game' \
   -F "rom=@$work/one.zip;filename=one.zip" "$origin/upload"
 grep -q 'Zip Game was validated, filed, and added to the dashboard.' \
   "$work/response.body"
-cmp "$work/zip-game.ch8" "$work/data/roms/chip8/zip-game.ch8"
-printf 'upload-chip8-raw-game\tRaw Game\tchip8\t%s\t#5FD7D7\n' \
-  "$work/data/roms/chip8/raw-game.ch8" > "$work/expected-games.tsv"
-printf 'upload-chip8-zip-game\tZip Game\tchip8\t%s\t#5FD7D7\n' \
-  "$work/data/roms/chip8/zip-game.ch8" >> "$work/expected-games.tsv"
+cmp "$work/zip-game.tap" "$work/data/roms/zx/zip-game.tap"
+printf 'upload-zx-raw-game\tRaw Game\tzx\t%s\t#AF87D7\n' \
+  "$work/data/roms/zx/raw-game.tap" > "$work/expected-games.tsv"
+printf 'upload-zx-zip-game\tZip Game\tzx\t%s\t#AF87D7\n' \
+  "$work/data/roms/zx/zip-game.tap" >> "$work/expected-games.tsv"
 cmp "$work/expected-games.tsv" "$work/data/nes-deck/uploads/games.tsv"
 [[ $(stat -c '%a' "$work/data/nes-deck/uploads/games.tsv") == 600 ]]
 
-printf '\377' > "$work/replacement.ch8"
+printf '\002\000\063\063' > "$work/replacement.tap"
 request 422 -b "$work/cookies" -H "Origin: $origin" \
-  -F "csrf=$csrf" -F system=chip8 -F 'title=Raw Game' \
-  -F "rom=@$work/replacement.ch8;filename=raw-game.ch8" "$origin/upload"
+  -F "csrf=$csrf" -F system=zx -F 'title=Raw Game' \
+  -F "rom=@$work/replacement.tap;filename=raw-game.tap" "$origin/upload"
 grep -q 'a game with this title is already cataloged' "$work/response.body"
-cmp "$work/raw-game.ch8" "$work/data/roms/chip8/raw-game.ch8"
+cmp "$work/raw-game.tap" "$work/data/roms/zx/raw-game.tap"
 cmp "$work/expected-games.tsv" "$work/data/nes-deck/uploads/games.tsv"
 
 palette=(background text-dark field surface inactive-border control-border footer \
