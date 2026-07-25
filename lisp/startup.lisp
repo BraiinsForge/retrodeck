@@ -15,6 +15,7 @@
            #:chiptune-close
            #:chiptune-open
            #:chiptune-rewind
+           #:chiptune-start-track
            #:chiptune-step
            #:evdev-controls-close
            #:evdev-controls-dispatch
@@ -134,6 +135,7 @@
            #:open-chiptune-file
            #:render-chiptune
            #:rewind-chiptune-file
+           #:start-chiptune-track
            #:step-chiptune-file
            #:write-chiptune-audio
            #:*dashboard-brightness-minimum*
@@ -346,7 +348,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 23)
+(defconstant +native-abi-version+ 24)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))

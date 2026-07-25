@@ -44,7 +44,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 23;
+const ABI_VERSION: ClFixnum = 24;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -328,6 +328,10 @@ impl Ecl {
                 native_chiptune_open as EclOneArgumentFunction,
             ),
             (
+                "CHIPTUNE-START-TRACK",
+                native_chiptune_start_track as EclOneArgumentFunction,
+            ),
+            (
                 "CHIPTUNE-AUDIO-OPEN",
                 native_chiptune_audio_open as EclOneArgumentFunction,
             ),
@@ -432,19 +436,29 @@ unsafe extern "C" fn native_abi_version() -> ClObject {
     unsafe { ecl_make_integer(ABI_VERSION) }
 }
 
-unsafe extern "C" fn native_chiptune_open(path: ClObject) -> ClObject {
-    let result = decode_path(path, "chiptune path").and_then(|path| chiptune::open(&path));
+fn chiptune_metadata_list(result: Result<chiptune::Metadata, String>) -> ClObject {
     match result {
         Ok(metadata) => make_object_list(&[
             make_base_string(&metadata.title, "chiptune title"),
             make_base_string(&metadata.artist, "chiptune artist"),
+            make_base_string(&metadata.author, "chiptune author"),
+            make_base_string(&metadata.system, "chiptune system"),
             unsafe { ecl_make_integer(metadata.length_ms as ClFixnum) },
+            unsafe { ecl_make_integer(metadata.track_count as ClFixnum) },
         ]),
         Err(error) => {
             eprintln!("retrodeck: {error}");
             ECL_NIL
         }
     }
+}
+
+unsafe extern "C" fn native_chiptune_open(path: ClObject) -> ClObject {
+    chiptune_metadata_list(decode_path(path, "chiptune path").and_then(|path| chiptune::open(&path)))
+}
+
+unsafe extern "C" fn native_chiptune_start_track(track: ClObject) -> ClObject {
+    chiptune_metadata_list(decode_i32(track, "chiptune track").and_then(chiptune::start_track))
 }
 
 unsafe extern "C" fn native_chiptune_step() -> ClObject {

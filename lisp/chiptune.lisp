@@ -181,18 +181,38 @@
       (and (typep visual 'sequence) (= (length visual) 1470)
            (every (lambda (sample) (typep sample '(signed-byte 16))) visual))))
 
+(defun chiptune-ogg-path-p (path)
+  (let ((length (length path)))
+    (and (>= length 4) (string-equal path ".ogg" :start1 (- length 4)))))
+
+(defun chiptune-compose-metadata (path native track-index)
+  (unless (and (listp native) (= (length native) 6)
+               (every #'stringp (subseq native 0 4))
+               (typep (fifth native) '(integer -1 *))
+               (typep (sixth native) '(integer 1 *)))
+    (error "Malformed native chiptune metadata ~S" native))
+  (destructuring-bind (title game author system length track-count) native
+    (unless (< track-index track-count)
+      (error "Chiptune track ~D is out of range" track-index))
+    (list :title (if (plusp (length title)) title (chiptune-base-name path))
+          :subtitle (if (and (plusp (length game)) (plusp (length author)))
+                        (concatenate 'string game " - " author)
+                        (if (plusp (length game)) game author))
+          :system (if (chiptune-ogg-path-p path) "OGG VORBIS" system)
+          :length length :track-index track-index :track-count track-count)))
+
 (defun open-chiptune-file (path)
   (check-type path string)
   (let ((result (retrodeck.native:chiptune-open (native-path-string path))))
     (when result
-      (unless (and (listp result) (= (length result) 3)
-                   (stringp (first result)) (stringp (second result))
-                   (typep (third result) '(integer -1 *)))
-        (error "Malformed native chiptune metadata ~S" result))
-      (destructuring-bind (title artist length) result
-        (list :title (if (plusp (length title)) title (chiptune-base-name path))
-              :subtitle artist :system "OGG VORBIS" :length length
-              :track-index 0 :track-count 1)))))
+      (chiptune-compose-metadata path result 0))))
+
+(defun start-chiptune-track (path track)
+  (check-type path string)
+  (check-type track (integer 0 *))
+  (let ((result (retrodeck.native:chiptune-start-track track)))
+    (when result
+      (chiptune-compose-metadata path result track))))
 
 (defun chiptune-decode-pcm (pcm)
   (unless (and (stringp pcm) (= (length pcm) 2940))

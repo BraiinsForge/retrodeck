@@ -44,8 +44,8 @@
        *wayland-dispatch-timeout* *wayland-touch* *wayland-touch-queue*
        *wayland-size* *helper-arguments* *terminal-arguments*
        *child-arguments* *chiptune-open-result* *chiptune-step-result*
-       *chiptune-open-path* *chiptune-audio-open-volume*
-       *chiptune-audio-write-pcm*)
+       *chiptune-open-path* *chiptune-start-track-index*
+       *chiptune-audio-open-volume* *chiptune-audio-write-pcm*)
   ("" *control-file-read-result*)
   ('(1 2 3 4) *canvas-hash-words* *monotonic-words*)
   ('(0) *state-file-read-result*)
@@ -110,7 +110,7 @@
     (push :sound *interaction-trace*))
   *play-status*)
 (define-native-test-functions
-  (abi-version () 23)
+  (abi-version () 24)
   (audio-active-p () (incf *active-count*) *active-status*)
   (chiptune-audio-open (volume)
     (setf *chiptune-audio-open-volume* volume)
@@ -121,6 +121,9 @@
   (chiptune-audio-close () *chiptune-audio-close-status*)
   (chiptune-open (path)
     (setf *chiptune-open-path* path)
+    *chiptune-open-result*)
+  (chiptune-start-track (track)
+    (setf *chiptune-start-track-index* track)
     *chiptune-open-result*)
   (chiptune-step () *chiptune-step-result*)
   (chiptune-rewind () *chiptune-rewind-status*)
@@ -916,14 +919,31 @@
     (sample 0 -32768)
     (sample 1 32767)
     (sample 1469 -1))
-  (let ((*chiptune-open-result* '("" "artist" 50851))
+  (let ((*chiptune-open-result* '("" "artist" "" "" 50851 1))
         (*chiptune-step-result* (list pcm 0 735 66))
-        (*chiptune-open-path* nil))
+        (*chiptune-open-path* nil)
+        (*chiptune-start-track-index* nil))
     (assert (equal (retrodeck:open-chiptune-file "/tmp/crazy.ogg")
                    '(:title "crazy" :subtitle "artist" :system "OGG VORBIS"
                      :length 50851 :track-index 0 :track-count 1)))
     (assert (and (typep *chiptune-open-path* 'base-string)
                  (string= *chiptune-open-path* "/tmp/crazy.ogg")))
+    (let ((*chiptune-open-result*
+            '("Song 3" "Game" "Author" "Nintendo NES" 150000 4)))
+      (assert (equal (retrodeck:open-chiptune-file "/tmp/game.nsf")
+                     '(:title "Song 3" :subtitle "Game - Author"
+                       :system "Nintendo NES" :length 150000
+                       :track-index 0 :track-count 4)))
+      (assert (equal (retrodeck:start-chiptune-track "/tmp/game.nsf" 2)
+                     '(:title "Song 3" :subtitle "Game - Author"
+                       :system "Nintendo NES" :length 150000
+                       :track-index 2 :track-count 4)))
+      (assert (= *chiptune-start-track-index* 2))
+      (assert-signals error (retrodeck:start-chiptune-track "/tmp/game.nsf" 4)))
+    (let ((*chiptune-open-result* '("" "" "COMPOSER" "Spectrum" -1 2)))
+      (assert (equal (retrodeck:open-chiptune-file "/tmp/tune.ay")
+                     '(:title "tune" :subtitle "COMPOSER" :system "Spectrum"
+                       :length -1 :track-index 0 :track-count 2))))
     (multiple-value-bind (visual ended frames position raw-pcm)
         (retrodeck:step-chiptune-file)
       (assert (and (typep visual '(simple-array (signed-byte 16) (1470)))
@@ -955,6 +975,7 @@
 (let ((*chiptune-open-result* '("bad"))
       (*chiptune-step-result* '("short" 0 735 0)))
   (assert-signals error (retrodeck:open-chiptune-file "/tmp/bad.ogg"))
+  (assert-signals error (retrodeck:start-chiptune-track "/tmp/bad.nsf" 0))
   (assert-signals error (retrodeck:step-chiptune-file))
   (assert-signals error (retrodeck:open-chiptune-audio 101))
   (assert-signals error (retrodeck:write-chiptune-audio "short")))
