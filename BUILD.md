@@ -53,7 +53,6 @@ nix build --no-link --print-out-paths .#retrodeck-native
 nix build --no-link --print-out-paths .#nes-deck
 nix build --no-link --print-out-paths .#gb-deck
 nix build --no-link --print-out-paths .#zx-deck
-nix build --no-link --print-out-paths .#chip8-deck
 nix build --no-link --print-out-paths .#ten-seconds-deck
 nix build --no-link --print-out-paths .#deck-menu
 nix build --no-link --print-out-paths .#fbterm-deck
@@ -73,7 +72,6 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 | `nes-deck` | `bin/nes-deck` |
 | `gb-deck` | `bin/gb-deck` |
 | `zx-deck` | `bin/zx-deck` |
-| `chip8-deck` | `bin/chip8-deck` |
 | `ten-seconds-deck` | `bin/ten-seconds-deck` |
 | `deck-menu` | `bin/deck-menu` |
 | `fbterm-deck` | `bin/{fbterm,loadkeys}` plus font and keymaps |
@@ -232,8 +230,8 @@ tests/run-host-tests.sh
 It covers Lisp menu-sound policy, the Rust menu-tone renderer, NES mixer, APU
 noise, SRAM codec, controller and keyboard input, dashboard geometry and
 behavior, ROM catalog, cover cache, Wi-Fi profile helper, rlwrap-backed
-terminal lifecycle, shared framebuffer/audio runtime, timer configuration, and
-CHIP-8 core.
+terminal lifecycle, shared framebuffer/audio runtime, and timer
+configuration.
 
 The suite also runs the uploader's Go tests for authentication, request
 boundaries, ROM validation, atomic storage, and the Paper UI contract.
@@ -335,7 +333,7 @@ Audio uses `/dev/dsp` through the Deck's ALSA OSS bridge. All streams use
 signed 16-bit little-endian samples. Emulator and chiptune streams are stereo;
 the menu and timer cues are mono. FCEUmm reports 48 kHz. The OSS device stays at its
 required nominal 48 kHz while the runtime resamples to the measured 47,328
-frames/s application clock. Fuse, CHIP-8, the timer, menu cues, and chiptunes
+frames/s application clock. Fuse, the timer, menu cues, and chiptunes
 use 44.1 kHz. Gambatte produces 32,768 Hz and is explicitly resampled to the
 Deck's verified 32 kHz OSS rate. Gain is applied in the native mixer because
 the kernel OSS path bypasses ALSA userspace soft volume.
@@ -360,7 +358,7 @@ retrodeck/
 ├── nix/                        ECL and runtime-specific Nix expressions
 ├── ops/
 │   ├── bmc/                    external BMC patch application
-│   ├── deck-menu/              covers, screenshots, and FOSS CHIP-8 fetcher
+│   ├── deck-menu/              covers and screenshots
 │   ├── deck-wifi/              profile-only Wi-Fi helper
 │   ├── deploy/                 validated on-Deck activation transaction
 │   ├── lib/                    shared strict deployment configuration parser
@@ -382,7 +380,6 @@ retrodeck/
 │   ├── deck_runtime.cpp        video selection, audio, and frame clock
 │   ├── deck_wayland.cpp        shared-memory widget and game surfaces
 │   ├── libretro_deck.cpp       NES, GB/GBC, and ZX host
-│   ├── chip8_deck.cpp          CHIP-8 frontend
 │   ├── chiptune_deck.cpp       GME and Ogg native music player
 │   ├── ten_seconds_deck.cpp    native timing game
 │   └── joypad_input.cpp        stable two-controller input

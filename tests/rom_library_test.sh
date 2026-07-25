@@ -44,9 +44,6 @@ while IFS="$tab" read -r id title system path color; do
 				exit 1
 			fi
 			;;
-		chip8)
-			case $path in /mnt/data/roms/chip8/*.ch8) ;; *) exit 1 ;; esac
-			;;
 		deck)
 			case $path in /mnt/data/nes-deck/games/*) ;; *) exit 1 ;; esac
 			;;

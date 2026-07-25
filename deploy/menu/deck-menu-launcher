@@ -19,6 +19,8 @@ MENU=$MENU_DIR/deck-menu
 NES_EMULATOR=$BASE/nes-deck
 GB_EMULATOR=$BASE/gb-deck
 ZX_EMULATOR=$BASE/zx-deck
+# CHIP-8 is retired; deck-menu still requires a non-empty flag until the
+# C++ dashboard is replaced, and no catalog entry can reach it.
 CHIP8_EMULATOR=$BASE/chip8-deck
 DECK_GAME=$BASE/ten-seconds-deck
 CHIPTUNE_PLAYER=$BASE/chiptune-deck
@@ -135,10 +137,6 @@ if [ ! -x "$GB_EMULATOR" ]; then
 fi
 if [ ! -x "$ZX_EMULATOR" ]; then
 	log_message "ZX Spectrum emulator is missing or not executable: $ZX_EMULATOR"
-	exit 1
-fi
-if [ ! -x "$CHIP8_EMULATOR" ]; then
-	log_message "CHIP-8 emulator is missing or not executable: $CHIP8_EMULATOR"
 	exit 1
 fi
 if [ ! -x "$DECK_GAME" ]; then

@@ -9,7 +9,6 @@ roms/
   gb/
   gbc/
   zx/
-  chip8/
 ```
 
 Filenames are lowercase kebab-case and omit dump-set metadata. The original

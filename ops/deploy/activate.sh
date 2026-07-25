@@ -59,7 +59,7 @@ trap restore_service_after_failure EXIT
 
 # Validate the complete payload before stopping a running service.
 for executable in \
-  nes-deck gb-deck zx-deck chip8-deck ten-seconds-deck chiptune-deck; do
+  nes-deck gb-deck zx-deck ten-seconds-deck chiptune-deck; do
   [ -x "$stage/nes-deck/$executable" ] || {
     echo "Staged executable is missing: $executable" >&2
     exit 1
@@ -198,7 +198,6 @@ fi
 cp -p "$stage/nes-deck/nes-deck" "$base/nes-deck"
 cp -p "$stage/nes-deck/gb-deck" "$base/gb-deck"
 cp -p "$stage/nes-deck/zx-deck" "$base/zx-deck"
-cp -p "$stage/nes-deck/chip8-deck" "$base/chip8-deck"
 cp -p "$stage/nes-deck/ten-seconds-deck" "$base/ten-seconds-deck"
 cp -p "$stage/nes-deck/chiptune-deck" "$base/chiptune-deck"
 cp -p "$stage/nes-deck/retrodeck-native" "$base/retrodeck-native"
@@ -232,6 +231,12 @@ mkdir -p "$base/menu" "$base/terminal" "$base/licenses"
 cp -Rp "$stage/nes-deck/menu/." "$base/menu/"
 rm -rf "$base/menu/settings-icons"
 rm -f "$base/menu/knekko-settings-icons.tsv"
+# CHIP-8 was retired from the product.
+rm -f "$base/chip8-deck"
+rm -rf /mnt/data/roms/chip8
+if [ -f "$base/uploads/games.tsv" ]; then
+  sed -i '/	chip8	/d' "$base/uploads/games.tsv"
+fi
 rm -rf "$base/games.new"
 mkdir -p "$base/games.new"
 cp -Rp "$stage/nes-deck/games/." "$base/games.new/"
@@ -264,7 +269,7 @@ mv "$base/langs/chibi.new" "$base/langs/chibi"
 cp -p "$stage/nes-deck/langs/lua" "$base/langs/lua"
 cp -p "$stage/nes-deck/langs/python" "$base/langs/python"
 
-for system in nes gb gbc zx chip8; do
+for system in nes gb gbc zx; do
   mkdir -p "/mnt/data/roms/$system"
   cp -Rp "$stage/roms/$system/." "/mnt/data/roms/$system/"
 done

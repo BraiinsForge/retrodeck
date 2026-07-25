@@ -24,7 +24,7 @@ details when they are needed for archaeology.
 - `/mnt/data` is the persistent application volume. Deployment refuses to
   activate when that mount is absent.
 - Tracked ROMs install under `/mnt/data/roms/<system>/`. The systems are `nes`,
-  `gb`, `gbc`, `zx`, and `chip8`.
+  `gb`, `gbc`, and `zx`.
 - Language working directories live under `/mnt/data/langs/`. Chiptunes live
   under `/mnt/data/chiptunes`.
 - Runtime state, logs, covers, licenses, and launchers live under
@@ -84,11 +84,8 @@ details when they are needed for archaeology.
 | NES | FCEUmm | 256 by 224 after vertical overscan crop | 60.100 Hz |
 | GB and GBC | Gambatte | 160 by 144 | 59.728 Hz |
 | ZX Spectrum | Fuse | 320 by 240 core output | 50 Hz |
-| CHIP-8 | c-octo based frontend | VM-specific low resolution | 60 Hz host loop |
 
 - NES renders at exact 2x scale as 512 by 448 inside the safe area.
-- CHIP-8, SCHIP, and XO-CHIP frames use indexed source pixels and integer
-  nearest-neighbor expansion.
 - The chiptune player supports GME formats and 44.1 kHz mono or stereo Ogg
   Vorbis. It does not recurse without bounds or follow symbolic links.
 - Console emulators display a top-left exit cross. Holding anywhere for two

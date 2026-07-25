@@ -71,7 +71,6 @@ cd "$repo_root"
 work=$(mktemp -d "${TMPDIR:-/tmp}/nes-deck-deploy.XXXXXX")
 trap 'rm -rf "$work"' EXIT INT TERM HUP
 payload=$work/payload
-foss=$work/foss-games
 
 build_flake() {
   local attribute=$1
@@ -82,7 +81,6 @@ echo "Building static ARM payloads..."
 nes=$(build_flake .#nes-deck)
 gb=$(build_flake .#gb-deck)
 zx=$(build_flake .#zx-deck)
-chip8=$(build_flake .#chip8-deck)
 timer=$(build_flake .#ten-seconds-deck)
 menu=$(build_flake .#deck-menu)
 native=$(build_flake .#retrodeck-native)
@@ -95,8 +93,6 @@ chiptune=$(build_flake .#chiptune-deck)
 uploader=$(build_flake .#rom-uploader)
 runtime_licenses=$(build_flake .#runtime-licenses)
 ecl=$(nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix | tail -n 1)
-
-ops/deck-menu/fetch-foss-games.sh "$foss"
 
 mkdir -p \
   "$payload/nes-deck/menu" \
@@ -118,7 +114,6 @@ mkdir -p \
 cp "$nes/bin/nes-deck" "$payload/nes-deck/nes-deck"
 cp "$gb/bin/gb-deck" "$payload/nes-deck/gb-deck"
 cp "$zx/bin/zx-deck" "$payload/nes-deck/zx-deck"
-cp "$chip8/bin/chip8-deck" "$payload/nes-deck/chip8-deck"
 cp "$timer/bin/ten-seconds-deck" "$payload/nes-deck/ten-seconds-deck"
 cp "$menu/bin/deck-menu" "$payload/nes-deck/menu/deck-menu"
 cp "$native/bin/retrodeck-native" "$payload/nes-deck/retrodeck-native"
@@ -179,13 +174,12 @@ cp deploy/menu/deck-keyboard-quirks \
 cp deploy/uploader/nes-deck-uploader.init \
   "$payload/etc/init.d/nes-deck-uploader"
 
-for result in "$nes" "$gb" "$zx" "$chip8" "$fbterm" "$rlwrap" "$lua" \
+for result in "$nes" "$gb" "$zx" "$fbterm" "$rlwrap" "$lua" \
               "$python" "$chibi" "$chiptune" "$runtime_licenses" "$ecl"; do
   if [[ -d $result/share/licenses ]]; then
     cp -a "$result/share/licenses/." "$payload/nes-deck/licenses/"
   fi
 done
-cp -a "$foss/licenses/." "$payload/nes-deck/licenses/"
 
 if [[ -d chiptunes ]]; then
   find chiptunes -maxdepth 1 -type f \( -name '*.ogg' -o -name '*.ay' -o \
@@ -194,19 +188,16 @@ if [[ -d chiptunes ]]; then
     -name '*.vgm' -o -name '*.vgz' \) -exec cp {} "$payload/chiptunes/" \;
 fi
 
-for system in nes gb gbc zx chip8; do
+for system in nes gb gbc zx; do
   mkdir -p "$payload/roms/$system"
   if [[ -d roms/$system ]]; then
     cp -a "roms/$system/." "$payload/roms/$system/"
-  fi
-  if [[ -d $foss/roms/$system ]]; then
-    cp -a "$foss/roms/$system/." "$payload/roms/$system/"
   fi
 done
 
 find "$payload/nes-deck" -type f \( \
   -name 'nes-deck' -o -name 'gb-deck' -o -name 'zx-deck' -o \
-  -name 'chip8-deck' -o -name 'ten-seconds-deck' -o \
+  -name 'ten-seconds-deck' -o \
   -name 'chiptune-deck' -o -name 'retrodeck-native' -o \
   -name 'deck-menu' -o \
   -name 'deck-menu-launcher' -o -name 'fetch-covers' -o \

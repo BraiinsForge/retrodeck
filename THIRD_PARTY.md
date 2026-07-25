@@ -13,11 +13,11 @@ notices from the exact source archives used in its build.
 
 Source identity is reproducible from these files:
 
-- `flake.lock` pins the emulator cores, CHIP-8 implementation, and Nixpkgs.
+- `flake.lock` pins the emulator cores and Nixpkgs.
 - `flake.nix` names every native runtime and its linked libraries.
 - `nix/ecl-arm-static.nix` pins the independent ECL build environment.
-- `FOSS_GAMES.md`, `chiptunes/README.md`, and `deploy/menu/ASSETS.md` record
-  the included CC0 games, music, and settings icons.
+- `chiptunes/README.md` and `deploy/menu/ASSETS.md` record the included CC0
+  music and settings icons.
 
 Owner-supplied ROMs are private data. They are not third-party project
 dependencies and are not relicensed by this repository.

@@ -46,7 +46,6 @@ The launcher also expects:
 - `/mnt/data/nes-deck/nes-deck`
 - `/mnt/data/nes-deck/gb-deck`
 - `/mnt/data/nes-deck/zx-deck`
-- `/mnt/data/nes-deck/chip8-deck`
 - `/mnt/data/nes-deck/ten-seconds-deck`
 - `/mnt/data/nes-deck/chiptune-deck`
 - `/mnt/data/nes-deck/ecl/bin/ecl.bin` (ECL 26.5.5)
@@ -58,7 +57,7 @@ The launcher also expects:
 - `/mnt/data/nes-deck/terminal/retro-terminal`
 - `/mnt/data/nes-deck/terminal/{fbterm,loadkeys,rlwrap,keymaps/}`
 - `/usr/sbin/deck-wifi-profile-add`
-- `/mnt/data/roms/{nes,gb,gbc,zx,chip8}/` and the ROM paths listed in
+- `/mnt/data/roms/{nes,gb,gbc,zx}/` and the ROM paths listed in
   `games.sexp`
 - `/mnt/data/langs/{lua,lisp,python,scheme}/` for persistent REPL files
 - `/mnt/data/chiptunes/` for user and tracked music files
@@ -172,7 +171,7 @@ five required keys:
 
 1. `:id` - lowercase stable identifier
 2. `:title` - menu title
-3. `:system` - one of `:nes`, `:gb`, `:gbc`, `:zx`, `:chip8`, or `:deck`
+3. `:system` - one of `:nes`, `:gb`, `:gbc`, `:zx`, or `:deck`
 4. `:rom` - normalized absolute path below `/mnt/data/roms/<system>/` with the
    system's required extension; Deck applications stay below
    `/mnt/data/nes-deck/games/`

@@ -3,7 +3,7 @@
 Retro Deck turns a Braiins Forge Deck into a persistent touch-first game and
 program launcher. It runs as a fullscreen BMC scene when `bmc-compositor` is
 installed and retains a direct-framebuffer mode for Decks without BMC. The
-dashboard provides NES, Game Boy, Game Boy Color, ZX Spectrum, CHIP-8,
+dashboard provides NES, Game Boy, Game Boy Color, ZX Spectrum,
 utilities, language REPLs, and a chiptune player. Two Retro Games THEGamepad
 controllers work as stable Player 1 and Player 2 devices.
 
@@ -94,7 +94,6 @@ build and test commands are in [BUILD.md](BUILD.md).
 | Game Boy | Gambatte | `/mnt/data/roms/gb` |
 | Game Boy Color | Gambatte | `/mnt/data/roms/gbc` |
 | ZX Spectrum | Fuse | `/mnt/data/roms/zx` |
-| CHIP-8 | c-octo | `/mnt/data/roms/chip8` |
 | Deck | Native programs and REPLs | `/mnt/data/langs`, `/mnt/data/chiptunes` |
 
 The Deck section contains:
@@ -117,7 +116,7 @@ mono or stereo. Ten CC0 tracks are included with provenance and checksums in
 Open `http://<DECK_WLAN_ADDRESS>:8080` on the Deck's local network or
 `http://<DECK_WIREGUARD_ADDRESS>:8080` through WireGuard, then sign in with the
 password from your private deployment configuration. The
-Paper-style intake page accepts a raw NES, GB, GBC, ZX Spectrum, or CHIP-8 ROM,
+Paper-style intake page accepts a raw NES, GB, GBC, or ZX Spectrum ROM,
 or a ZIP containing exactly one matching ROM. It validates the payload,
 refuses to replace an existing file, files it below
 `/mnt/data/roms/<system>/`, updates a private supplemental catalog, and
@@ -187,15 +186,14 @@ same hub ports to preserve Player 1 and Player 2 across boots.
 | Start | Start |
 | Select | Back |
 
-NES, GB, and GBC use this mapping. CHIP-8 uses the standard Octo mapping,
-except Space Racer maps one controller to each ship. ZX Spectrum assigns
+NES, GB, and GBC use this mapping. ZX Spectrum assigns
 Kempston to Player 1 and Sinclair 2 to Player 2; A/X fires, Back opens the
 Spectrum keyboard, L is Enter, and R is Space. A connected physical keyboard
 is passed through as the Spectrum keyboard, so letters, digits, Space, Enter,
 Backspace, Shift, Control, Alt, and the arrow keys retain their keyboard
 meaning instead of using the console-game mapping below.
 
-A keyboard remains a Player 1 fallback for NES, GB/GBC, and CHIP-8:
+A keyboard remains a Player 1 fallback for NES and GB/GBC:
 
 | Console control | Keyboard |
 | --- | --- |
@@ -208,14 +206,12 @@ A keyboard remains a Player 1 fallback for NES, GB/GBC, and CHIP-8:
 ## ROMs and save games
 
 `roms/<system>/` is the canonical tracked library. Supported intake folders
-are `nes`, `gb`, `gbc`, `zx`, and `chip8`. A ROM or single-ROM ZIP at the
+are `nes`, `gb`, `gbc`, and `zx`. A ROM or single-ROM ZIP at the
 repository root is unprocessed intake and must be validated, renamed, filed,
 checksummed, and added to the catalog before deployment. See
 [roms/README.md](roms/README.md) for the exact intake contract.
 
-The repository contains owner-supplied console ROMs and only freely licensed
-CHIP-8 ROMs. The reproducible CHIP-8 sources, licenses, and hashes are recorded
-in [FOSS_GAMES.md](FOSS_GAMES.md).
+The repository contains owner-supplied console ROMs.
 
 NES battery SRAM is saved atomically beside the ROM as `.srm`. GB and GBC use
 `.sav` plus `.rtc` when the cartridge has a real-time clock. The deploy script

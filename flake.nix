@@ -19,10 +19,6 @@
       url = "github:libretro/fuse-libretro/bce196fb774835fe65b3e5b821887a4ccf657167";
       flake = false;
     };
-    c-octo-src = {
-      url = "github:JohnEarnest/c-octo/5f62f185c9e6ae324dcbe9e7fe35ec7c3bdebfb1";
-      flake = false;
-    };
     lua-src = {
       url = "https://www.lua.org/ftp/lua-5.5.0.tar.gz";
       flake = false;
@@ -30,7 +26,7 @@
   };
 
   outputs =
-    { self, nixpkgs, fenix, fceumm-src, gambatte-src, fuse-src, c-octo-src, lua-src }:
+    { self, nixpkgs, fenix, fceumm-src, gambatte-src, fuse-src, lua-src }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
@@ -92,12 +88,6 @@
       nesSources = sourceTree (libretroSources ++ [ ./src/nes_sram.h ]);
       gbSources = sourceTree libretroSources;
       zxSources = sourceTree (libretroSources ++ [ ./src/zx_keyboard.h ]);
-      chip8Sources = sourceTree (runtimeSources ++ [
-        ./src/chip8_core.c
-        ./src/chip8_core.h
-        ./src/chip8_deck.cpp
-        ./src/joypad_input.cpp
-      ]);
       chiptuneSources = sourceTree (runtimeSources ++ [
         ./src/chiptune_deck.cpp
       ]);
@@ -598,60 +588,6 @@
             description = "Fuse ZX Spectrum core with Deck-native framebuffer frontend";
             homepage = "https://github.com/libretro/fuse-libretro";
             license = pkgs.lib.licenses.gpl3Only;
-            platforms = [ "armv7l-linux" ];
-          };
-        };
-
-        chip8-deck = pkgsCross.stdenv.mkDerivation {
-          pname = "chip8-deck";
-          version = "1.2-deck";
-
-          dontUnpack = true;
-          nativeBuildInputs = [ pkgs.nukeReferences ] ++ waylandNativeInputs;
-          buildInputs = [ pkgsCross.glibc.static ] ++ waylandStaticInputs;
-          allowedReferences = [ ];
-
-          NIX_CFLAGS_COMPILE = "-static -O3";
-          NIX_LDFLAGS = "-static";
-
-          buildPhase = ''
-            runHook preBuild
-            ${waylandProtocolBuild}
-            cp ${chip8Sources}/chip8_core.c deck_chip8_core.c
-            cp ${chip8Sources}/chip8_deck.cpp deck_chip8_deck.cpp
-            cp ${chip8Sources}/deck_runtime.cpp deck_runtime.cpp
-            cp ${chip8Sources}/deck_wayland.cpp deck_wayland.cpp
-            cp ${chip8Sources}/joypad_input.cpp deck_joypad_input.cpp
-            $CC -std=c99 -O3 -Wall -Wextra -Werror \
-              -I${c-octo-src}/src -I${chip8Sources} \
-              -c deck_chip8_core.c -o chip8_core.o
-            $CXX -std=c++11 -O3 -Wall -Wextra -Wpedantic -Werror \
-              -DRETRO_DECK_WAYLAND=1 -I. -I${chip8Sources} \
-              deck_chip8_deck.cpp \
-              deck_runtime.cpp \
-              deck_wayland.cpp \
-              deck_joypad_input.cpp \
-              deck-widget-v1-protocol.o \
-              wlr-layer-shell-unstable-v1-protocol.o \
-              chip8_core.o -static -pthread -lm -lwayland-client -lffi \
-              -o chip8-deck
-            runHook postBuild
-          '';
-
-          installPhase = ''
-            runHook preInstall
-            mkdir -p $out/bin $out/share/licenses/chip8-deck
-            install -m755 chip8-deck $out/bin/chip8-deck
-            install -m644 ${c-octo-src}/LICENSE.txt \
-              $out/share/licenses/chip8-deck/c-octo-LICENSE
-            nuke-refs $out/bin/chip8-deck
-            runHook postInstall
-          '';
-
-          meta = {
-            description = "c-octo CHIP-8/SCHIP/XO-CHIP core with Deck-native frontend";
-            homepage = "https://github.com/JohnEarnest/c-octo";
-            license = pkgs.lib.licenses.mit;
             platforms = [ "armv7l-linux" ];
           };
         };
