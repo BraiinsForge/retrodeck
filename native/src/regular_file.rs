@@ -2,7 +2,42 @@ use rustix::fs::{FileType, Mode, OFlags, fstat, open};
 use rustix::io::Errno;
 use std::fs::File;
 use std::io::Read;
+use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
+
+pub struct DirectoryEntry {
+    pub name: Vec<u8>,
+    pub kind: i32,
+    pub size: u64,
+}
+
+pub const ENTRY_FILE: i32 = 0;
+pub const ENTRY_DIRECTORY: i32 = 1;
+pub const ENTRY_OTHER: i32 = 2;
+
+pub fn list_directory(path: &Path) -> Result<Vec<DirectoryEntry>, String> {
+    let entries = std::fs::read_dir(path)
+        .map_err(|error| format!("cannot list directory {}: {error}", path.display()))?;
+    let mut result = Vec::new();
+    for entry in entries {
+        let Ok(entry) = entry else { continue };
+        let Ok(metadata) = std::fs::symlink_metadata(entry.path()) else {
+            continue;
+        };
+        result.push(DirectoryEntry {
+            name: entry.file_name().as_bytes().to_vec(),
+            kind: if metadata.is_file() {
+                ENTRY_FILE
+            } else if metadata.is_dir() {
+                ENTRY_DIRECTORY
+            } else {
+                ENTRY_OTHER
+            },
+            size: if metadata.is_file() { metadata.len() } else { 0 },
+        });
+    }
+    Ok(result)
+}
 
 pub fn read_regular(
     path: &Path,
@@ -69,6 +104,32 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn lists_entries_with_lstat_kinds_and_sizes() {
+        let directory = fixture_directory("list-directory");
+        std::fs::write(directory.join("track.ogg"), b"ogg").unwrap();
+        std::fs::create_dir(directory.join("nested")).unwrap();
+        symlink(directory.join("track.ogg"), directory.join("linked.ogg")).unwrap();
+
+        let mut entries = list_directory(&directory).unwrap();
+        entries.sort_by(|left, right| left.name.cmp(&right.name));
+        let summary = entries
+            .iter()
+            .map(|entry| (entry.name.as_slice(), entry.kind, entry.size))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            summary,
+            vec![
+                (b"linked.ogg".as_slice(), ENTRY_OTHER, 0),
+                (b"nested".as_slice(), ENTRY_DIRECTORY, 0),
+                (b"track.ogg".as_slice(), ENTRY_FILE, 3),
+            ]
+        );
+        assert!(list_directory(&directory.join("missing")).is_err());
 
         std::fs::remove_dir_all(directory).unwrap();
     }

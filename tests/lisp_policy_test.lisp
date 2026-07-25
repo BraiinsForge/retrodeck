@@ -45,7 +45,8 @@
        *wayland-size* *helper-arguments* *terminal-arguments*
        *child-arguments* *chiptune-open-result* *chiptune-step-result*
        *chiptune-open-path* *chiptune-start-track-index*
-       *chiptune-audio-open-volume* *chiptune-audio-write-pcm*)
+       *chiptune-audio-open-volume* *chiptune-audio-write-pcm*
+       *list-directory-path* *list-directory-result*)
   ("" *control-file-read-result*)
   ('(1 2 3 4) *canvas-hash-words* *monotonic-words*)
   ('(0) *state-file-read-result*)
@@ -110,7 +111,10 @@
     (push :sound *interaction-trace*))
   *play-status*)
 (define-native-test-functions
-  (abi-version () 24)
+  (abi-version () 25)
+  (list-directory (path)
+    (setf *list-directory-path* path)
+    *list-directory-result*)
   (audio-active-p () (incf *active-count*) *active-status*)
   (chiptune-audio-open (volume)
     (setf *chiptune-audio-open-volume* volume)
@@ -882,6 +886,52 @@
                        ("demo.mp3" 1 nil) ("demo.ogg" 0 nil)
                        ("demo.ogg" 16777217 nil) ("demo" 1 nil)
                        (,(format nil "demo.~CSS" (code-char #x212a)) 1 nil)))
+(flet ((lister-for (tree)
+         (lambda (path)
+           (cdr (assoc path tree :test #'string=)))))
+  (let ((tree
+          '(("/music"
+             (:name "zelda.nsf" :kind :file :size 4096)
+             (:name ".hidden.ogg" :kind :file :size 4096)
+             (:name "broken.ogg" :kind :other :size 0)
+             (:name "huge.spc" :kind :file :size 16777217)
+             (:name "empty.gbs" :kind :file :size 0)
+             (:name "readme.txt" :kind :file :size 12)
+             (:name "b-side" :kind :directory :size 0)
+             (:name "a-side" :kind :directory :size 0))
+            ("/music/a-side"
+             (:name "crazy.OGG" :kind :file :size 100))
+            ("/music/b-side"
+             (:name "deep" :kind :directory :size 0))
+            ("/music/b-side/deep"
+             (:name "tune.ay" :kind :file :size 1)))))
+    (assert (equal (retrodeck:scan-chiptune-files
+                    "/music" :lister (lister-for tree))
+                   '("/music/a-side/crazy.OGG"
+                     "/music/b-side/deep/tune.ay"
+                     "/music/zelda.nsf"))))
+  (let ((tree '(("/deep" (:name "d" :kind :directory :size 0))
+                ("/deep/d" (:name "d" :kind :directory :size 0))
+                ("/deep/d/d" (:name "d" :kind :directory :size 0))
+                ("/deep/d/d/d" (:name "d" :kind :directory :size 0))
+                ("/deep/d/d/d/d"
+                 (:name "reachable.ogg" :kind :file :size 1)
+                 (:name "d" :kind :directory :size 0))
+                ("/deep/d/d/d/d/d"
+                 (:name "unreachable.ogg" :kind :file :size 1)))))
+    (assert (equal (retrodeck:scan-chiptune-files
+                    "/deep" :lister (lister-for tree))
+                   '("/deep/d/d/d/d/reachable.ogg"))))
+  (let ((retrodeck:*chiptune-maximum-files* 2))
+    (assert (equal (retrodeck:scan-chiptune-files
+                    "/cap"
+                    :lister (lister-for
+                             '(("/cap"
+                                (:name "c.ogg" :kind :file :size 1)
+                                (:name "a.ogg" :kind :file :size 1)
+                                (:name "b.ogg" :kind :file :size 1)))))
+                   '("/cap/a.ogg" "/cap/b.ogg")))))
+(assert-signals type-error (retrodeck:scan-chiptune-files 4))
 (assert-binary-table #'string= #'retrodeck:chiptune-display-text
                      '(("a_z 9.:+-/Č!" 64 "A Z 9.:+-/")
                        ("abcdef" 6 "ABCDEF") ("abcdef" 5 "AB...")

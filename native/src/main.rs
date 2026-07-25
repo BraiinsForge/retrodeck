@@ -44,7 +44,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 24;
+const ABI_VERSION: ClFixnum = 25;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -330,6 +330,10 @@ impl Ecl {
             (
                 "CHIPTUNE-START-TRACK",
                 native_chiptune_start_track as EclOneArgumentFunction,
+            ),
+            (
+                "LIST-DIRECTORY",
+                native_list_directory as EclOneArgumentFunction,
             ),
             (
                 "CHIPTUNE-AUDIO-OPEN",
@@ -825,6 +829,32 @@ unsafe extern "C" fn native_read_regular_file(
         )
     })();
     native_optional_string(result)
+}
+
+unsafe extern "C" fn native_list_directory(path: ClObject) -> ClObject {
+    let result = decode_path(path, "directory path")
+        .and_then(|path| regular_file::list_directory(&path));
+    match result {
+        Ok(entries) => {
+            let items = entries
+                .iter()
+                .map(|entry| {
+                    make_object_list(&[
+                        make_base_string(&entry.name, "directory entry name"),
+                        unsafe { ecl_make_integer(entry.kind as ClFixnum) },
+                        unsafe {
+                            ecl_make_integer(ClFixnum::try_from(entry.size).unwrap_or(ClFixnum::MAX))
+                        },
+                    ])
+                })
+                .collect::<Vec<_>>();
+            make_object_list(&items)
+        }
+        Err(error) => {
+            eprintln!("retrodeck: {error}");
+            ECL_NIL
+        }
+    }
 }
 
 unsafe extern "C" fn native_read_control_file(path: ClObject) -> ClObject {

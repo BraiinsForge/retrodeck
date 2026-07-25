@@ -33,6 +33,7 @@
            #:fbdev-size
            #:finish-audio
            #:input-poll
+           #:list-directory
            #:monotonic-nanoseconds-words
            #:network-status
            #:play-tone-sequence
@@ -91,6 +92,7 @@
                 #:fbdev-size
                 #:finish-audio
                 #:input-poll
+                #:list-directory
                 #:monotonic-nanoseconds-words
                 #:network-status
                 #:play-tone-sequence
@@ -135,6 +137,7 @@
            #:open-chiptune-file
            #:render-chiptune
            #:rewind-chiptune-file
+           #:scan-chiptune-files
            #:start-chiptune-track
            #:step-chiptune-file
            #:write-chiptune-audio
@@ -266,6 +269,7 @@
            #:load-dashboard-volume-state
            #:load-project-credits
            #:render-ten-seconds
+           #:list-native-directory
            #:load-text-mask
            #:main
            #:make-dashboard-runtime
@@ -348,7 +352,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 24)
+(defconstant +native-abi-version+ 25)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -502,6 +506,20 @@
   (when (> minimum-bytes maximum-bytes)
     (error "Regular file byte bounds are invalid"))
   (read-regular-file (native-path-string path) minimum-bytes maximum-bytes))
+
+(defun list-native-directory (path)
+  (check-type path string)
+  (mapcar (lambda (entry)
+            (unless (and (listp entry) (= (length entry) 3)
+                         (stringp (first entry))
+                         (typep (second entry) '(integer 0 2))
+                         (typep (third entry) '(integer 0 *)))
+              (error "Invalid native directory entry ~S" entry))
+            (list :name (first entry)
+                  :kind (ecase (second entry)
+                          (0 :file) (1 :directory) (2 :other))
+                  :size (third entry)))
+          (list-directory (native-path-string path))))
 
 (defun load-text-mask (text scale)
   (check-type text string)

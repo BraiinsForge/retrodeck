@@ -591,6 +591,38 @@
                           (subseq path dot))
                      *chiptune-extensions* :test #'string=))))))
 
+(defun scan-chiptune-files (directory &key (lister #'list-native-directory))
+  "Collect supported chiptune paths the way the C++ player scanned them."
+  (check-type directory string)
+  (check-type lister function)
+  (let ((files nil) (count 0))
+    (labels ((entry-name (entry) (getf entry :name))
+             (visible-p (entry)
+               (let ((name (entry-name entry)))
+                 (and (plusp (length name))
+                      (char/= (char name 0) #\.))))
+             (walk (path depth)
+               (when (or (> depth *chiptune-maximum-depth*)
+                         (>= count *chiptune-maximum-files*))
+                 (return-from walk))
+               (dolist (entry (sort (remove-if-not #'visible-p
+                                                   (funcall lister path))
+                                    #'string< :key #'entry-name))
+                 (when (>= count *chiptune-maximum-files*)
+                   (return))
+                 (let ((child (concatenate 'string path "/"
+                                           (entry-name entry))))
+                   (ecase (getf entry :kind)
+                     (:directory (walk child (1+ depth)))
+                     (:file
+                      (when (chiptune-file-accepted-p
+                             child (getf entry :size))
+                        (push child files)
+                        (incf count)))
+                     (:other nil))))))
+      (walk directory 0))
+    (sort (nreverse files) #'string<)))
+
 (defun chiptune-display-text (input maximum)
   (check-type input string)
   (check-type maximum (integer 0 *))
