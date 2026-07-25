@@ -17,16 +17,14 @@ details for development.
 
 ## Prerequisites
 
-Install Nix with flakes enabled. Host tests also require C, C++, Rust, and
-Common Lisp compilers, `pkg-config`, libpng and Wayland development headers,
-`wayland-scanner`, and ImageMagick.
+Install Nix with flakes enabled. Host tests also require Rust and Common
+Lisp compilers.
 
 On Debian or Ubuntu:
 
 ```sh
 sudo apt-get install \
-  build-essential cargo imagemagick libpng-dev libwayland-dev pkg-config \
-  rustc sbcl
+  cargo rustc sbcl
 ```
 
 Then clone the private repository:
@@ -39,12 +37,13 @@ cd retrodeck
 The first Nix build downloads the pinned cross toolchain and may take several
 minutes. Later builds reuse the Nix store.
 
-Each native runtime receives an explicit local source set. Keep new source
-and header files in the corresponding source set near the top of `flake.nix`;
-do not add the complete `src/` directory as a build input. The dashboard,
-timer, and chiptune player are startup-loaded Common Lisp served by
-`retrodeck-native`; deployment installs them as `deck-menu`,
-`ten-seconds-deck`, and `chiptune-deck` symlinks to that binary.
+The dashboard, timer, and chiptune player are startup-loaded Common Lisp
+served by `retrodeck-native`; deployment installs them as `deck-menu`,
+`ten-seconds-deck`, and `chiptune-deck` symlinks to that binary. The console
+emulators are Rust libretro hosts (`native/src/bin/retro-host/`) with the
+pinned FCEUmm, Gambatte, and Fuse cores statically linked, one binary per
+console. The `libretro-host-smoke` flake check runs each emulator headless
+under QEMU against a tracked ROM and pins its 120-frame video hash.
 
 ## Build packages individually
 
@@ -170,9 +169,7 @@ publishes finished rows. The Lisp runtime adapter now exposes initialization, a
 single-iteration coordinator, and shutdown: Lisp reads the pre-poll clock,
 runs recovery and timers, chooses the policy timeout, invokes the aggregate
 native poll, dispatches the normalized snapshot, and preserves the combined
-effect trace. Startup opens neither display backend automatically, so the Rust
-host remains harmless beside the working C++ dashboard until Lisp rendering
-reaches full parity.
+effect trace.
 
 Build the host and run its focused mechanism tests with:
 
@@ -338,11 +335,6 @@ retrodeck/
 ├── patches/                    pinned upstream fixes
 ├── protocol/                   Deck widget and layer-shell client protocols
 ├── roms/                       private canonical ROM library and checksums
-├── src/
-│   ├── deck_runtime.cpp        video selection, audio, and frame clock
-│   ├── deck_wayland.cpp        shared-memory widget and game surfaces
-│   ├── libretro_deck.cpp       NES, GB/GBC, and ZX host
-│   └── joypad_input.cpp        stable two-controller input
 ├── terminal/                   vendored fbterm source and provenance
 ├── tests/                      host regression suite
 ├── flake.nix                   pinned cross-build definitions

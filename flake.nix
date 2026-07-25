@@ -58,8 +58,6 @@
         lockFile = ./native/Cargo.lock;
       };
 
-      waylandNativeInputs = [ pkgs.wayland-scanner ];
-      waylandStaticInputs = [ staticCross.wayland staticCross.libffi ];
       # Build libgme.a with the glibc cross toolchain; pkgsStatic would mix
       # musl objects into a glibc link.
       gmeStaticCross = pkgsCross.stdenv.mkDerivation {
@@ -250,44 +248,6 @@
             platforms = [ system ];
           };
         };
-      # Keep each local build input narrow. Referencing ./src as an include
-      # directory would make every source edit invalidate every native runtime.
-      sourceTree = files: pkgs.lib.fileset.toSource {
-        root = ./src;
-        fileset = pkgs.lib.fileset.unions files;
-      };
-      runtimeSources = [
-        ./src/deck_runtime.cpp
-        ./src/deck_runtime.h
-        ./src/deck_wayland.cpp
-        ./src/deck_wayland.h
-      ];
-      libretroSources = runtimeSources ++ [
-        ./src/joypad_input.cpp
-        ./src/libretro_deck.cpp
-      ];
-      nesSources = sourceTree (libretroSources ++ [ ./src/nes_sram.h ]);
-      gbSources = sourceTree libretroSources;
-      zxSources = sourceTree (libretroSources ++ [ ./src/zx_keyboard.h ]);
-      waylandProtocolBuild = ''
-        wayland-scanner client-header \
-          ${./protocol/deck-widget-v1.xml} \
-          deck-widget-v1-client-protocol.h
-        wayland-scanner private-code \
-          ${./protocol/deck-widget-v1.xml} \
-          deck-widget-v1-protocol.c
-        wayland-scanner client-header \
-          ${./protocol/wlr-layer-shell-unstable-v1.xml} \
-          wlr-layer-shell-unstable-v1-client-protocol.h
-        wayland-scanner private-code \
-          ${./protocol/wlr-layer-shell-unstable-v1.xml} \
-          wlr-layer-shell-unstable-v1-protocol.c
-        $CC -std=c99 -Os -Wall -Wextra -Werror \
-          -c deck-widget-v1-protocol.c -o deck-widget-v1-protocol.o
-        $CC -std=c99 -Os -Wall -Wextra -Werror \
-          -c wlr-layer-shell-unstable-v1-protocol.c \
-          -o wlr-layer-shell-unstable-v1-protocol.o
-      '';
       runtimeLicenses = import ./nix/runtime-licenses.nix {
         inherit pkgs pkgsCross staticCross nativeCargoDeps;
         nixpkgsSource = nixpkgs.outPath;
