@@ -111,11 +111,14 @@ overrides without a Rust
 rebuild. Deployment updates the nine standard Lisp files but leaves an
 existing `local.lisp` untouched.
 
-Native ABI 19 retains the widget-side Wayland and direct-fbdev primitives and
+Native ABI 20 retains the widget-side Wayland and direct-fbdev primitives and
 adds one exact-display Wayland open plus only narrow canvas, raster,
 projected-text, evdev, regular-file, network, state-file, control-file,
-helper-process, audio, managed-child, terminal-process, and aggregate-input
-mechanisms for Lisp to orchestrate. The exact-display primitive connects an
+helper-process, audio, managed-child, terminal-process, aggregate-input, and
+monotonic-clock mechanisms for Lisp to orchestrate. Audio now accepts a bounded
+one-to-three-note Lisp sequence without changing the existing two-note menu
+primitive, and the clock returns `CLOCK_MONOTONIC` nanoseconds as four portable
+16-bit words for Lisp reconstruction. The exact-display primitive connects an
 absolute socket path directly or a relative name below absolute
 `XDG_RUNTIME_DIR` through `wayland-client`; the existing environment-based open
 remains unchanged for explicit mode. Lisp snapshots the policy-named

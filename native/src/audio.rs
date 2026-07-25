@@ -22,9 +22,9 @@ const SNDCTL_DSP_CHANNELS: c_ulong = 0xc0045006;
 const SNDCTL_DSP_SETFRAGMENT: c_ulong = 0xc004500a;
 
 #[derive(Clone, Copy)]
-struct Tone {
-    frequency: c_int,
-    duration_ms: c_int,
+pub struct Tone {
+    pub frequency: c_int,
+    pub duration_ms: c_int,
 }
 
 pub enum PlayOutcome {
@@ -63,8 +63,11 @@ pub fn play_tones(
         second_frequency,
         second_duration_ms,
     )?;
-    validate(&tones[..count], 44100, volume_percent)?;
+    play_tone_sequence(&tones[..count], volume_percent)
+}
 
+pub fn play_tone_sequence(tones: &[Tone], volume_percent: c_int) -> Result<PlayOutcome, String> {
+    validate(tones, 44100, volume_percent)?;
     let mut player = player();
     player.reap_finished();
     if player.child_pid > 0 {
@@ -81,7 +84,7 @@ pub fn play_tones(
             signal(SIG_INT, SIG_DFL);
             signal(SIG_HUP, SIG_DFL);
         }
-        let result = play_blocking(&tones[..count], volume_percent);
+        let result = play_blocking(tones, volume_percent);
         if let Err(error) = result.as_ref() {
             eprintln!("retrodeck: {error}");
         }
@@ -205,8 +208,8 @@ fn tone_sequence(
 }
 
 fn validate(tones: &[Tone], rate: c_int, volume_percent: c_int) -> Result<(), String> {
-    if tones.is_empty() {
-        return Err("at least one menu tone is required".to_owned());
+    if !(1..=3).contains(&tones.len()) {
+        return Err("menu sounds need one through three tones".to_owned());
     }
     if !(1..=100).contains(&volume_percent) {
         return Err("menu sound volume must be between 1 and 100".to_owned());
@@ -342,6 +345,11 @@ mod tests {
             (&[(659, 35)][..], 1543, 0xab6adca9dc7484b9),
             (&[(659, 25), (880, 30)][..], 2425, 0x633b4308002d1688),
             (&[(659, 25), (440, 30)][..], 2425, 0xfe15242926ff4036),
+            (
+                &[(784, 35), (1047, 40), (1319, 55)][..],
+                5732,
+                0xb572c4d4420310d4,
+            ),
         ];
         for (notes, expected_length, expected_digest) in cases {
             let tones = notes
@@ -360,6 +368,17 @@ mod tests {
     #[test]
     fn rejects_invalid_tone_requests() {
         assert!(tone_sequence(659, 25, 0, 30).is_err());
+        assert!(
+            render_tones(
+                &[Tone {
+                    frequency: 659,
+                    duration_ms: 25
+                }; 4],
+                44100,
+                42
+            )
+            .is_err()
+        );
         assert!(
             render_tones(
                 &[Tone {

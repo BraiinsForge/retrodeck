@@ -1,5 +1,6 @@
 use crate::{input, wayland};
 use rustix::event::{PollFd, Timespec, poll};
+use rustix::time::{ClockId, clock_gettime};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -10,6 +11,11 @@ pub struct InputDispatch {
     pub touch_lost: bool,
     pub rescan: bool,
     pub shutdown: bool,
+}
+
+pub fn monotonic_nanoseconds() -> u64 {
+    let now = clock_gettime(ClockId::Monotonic);
+    now.tv_sec as u64 * 1_000_000_000 + now.tv_nsec as u64
 }
 
 pub fn dispatch(wayland_backend: bool, timeout_ms: u32) -> Result<InputDispatch, String> {
@@ -52,6 +58,8 @@ mod tests {
 
     #[test]
     fn polls_one_shared_readiness_snapshot() {
+        let first = monotonic_nanoseconds();
+        assert!(monotonic_nanoseconds() >= first);
         let (reader, mut writer) = UnixStream::pair().unwrap();
         writer.write_all(&[1]).unwrap();
         let mut descriptors = [PollFd::from_borrowed_fd(reader.as_fd(), PollFlags::IN)];

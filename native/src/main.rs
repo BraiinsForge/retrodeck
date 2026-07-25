@@ -44,7 +44,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 19;
+const ABI_VERSION: ClFixnum = 20;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -184,6 +184,10 @@ impl Ecl {
                 "CANVAS-DRAW-PROJECTED-TEXT",
                 native_canvas_draw_projected_text as EclTwoArgumentFunction,
             ),
+            (
+                "PLAY-TONE-SEQUENCE",
+                native_play_tone_sequence as EclTwoArgumentFunction,
+            ),
             ("INPUT-POLL", native_input_poll as EclTwoArgumentFunction),
             ("RUN-HELPER", native_run_helper as EclTwoArgumentFunction),
             (
@@ -233,6 +237,10 @@ impl Ecl {
             (
                 "CANVAS-RGB565-HASH-WORDS",
                 native_canvas_rgb565_hash_words as EclFixedFunction,
+            ),
+            (
+                "MONOTONIC-NANOSECONDS-WORDS",
+                native_monotonic_nanoseconds_words as EclFixedFunction,
             ),
             ("STOP-AUDIO", native_stop_audio as EclFixedFunction),
             ("FINISH-AUDIO", native_finish_audio as EclFixedFunction),
@@ -472,7 +480,7 @@ unsafe extern "C" fn native_play_tones(
     second_duration_ms: ClObject,
     volume_percent: ClObject,
 ) -> ClObject {
-    let result = (|| {
+    native_play_outcome((|| {
         audio::play_tones(
             decode_i32(first_frequency, "first tone frequency")?,
             decode_i32(first_duration_ms, "first tone duration")?,
@@ -480,7 +488,22 @@ unsafe extern "C" fn native_play_tones(
             decode_i32(second_duration_ms, "second tone duration")?,
             decode_i32(volume_percent, "menu sound volume")?,
         )
-    })();
+    })())
+}
+
+unsafe extern "C" fn native_play_tone_sequence(
+    tones: ClObject,
+    volume_percent: ClObject,
+) -> ClObject {
+    native_play_outcome((|| {
+        audio::play_tone_sequence(
+            &decode_tone_sequence(tones)?,
+            decode_i32(volume_percent, "sound volume")?,
+        )
+    })())
+}
+
+fn native_play_outcome(result: Result<audio::PlayOutcome, String>) -> ClObject {
     let status = match result {
         Ok(audio::PlayOutcome::Started) => 1,
         Ok(audio::PlayOutcome::Busy) => 2,
@@ -507,13 +530,11 @@ unsafe extern "C" fn native_finish_audio() -> ClObject {
 }
 
 unsafe extern "C" fn native_canvas_rgb565_hash_words() -> ClObject {
-    let hash = canvas::rgb565_hash();
-    make_fixnum_list(&[
-        ((hash >> 48) & 0xffff) as ClFixnum,
-        ((hash >> 32) & 0xffff) as ClFixnum,
-        ((hash >> 16) & 0xffff) as ClFixnum,
-        (hash & 0xffff) as ClFixnum,
-    ])
+    make_unsigned_64_words(canvas::rgb565_hash())
+}
+
+unsafe extern "C" fn native_monotonic_nanoseconds_words() -> ClObject {
+    make_unsigned_64_words(polling::monotonic_nanoseconds())
 }
 
 unsafe extern "C" fn native_canvas_clear(color: ClObject) -> ClObject {
@@ -1056,6 +1077,15 @@ fn make_fixnum_list(values: &[ClFixnum]) -> ClObject {
     list
 }
 
+fn make_unsigned_64_words(value: u64) -> ClObject {
+    make_fixnum_list(&[
+        ((value >> 48) & 0xffff) as ClFixnum,
+        ((value >> 32) & 0xffff) as ClFixnum,
+        ((value >> 16) & 0xffff) as ClFixnum,
+        (value & 0xffff) as ClFixnum,
+    ])
+}
+
 fn boolean_fixnum(value: bool) -> ClFixnum {
     if value { 1 } else { 0 }
 }
@@ -1084,13 +1114,20 @@ fn decode_path(object: ClObject, name: &str) -> Result<PathBuf, String> {
     Ok(PathBuf::from(OsStr::from_bytes(&bytes)))
 }
 
-fn decode_object_list(object: ClObject, name: &str) -> Result<Vec<ClObject>, String> {
+fn decode_object_list(
+    object: ClObject,
+    name: &str,
+    maximum: usize,
+) -> Result<Vec<ClObject>, String> {
     let mut values = Vec::new();
     let mut seen = Vec::new();
     let mut cursor = object;
     while cursor != ECL_NIL {
         if unsafe { cl_consp(cursor) } == ECL_NIL {
             return Err(format!("{name} must be a proper list"));
+        }
+        if values.len() == maximum {
+            return Err(format!("{name} has more than {maximum} items"));
         }
         if seen.contains(&cursor) {
             return Err(format!("{name} cannot be circular"));
@@ -1100,6 +1137,26 @@ fn decode_object_list(object: ClObject, name: &str) -> Result<Vec<ClObject>, Str
         cursor = unsafe { cl_cdr(cursor) };
     }
     Ok(values)
+}
+
+fn decode_tone_sequence(object: ClObject) -> Result<Vec<audio::Tone>, String> {
+    let notes = decode_object_list(object, "tone sequence", 3)?;
+    if !(1..=3).contains(&notes.len()) {
+        return Err("tone sequence needs one through three notes".to_owned());
+    }
+    notes
+        .into_iter()
+        .map(|note| {
+            let pair = decode_object_list(note, "tone", 2)?;
+            let [frequency, duration_ms] = pair.as_slice() else {
+                return Err("each tone needs frequency and duration".to_owned());
+            };
+            Ok(audio::Tone {
+                frequency: decode_i32(*frequency, "tone frequency")?,
+                duration_ms: decode_i32(*duration_ms, "tone duration")?,
+            })
+        })
+        .collect()
 }
 
 fn decode_os_string(object: ClObject, name: &str) -> Result<OsString, String> {
@@ -1114,7 +1171,7 @@ fn decode_os_string(object: ClObject, name: &str) -> Result<OsString, String> {
 }
 
 fn decode_os_string_list(object: ClObject, name: &str) -> Result<Vec<OsString>, String> {
-    decode_object_list(object, name)?
+    decode_object_list(object, name, usize::MAX)?
         .into_iter()
         .enumerate()
         .map(|(index, value)| decode_os_string(value, &format!("{name} item {index}")))
@@ -1122,7 +1179,7 @@ fn decode_os_string_list(object: ClObject, name: &str) -> Result<Vec<OsString>, 
 }
 
 fn decode_environment(object: ClObject) -> Result<Vec<(OsString, OsString)>, String> {
-    decode_object_list(object, "child environment")?
+    decode_object_list(object, "child environment", usize::MAX)?
         .into_iter()
         .enumerate()
         .map(|(index, entry)| {

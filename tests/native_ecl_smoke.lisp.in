@@ -25,7 +25,21 @@
         :touch-supervision t :mirror-console t))
 
 (defun main ()
-  (check (= (retrodeck.native:abi-version) 19) "Native ABI mismatch")
+  (check (= (retrodeck.native:abi-version) 20) "Native ABI mismatch")
+  (let ((first (monotonic-nanoseconds)))
+    (check (and (typep first '(integer 0 *))
+                (>= (monotonic-nanoseconds) first))
+           "Native monotonic clock failed"))
+  (check (= (retrodeck.native:play-tone-sequence
+             '((784 35) (1047 40) (1319 55)) 42) 1)
+         "Valid three-note cue did not start")
+  (retrodeck.native:stop-audio)
+  (check (zerop (retrodeck.native:play-tone-sequence
+                 '((784 35) (1047 40) (1319 55)) 0))
+         "Invalid-volume three-note cue unexpectedly started")
+  (check (zerop (retrodeck.native:play-tone-sequence
+                 '((784 35) (1047 40) (1319 55) (1568 60)) 42))
+         "Four-note cue unexpectedly started")
   (unless (zerop (retrodeck.native:wayland-open-widget-at
                   (coerce "retrodeck-no-wayland-smoke" 'base-string)))
     (error "Relative Wayland display unexpectedly opened"))

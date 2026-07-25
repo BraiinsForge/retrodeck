@@ -45,7 +45,7 @@
        *wayland-size* *helper-arguments* *terminal-arguments*
        *child-arguments*)
   ("" *control-file-read-result*)
-  ('(1 2 3 4) *canvas-hash-words*)
+  ('(1 2 3 4) *canvas-hash-words* *monotonic-words*)
   ('(0) *state-file-read-result*)
   ('("" "" "" "STATUS UNAVAILABLE") *network-status-result*)
   ('(0 0) *evdev-controls-scan-result* *evdev-controls-dispatch-result*)
@@ -68,14 +68,17 @@
      ,@(when calls `((push ,arguments ,calls)))
      ,result))
 
+(defun record-native-play (arguments)
+  (setf *play-arguments* arguments)
+  (when *record-interaction*
+    (push :sound *interaction-trace*))
+  *play-status*)
+
 (define-native-test-functions
-  (abi-version () 19)
+  (abi-version () 20)
   (audio-active-p () (incf *active-count*) *active-status*)
-  (play-tones (&rest arguments)
-    (setf *play-arguments* arguments)
-    (when *record-interaction*
-      (push :sound *interaction-trace*))
-    *play-status*)
+  (play-tones (&rest arguments) (record-native-play arguments))
+  (play-tone-sequence (&rest arguments) (record-native-play arguments))
   (stop-audio () (incf *stop-count*) 0)
   (finish-audio () (incf *finish-count*) 0)
   (canvas-clear (color)
@@ -84,6 +87,7 @@
       (push :render *interaction-trace*))
     *canvas-clear-status*)
   (canvas-rgb565-hash-words () *canvas-hash-words*)
+  (monotonic-nanoseconds-words () *monotonic-words*)
   (canvas-configure-projection (&rest arguments)
     (record-native-call arguments *projection-arguments* *projection-status*))
   (canvas-draw-projected-text (&rest arguments)
@@ -301,6 +305,11 @@
 (assert (retrodeck:play-menu-sound :next 0))
 (assert (null *play-arguments*))
 
+(let ((notes '((784 35) (1047 40) (1319 55))))
+  (setf *play-status* 1)
+  (assert (= (retrodeck.native:play-tone-sequence notes 42) 1))
+  (assert (equal *play-arguments* (list notes 42))))
+
 (setf *active-status* 1
       retrodeck::*menu-sound-input-until-ms* 0)
 (assert (retrodeck:menu-sound-blocks-input-p :controller 100))
@@ -325,6 +334,7 @@
 (assert (retrodeck:clear-canvas #x121212))
 (assert (= *canvas-clear-color* #x121212))
 (assert (= (retrodeck:canvas-rgb565-hash) #x0001000200030004))
+(assert (= (retrodeck:monotonic-nanoseconds) #x0001000200030004))
 (assert (retrodeck:draw-canvas-glyph -4 8 65 2 #xfe6c27))
 (assert (equal *canvas-glyph-arguments* '(-4 8 65 2 #xfe6c27)))
 (assert (retrodeck:draw-canvas-glyph 0 0 0 1 0))

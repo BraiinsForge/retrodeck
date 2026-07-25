@@ -1361,6 +1361,33 @@ focused Rust and Lisp tests. This leaves 3,807 production lines and 26 total lin
 below the 15,909/18,584 budgets without compressed or generated first-party
 source.
 
+## Native timer mechanism checkpoint
+
+Native ABI 20 keeps the existing five-argument menu-tone primitive unchanged and
+adds one bounded one-through-three-tone sequence mechanism. It reuses the same
+non-blocking worker, busy result, reap, stop, OSS output, and waveform path. The
+new three-note 10 Seconds cue independently matches the C++ reference at 5,732
+samples and FNV-1a `b572c4d4420310d4`; a four-note ECL request is rejected before
+the decoder traverses or allocates a fourth item.
+
+The same ABI exposes `CLOCK_MONOTONIC` nanoseconds as four unsigned 16-bit words.
+Startup-loaded Lisp validates and reconstructs the portable unsigned 64-bit value
+and shares that checked decoder with the existing canvas hash. Rust contains no
+timer state, deadlines, cue selection, or input policy. `RETRODECK:MAIN`, the
+launcher, and the authoritative C++ 10 Seconds executable remain unchanged.
+
+Direct Cargo checks, fresh SBCL policy tests, and the x86_64 and ARM/ECL native
+smoke boundaries passed, including a successful native three-note start followed
+by explicit stop, invalid-volume rejection, four-note rejection, and monotonic
+clock reconstruction. Four readable fixture consolidations recovered 102 focused
+test lines before this slice without removing assertions or covered behavior.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 12,199
+production lines, including the existing catalog compiler, and 18,577 lines with
+focused Rust and Lisp tests. This leaves 3,710 production lines and 7 total lines
+below the 15,909/18,584 budgets without compressed or generated first-party
+source.
+
 ## Validation baseline
 
 Updated on 2026-07-25:
@@ -1438,6 +1465,9 @@ Updated on 2026-07-25:
 - The startup-loaded 10 Seconds policy/state/render boundary matched five complete
   C++ RGB565 frames through ARM/ECL; runtime polling, input, audio, presentation,
   and physical timing remain deferred while the C++ executable stays authoritative
+- ABI 20 matched the exact three-note C++ waveform, rejected a fourth note before
+  unbounded ECL traversal, started and stopped the native sequence through ECL,
+  and reconstructed portable `CLOCK_MONOTONIC` nanoseconds on x86_64 and ARM
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 

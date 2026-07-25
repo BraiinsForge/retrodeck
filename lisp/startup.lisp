@@ -24,7 +24,9 @@
            #:fbdev-size
            #:finish-audio
            #:input-poll
+           #:monotonic-nanoseconds-words
            #:network-status
+           #:play-tone-sequence
            #:play-tones
            #:raster-clear
            #:raster-load-cover
@@ -77,7 +79,9 @@
                 #:fbdev-size
                 #:finish-audio
                 #:input-poll
+                #:monotonic-nanoseconds-words
                 #:network-status
+                #:play-tone-sequence
                 #:play-tones
                 #:read-control-file
                 #:read-regular-file
@@ -234,6 +238,7 @@
            #:menu-sound-blocks-input-p
            #:menu-sound-duration-ms
            #:menu-sound-notes
+           #:monotonic-nanoseconds
            #:next-evdev-control
            #:next-evdev-touch
            #:next-wayland-touch
@@ -303,7 +308,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 19)
+(defconstant +native-abi-version+ 20)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -314,6 +319,17 @@
 
 (defparameter *menu-sound-input-tail-ms* 60)
 (defparameter *menu-sound-input-until-ms* 0)
+
+(defun decode-native-unsigned-64 (words label)
+  (unless (and (listp words) (= (length words) 4)
+               (every (lambda (word) (typep word '(integer 0 65535))) words))
+    (error "~A is unavailable" label))
+  (reduce (lambda (value word) (logior (ash value 16) word))
+          words :initial-value 0))
+
+(defun monotonic-nanoseconds ()
+  (decode-native-unsigned-64
+   (monotonic-nanoseconds-words) "Native monotonic clock"))
 
 (defun monotonic-ms ()
   (floor (* 1000 (get-internal-real-time))
@@ -367,11 +383,8 @@
   (= (canvas-clear color) 1))
 
 (defun canvas-rgb565-hash ()
-  (let ((words (canvas-rgb565-hash-words)))
-    (unless (= (length words) 4)
-      (error "Native canvas hash is unavailable"))
-    (reduce (lambda (value word) (logior (ash value 16) word))
-            words :initial-value 0)))
+  (decode-native-unsigned-64
+   (canvas-rgb565-hash-words) "Native canvas hash"))
 
 (defun native-unsigned-64-hex (value)
   (check-type value (integer 0 9223372036854775807))
