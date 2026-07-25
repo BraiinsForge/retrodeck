@@ -220,7 +220,7 @@ impl Widget {
         Ok(widget)
     }
 
-    fn open_gameplay(display: Option<&Path>) -> Result<Self, String> {
+    fn open_gameplay(display: Option<&Path>, width: u32, height: u32) -> Result<Self, String> {
         let (queue, mut state) = connect(display)?;
         let qh = queue.handle();
         let compositor = state.compositor.clone().unwrap();
@@ -262,8 +262,6 @@ impl Widget {
             &qh,
             false,
         );
-        let width = (GAME_SOURCE_WIDTH * 2) as u32;
-        let height = (GAME_SOURCE_HEIGHT * 2) as u32;
         layer_surface.set_size(width, height);
         layer_surface
             .set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::None);
@@ -621,10 +619,82 @@ pub fn open_widget_at(display: &Path) -> Result<(), String> {
 }
 
 pub fn open_gameplay_at(display: &Path) -> Result<(), String> {
+    open_game_surface_at(
+        display,
+        (GAME_SOURCE_WIDTH * 2) as u32,
+        (GAME_SOURCE_HEIGHT * 2) as u32,
+    )
+}
+
+pub fn open_game_surface_at(display: &Path, width: u32, height: u32) -> Result<(), String> {
     close();
-    let widget = Widget::open_gameplay(Some(display))?;
+    let widget = Widget::open_gameplay(Some(display), width, height)?;
     WIDGET.with(|current| *current.borrow_mut() = Some(widget));
     Ok(())
+}
+
+pub fn present_game_xrgb(
+    frame: &[u32],
+    source_width: usize,
+    source_height: usize,
+) -> Result<(), String> {
+    with_widget(|widget| {
+        let width = widget.state.width as usize;
+        let height = widget.state.height as usize;
+        widget.present_frame(|pixels| {
+            scale_game_frame(frame, source_width, source_height, pixels, width, height);
+        })
+    })
+}
+
+fn scale_game_frame(
+    frame: &[u32],
+    source_width: usize,
+    source_height: usize,
+    pixels: &mut [u32],
+    target_width: usize,
+    target_height: usize,
+) {
+    if pixels.len() < target_width * target_height
+        || frame.len() < source_width * source_height
+        || source_width == 0
+        || source_height == 0
+    {
+        return;
+    }
+    if target_width == source_width && target_height == source_height {
+        pixels[..frame.len()].copy_from_slice(frame);
+        return;
+    }
+    let scale_x = target_width / source_width;
+    let scale_y = target_height / source_height;
+    if scale_x >= 1
+        && scale_x == scale_y
+        && source_width * scale_x == target_width
+        && source_height * scale_y == target_height
+    {
+        // Fill one expanded row, then duplicate it for the remaining rows.
+        for source_y in 0..source_height {
+            let first_row = source_y * scale_y * target_width;
+            for source_x in 0..source_width {
+                let value = frame[source_y * source_width + source_x];
+                let start = first_row + source_x * scale_x;
+                pixels[start..start + scale_x].fill(value);
+            }
+            for duplicate in 1..scale_y {
+                let row = first_row + duplicate * target_width;
+                let (head, tail) = pixels.split_at_mut(row);
+                tail[..target_width]
+                    .copy_from_slice(&head[first_row..first_row + target_width]);
+            }
+        }
+        return;
+    }
+    for (index, pixel) in pixels[..target_width * target_height].iter_mut().enumerate() {
+        let source_x = (index % target_width) * source_width / target_width;
+        let source_y = (index / target_width) * source_height / target_height;
+        *pixel = frame[source_y * source_width + source_x];
+    }
 }
 
 fn open_widget_for(display: Option<&Path>) -> Result<(), String> {

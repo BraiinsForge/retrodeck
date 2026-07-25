@@ -9,6 +9,11 @@ name = "retrodeck-native"
 path = "src/main.rs"
 test = false
 
+[[bin]]
+name = "retro-host"
+path = "src/bin/retro-host/main.rs"
+test = false
+
 [profile.release]
 panic = "abort"
 strip = true
