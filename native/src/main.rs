@@ -44,7 +44,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 22;
+const ABI_VERSION: ClFixnum = 23;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -241,6 +241,10 @@ impl Ecl {
             ),
             ("CHIPTUNE-CLOSE", native_chiptune_close as EclFixedFunction),
             (
+                "CHIPTUNE-AUDIO-CLOSE",
+                native_chiptune_audio_close as EclFixedFunction,
+            ),
+            (
                 "PROCESS-SHUTDOWN-P",
                 native_process_shutdown as EclFixedFunction,
             ),
@@ -322,6 +326,14 @@ impl Ecl {
             (
                 "CHIPTUNE-OPEN",
                 native_chiptune_open as EclOneArgumentFunction,
+            ),
+            (
+                "CHIPTUNE-AUDIO-OPEN",
+                native_chiptune_audio_open as EclOneArgumentFunction,
+            ),
+            (
+                "CHIPTUNE-AUDIO-WRITE",
+                native_chiptune_audio_write as EclOneArgumentFunction,
             ),
             (
                 "CANVAS-CLEAR",
@@ -409,6 +421,7 @@ impl Drop for Ecl {
         fbdev::close();
         input::close_touch();
         wayland::close();
+        let _ = audio::close_chiptune_pcm();
         audio::stop();
         let _ = chiptune::close();
         unsafe { cl_shutdown() };
@@ -462,6 +475,28 @@ unsafe extern "C" fn native_chiptune_rewind() -> ClObject {
 
 unsafe extern "C" fn native_chiptune_close() -> ClObject {
     native_status(chiptune::close())
+}
+
+unsafe extern "C" fn native_chiptune_audio_open(volume: ClObject) -> ClObject {
+    native_status(decode_i32(volume, "chiptune volume").and_then(audio::open_chiptune_pcm))
+}
+
+unsafe extern "C" fn native_chiptune_audio_write(pcm: ClObject) -> ClObject {
+    let result =
+        decode_base_string(pcm, "chiptune PCM").and_then(|pcm| audio::write_chiptune_pcm(&pcm));
+    let status = match result {
+        Ok(audio::PcmWriteOutcome::Queued) => 1,
+        Ok(audio::PcmWriteOutcome::Busy) => 0,
+        Err(error) => {
+            eprintln!("retrodeck: {error}");
+            0
+        }
+    };
+    unsafe { ecl_make_integer(status) }
+}
+
+unsafe extern "C" fn native_chiptune_audio_close() -> ClObject {
+    native_status(audio::close_chiptune_pcm())
 }
 
 unsafe extern "C" fn native_run_helper(executable: ClObject, input: ClObject) -> ClObject {

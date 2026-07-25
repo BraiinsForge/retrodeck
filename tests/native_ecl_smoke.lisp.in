@@ -25,7 +25,7 @@
         :touch-supervision t :mirror-console t))
 
 (defun main ()
-  (check (= (retrodeck.native:abi-version) 22) "Native ABI mismatch")
+  (check (= (retrodeck.native:abi-version) 23) "Native ABI mismatch")
   (check (zerop (retrodeck.native:process-shutdown-p))
          "Native shutdown state was set")
   (let ((first (monotonic-nanoseconds)))
@@ -42,6 +42,13 @@
   (check (zerop (retrodeck.native:play-tone-sequence
                  '((784 35) (1047 40) (1319 55) (1568 60)) 42))
          "Four-note cue unexpectedly started")
+  (check (zerop (retrodeck.native:chiptune-audio-open 101))
+         "Invalid chiptune volume unexpectedly opened audio")
+  (check (zerop (retrodeck.native:chiptune-audio-write
+                 (coerce "short" 'base-string)))
+         "Short chiptune PCM unexpectedly queued")
+  (check (= (retrodeck.native:chiptune-audio-close) 1)
+         "Chiptune audio close failed")
   (dolist (open (list #'retrodeck.native:wayland-open-widget-at
                       #'retrodeck.native:wayland-open-gameplay-at))
     (dolist (display (list "retrodeck-no-wayland-smoke"

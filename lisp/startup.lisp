@@ -9,6 +9,9 @@
            #:canvas-draw-raster
            #:canvas-fill-rect
            #:canvas-rgb565-hash-words
+           #:chiptune-audio-close
+           #:chiptune-audio-open
+           #:chiptune-audio-write
            #:chiptune-close
            #:chiptune-open
            #:chiptune-rewind
@@ -124,12 +127,15 @@
            #:chiptune-file-accepted-p
            #:chiptune-format-time
            #:chiptune-touch-action
+           #:close-chiptune-audio
            #:close-chiptune-file
            #:make-chiptune-render-state
+           #:open-chiptune-audio
            #:open-chiptune-file
            #:render-chiptune
            #:rewind-chiptune-file
            #:step-chiptune-file
+           #:write-chiptune-audio
            #:*dashboard-brightness-minimum*
            #:*dashboard-brightness-step*
            #:*dashboard-built-in-applications*
@@ -340,7 +346,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 22)
+(defconstant +native-abi-version+ 23)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))

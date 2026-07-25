@@ -11,7 +11,8 @@
      *canvas-fill-status* *projection-status* *projected-text-status*
      *control-file-write-status* *state-file-write-status*
      *chiptune-rewind-status* *chiptune-close-status*
-     *canvas-raster-status* *evdev-open-status* *fbdev-open-status*
+     *chiptune-audio-open-status* *chiptune-audio-write-status*
+     *chiptune-audio-close-status* *canvas-raster-status* *evdev-open-status* *fbdev-open-status*
      *fbdev-canvas-status* *fbdev-present-status* *wayland-open-status*
      *wayland-canvas-status* *wayland-present-status*)
   (0 *active-status* *active-count* *stop-count* *finish-count*
@@ -43,7 +44,8 @@
        *wayland-dispatch-timeout* *wayland-touch* *wayland-touch-queue*
        *wayland-size* *helper-arguments* *terminal-arguments*
        *child-arguments* *chiptune-open-result* *chiptune-step-result*
-       *chiptune-open-path*)
+       *chiptune-open-path* *chiptune-audio-open-volume*
+       *chiptune-audio-write-pcm*)
   ("" *control-file-read-result*)
   ('(1 2 3 4) *canvas-hash-words* *monotonic-words*)
   ('(0) *state-file-read-result*)
@@ -108,8 +110,15 @@
     (push :sound *interaction-trace*))
   *play-status*)
 (define-native-test-functions
-  (abi-version () 22)
+  (abi-version () 23)
   (audio-active-p () (incf *active-count*) *active-status*)
+  (chiptune-audio-open (volume)
+    (setf *chiptune-audio-open-volume* volume)
+    *chiptune-audio-open-status*)
+  (chiptune-audio-write (pcm)
+    (setf *chiptune-audio-write-pcm* pcm)
+    *chiptune-audio-write-status*)
+  (chiptune-audio-close () *chiptune-audio-close-status*)
   (chiptune-open (path)
     (setf *chiptune-open-path* path)
     *chiptune-open-result*)
@@ -915,26 +924,40 @@
                      :length 50851 :track-index 0 :track-count 1)))
     (assert (and (typep *chiptune-open-path* 'base-string)
                  (string= *chiptune-open-path* "/tmp/crazy.ogg")))
-    (multiple-value-bind (visual ended frames position)
+    (multiple-value-bind (visual ended frames position raw-pcm)
         (retrodeck:step-chiptune-file)
       (assert (and (typep visual '(simple-array (signed-byte 16) (1470)))
                    (not ended) (= frames 735) (= position 66)
+                   (string= raw-pcm pcm)
                    (= (aref visual 0) -32768)
                    (= (aref visual 1) 32767)
                    (zerop (aref visual 2))
                    (= (aref visual 1469) -1))))
-    (assert (and (retrodeck:rewind-chiptune-file)
+    (assert (and (retrodeck:open-chiptune-audio 42)
+                 (= *chiptune-audio-open-volume* 42)
+                 (retrodeck:write-chiptune-audio pcm)
+                 (string= *chiptune-audio-write-pcm* pcm)
+                 (retrodeck:close-chiptune-audio)
+                 (retrodeck:rewind-chiptune-file)
                  (retrodeck:close-chiptune-file)))))
 (let ((*chiptune-open-result* nil) (*chiptune-step-result* nil)
-      (*chiptune-rewind-status* 0) (*chiptune-close-status* 0))
+      (*chiptune-rewind-status* 0) (*chiptune-close-status* 0)
+      (*chiptune-audio-open-status* 0) (*chiptune-audio-write-status* 0)
+      (*chiptune-audio-close-status* 0))
   (assert (and (null (retrodeck:open-chiptune-file "/tmp/missing.ogg"))
                (null (retrodeck:step-chiptune-file))
+               (not (retrodeck:open-chiptune-audio 42))
+               (not (retrodeck:write-chiptune-audio
+                     (make-string 2940 :initial-element (code-char 0))))
+               (not (retrodeck:close-chiptune-audio))
                (not (retrodeck:rewind-chiptune-file))
                (not (retrodeck:close-chiptune-file)))))
 (let ((*chiptune-open-result* '("bad"))
       (*chiptune-step-result* '("short" 0 735 0)))
   (assert-signals error (retrodeck:open-chiptune-file "/tmp/bad.ogg"))
-  (assert-signals error (retrodeck:step-chiptune-file)))
+  (assert-signals error (retrodeck:step-chiptune-file))
+  (assert-signals error (retrodeck:open-chiptune-audio 101))
+  (assert-signals error (retrodeck:write-chiptune-audio "short")))
 (let ((ready (retrodeck:make-chiptune-render-state
               :ready t :title "crazy" :system "ogg vorbis"
               :position 25000 :length 50000 :file-index 1 :file-count 3

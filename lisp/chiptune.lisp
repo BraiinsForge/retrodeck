@@ -215,7 +215,20 @@
                    (typep (fourth result) '(integer 0 *)))
         (error "Malformed native chiptune snapshot ~S" result))
       (values (chiptune-decode-pcm (first result))
-              (= (second result) 1) (third result) (fourth result)))))
+              (= (second result) 1) (third result) (fourth result)
+              (first result)))))
+
+(defun open-chiptune-audio (volume)
+  (check-type volume (integer 0 100))
+  (= (retrodeck.native:chiptune-audio-open volume) 1))
+
+(defun write-chiptune-audio (pcm)
+  (unless (and (stringp pcm) (= (length pcm) 2940))
+    (error "Chiptune audio needs one 2940-byte PCM block"))
+  (= (retrodeck.native:chiptune-audio-write pcm) 1))
+
+(defun close-chiptune-audio ()
+  (= (retrodeck.native:chiptune-audio-close) 1))
 
 (defun rewind-chiptune-file ()
   (= (retrodeck.native:chiptune-rewind) 1))

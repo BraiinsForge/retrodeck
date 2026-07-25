@@ -2,7 +2,10 @@ use std::ffi::{c_char, c_int, c_ulong, c_void};
 use std::io;
 use std::mem;
 use std::slice;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::thread::{self, JoinHandle};
 
 const AUDIO_DEVICE: &[u8] = b"/dev/dsp\0";
 const O_WRONLY: c_int = 1;
@@ -20,6 +23,20 @@ const SNDCTL_DSP_SPEED: c_ulong = 0xc0045002;
 const SNDCTL_DSP_SETFMT: c_ulong = 0xc0045005;
 const SNDCTL_DSP_CHANNELS: c_ulong = 0xc0045006;
 const SNDCTL_DSP_SETFRAGMENT: c_ulong = 0xc004500a;
+const SNDCTL_DSP_GETOSPACE: c_ulong = 0x8010500c;
+const SNDCTL_DSP_SETTRIGGER: c_ulong = 0x40045010;
+const PCM_ENABLE_OUTPUT: c_int = 0x2;
+const CHIPTUNE_PCM_BYTES: usize = 735 * 2 * mem::size_of::<i16>();
+const CHIPTUNE_QUEUE_BLOCKS: usize = 22;
+
+#[repr(C)]
+#[derive(Default)]
+struct AudioBufferInfo {
+    fragments: c_int,
+    fragment_total: c_int,
+    fragment_size: c_int,
+    bytes: c_int,
+}
 
 #[derive(Clone, Copy)]
 pub struct Tone {
@@ -32,11 +49,23 @@ pub enum PlayOutcome {
     Busy,
 }
 
+pub enum PcmWriteOutcome {
+    Queued,
+    Busy,
+}
+
 struct Player {
     child_pid: c_int,
 }
 
+struct PcmPlayer {
+    sender: Option<SyncSender<Vec<u8>>>,
+    worker: Option<JoinHandle<()>>,
+    stop: Arc<AtomicBool>,
+}
+
 static PLAYER: Mutex<Player> = Mutex::new(Player { child_pid: -1 });
+static PCM_PLAYER: Mutex<Option<PcmPlayer>> = Mutex::new(None);
 
 unsafe extern "C" {
     fn open(path: *const c_char, flags: c_int, ...) -> c_int;
@@ -109,6 +138,86 @@ pub fn finish() {
     player().finish();
 }
 
+pub fn open_chiptune_pcm(volume_percent: c_int) -> Result<(), String> {
+    close_chiptune_pcm()?;
+    if !(0..=100).contains(&volume_percent) {
+        return Err("chiptune volume must be between 0 and 100".to_owned());
+    }
+    if volume_percent == 0 {
+        *pcm_player() = Some(PcmPlayer {
+            sender: None,
+            worker: None,
+            stop: Arc::new(AtomicBool::new(false)),
+        });
+        return Ok(());
+    }
+
+    let fd = unsafe { open(AUDIO_DEVICE.as_ptr().cast(), O_WRONLY | O_CLOEXEC) };
+    if fd < 0 {
+        return Err(os_error("cannot open /dev/dsp for chiptune audio"));
+    }
+    let trigger_pending = match configure_chiptune_pcm(fd) {
+        Ok(trigger_pending) => trigger_pending,
+        Err(error) => {
+            unsafe { close(fd) };
+            return Err(error);
+        }
+    };
+    let (sender, receiver) = sync_channel(CHIPTUNE_QUEUE_BLOCKS);
+    let stop = Arc::new(AtomicBool::new(false));
+    let worker_stop = Arc::clone(&stop);
+    let worker = match thread::Builder::new()
+        .name("retrodeck-chiptune-pcm".to_owned())
+        .spawn(move || {
+            chiptune_pcm_worker(fd, receiver, volume_percent, trigger_pending, worker_stop)
+        }) {
+        Ok(worker) => worker,
+        Err(error) => {
+            unsafe { close(fd) };
+            return Err(format!("cannot start chiptune audio worker: {error}"));
+        }
+    };
+    *pcm_player() = Some(PcmPlayer {
+        sender: Some(sender),
+        worker: Some(worker),
+        stop,
+    });
+    Ok(())
+}
+
+pub fn write_chiptune_pcm(pcm: &[u8]) -> Result<PcmWriteOutcome, String> {
+    if pcm.len() != CHIPTUNE_PCM_BYTES {
+        return Err(format!(
+            "chiptune PCM must contain {CHIPTUNE_PCM_BYTES} bytes"
+        ));
+    }
+    let player = pcm_player();
+    let Some(sender) = player.as_ref().and_then(|player| player.sender.as_ref()) else {
+        return Ok(PcmWriteOutcome::Busy);
+    };
+    match sender.try_send(pcm.to_vec()) {
+        Ok(()) => Ok(PcmWriteOutcome::Queued),
+        Err(TrySendError::Full(_)) => Ok(PcmWriteOutcome::Busy),
+        Err(TrySendError::Disconnected(_)) => {
+            Err("chiptune audio worker is unavailable".to_owned())
+        }
+    }
+}
+
+pub fn close_chiptune_pcm() -> Result<(), String> {
+    let Some(mut player) = pcm_player().take() else {
+        return Ok(());
+    };
+    player.stop.store(true, Ordering::Release);
+    drop(player.sender.take());
+    if let Some(worker) = player.worker.take() {
+        worker
+            .join()
+            .map_err(|_| "chiptune audio worker failed".to_owned())?;
+    }
+    Ok(())
+}
+
 impl Player {
     fn reap_finished(&mut self) {
         if self.child_pid <= 0 {
@@ -179,6 +288,103 @@ fn player() -> MutexGuard<'static, Player> {
     PLAYER
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn pcm_player() -> MutexGuard<'static, Option<PcmPlayer>> {
+    PCM_PLAYER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn configure_chiptune_pcm(fd: c_int) -> Result<bool, String> {
+    let mut fragment: c_int = (8 << 16) | 10;
+    let mut format = AFMT_S16_LE;
+    let mut channels: c_int = 1;
+    let mut rate: c_int = 44100;
+    unsafe {
+        ioctl(fd, SNDCTL_DSP_SETFRAGMENT, &mut fragment as *mut c_int);
+    }
+    let configured = unsafe {
+        ioctl(fd, SNDCTL_DSP_SETFMT, &mut format as *mut c_int) == 0
+            && format == AFMT_S16_LE
+            && ioctl(fd, SNDCTL_DSP_CHANNELS, &mut channels as *mut c_int) == 0
+            && channels == 1
+            && ioctl(fd, SNDCTL_DSP_SPEED, &mut rate as *mut c_int) == 0
+            && rate == 44100
+    };
+    if !configured {
+        return Err(os_error("cannot configure /dev/dsp for chiptune audio"));
+    }
+
+    let mut trigger = 0;
+    let trigger_pending =
+        unsafe { ioctl(fd, SNDCTL_DSP_SETTRIGGER, &mut trigger as *mut c_int) == 0 };
+    let mut space = AudioBufferInfo::default();
+    if unsafe { ioctl(fd, SNDCTL_DSP_GETOSPACE, &mut space as *mut AudioBufferInfo) } == 0
+        && space.bytes > 0
+        && space.bytes <= 1024 * 1024
+        && space.bytes % 2 == 0
+    {
+        write_all(fd, &vec![0; space.bytes as usize])
+            .map_err(|error| format!("cannot prefill /dev/dsp: {error}"))?;
+    }
+    Ok(trigger_pending)
+}
+
+fn chiptune_pcm_worker(
+    fd: c_int,
+    receiver: Receiver<Vec<u8>>,
+    volume_percent: c_int,
+    mut trigger_pending: bool,
+    stop: Arc<AtomicBool>,
+) {
+    let result = (|| {
+        for pcm in receiver {
+            if stop.load(Ordering::Acquire) {
+                break;
+            }
+            if trigger_pending {
+                let mut trigger = PCM_ENABLE_OUTPUT;
+                if unsafe { ioctl(fd, SNDCTL_DSP_SETTRIGGER, &mut trigger as *mut c_int) } != 0 {
+                    return Err(os_error("cannot start chiptune audio playback"));
+                }
+                trigger_pending = false;
+            }
+            let mono = render_chiptune_pcm_mono(&pcm, volume_percent)?;
+            let bytes = unsafe {
+                slice::from_raw_parts(
+                    mono.as_ptr().cast::<u8>(),
+                    mono.len() * mem::size_of::<i16>(),
+                )
+            };
+            write_all(fd, bytes)
+                .map_err(|error| format!("cannot write chiptune audio: {error}"))?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        eprintln!("retrodeck: {error}");
+    }
+    if unsafe { close(fd) } != 0 {
+        eprintln!(
+            "retrodeck: cannot close chiptune audio: {}",
+            io::Error::last_os_error()
+        );
+    }
+}
+
+fn render_chiptune_pcm_mono(pcm: &[u8], volume_percent: c_int) -> Result<Vec<i16>, String> {
+    if pcm.len() != CHIPTUNE_PCM_BYTES || !(1..=100).contains(&volume_percent) {
+        return Err("invalid chiptune PCM block or volume".to_owned());
+    }
+    Ok(pcm
+        .chunks_exact(4)
+        .map(|frame| {
+            let left = i16::from_le_bytes([frame[0], frame[1]]) as i32;
+            let right = i16::from_le_bytes([frame[2], frame[3]]) as i32;
+            (((left + right) / 2) * volume_percent / 100) as i16
+        })
+        .collect())
 }
 
 fn tone_sequence(
@@ -381,5 +587,28 @@ mod tests {
         ] {
             assert!(render_tones(tones, 44100, volume).is_err());
         }
+    }
+
+    #[test]
+    fn mixes_and_scales_exact_chiptune_blocks() {
+        let mut pcm = vec![0; CHIPTUNE_PCM_BYTES];
+        for (index, (left, right)) in [
+            (-32768_i16, -32768_i16),
+            (32767, 32767),
+            (-32768, 32767),
+            (1000, -2000),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let offset = index * 4;
+            pcm[offset..offset + 2].copy_from_slice(&left.to_le_bytes());
+            pcm[offset + 2..offset + 4].copy_from_slice(&right.to_le_bytes());
+        }
+        let mono = render_chiptune_pcm_mono(&pcm, 42).unwrap();
+        assert_eq!(mono.len(), 735);
+        assert_eq!(&mono[..4], &[-13762, 13762, 0, -210]);
+        assert!(mono[4..].iter().all(|sample| *sample == 0));
+        assert!(render_chiptune_pcm_mono(&pcm[..4], 42).is_err());
     }
 }
