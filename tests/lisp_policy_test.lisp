@@ -288,6 +288,14 @@
 (defmacro assert-native-call (form expected variable arguments)
   `(progn (assert (equal ,form ,expected))
           (assert (equal ,variable ,arguments))))
+(defmacro assert-native-writer (function status-variable arguments-variable path contents)
+  `(progn
+     (setf ,status-variable 1 ,arguments-variable nil)
+     (assert (,function ,path ,contents))
+     (assert (equal ,arguments-variable (list ,path ,contents)))
+     (setf ,status-variable 0)
+     (assert (not (,function ,path "0")))
+     (assert-signals type-error (,function "/tmp/x" 4))))
 (defmacro assert-values (form &rest expected)
   `(assert (equal (multiple-value-list ,form) (list ,@expected))))
 (defmacro assert-touch-release
@@ -517,92 +525,73 @@
 (assert-unary-table #'= #'retrodeck:menu-sound-duration-ms
                     '((:volume 120) (:confirm 55)))
 (assert (= retrodeck:*menu-sound-input-tail-ms* 60))
-
 (let ((before (retrodeck::monotonic-ms)))
   (setf *play-status* 1)
   (assert-values (retrodeck:play-menu-sound :confirm 42) t t)
   (let ((after (retrodeck::monotonic-ms)))
-    (assert (<= (+ before 115)
-                retrodeck::*menu-sound-input-until-ms*
+    (assert (<= (+ before 115) retrodeck::*menu-sound-input-until-ms*
                 (+ after 115)))))
 (assert (equal *play-arguments* '(659 25 880 30 42)))
-
-(setf *play-status* 1)
-(assert (retrodeck:play-menu-sound :previous 17))
-(assert (equal *play-arguments* '(523 35 0 0 17)))
-
-(setf retrodeck::*menu-sound-input-until-ms* 77
-      *play-status* 2)
-(assert-values (retrodeck:play-menu-sound :next 42) t nil)
-(assert (= retrodeck::*menu-sound-input-until-ms* 77))
-
-(setf *play-status* 0)
-(assert (not (retrodeck:play-menu-sound :next 42)))
-(assert (= retrodeck::*menu-sound-input-until-ms* 77))
-
-(setf *play-arguments* nil)
-(assert (retrodeck:play-menu-sound :next 0))
-(assert (null *play-arguments*))
-
+(dolist (fixture
+         '((:previous 17 1 0 (t t) (523 35 0 0 17) nil)
+           (:next 42 2 77 (t nil) (659 35 0 0 42) t)
+           (:next 42 0 77 (nil nil) (659 35 0 0 42) t)
+           (:next 0 0 77 (t nil) nil t)))
+  (destructuring-bind (sound volume status input-until values arguments
+                       check-input-until-p) fixture
+    (setf *play-status* status *play-arguments* nil
+          retrodeck::*menu-sound-input-until-ms* input-until)
+    (assert (equal (multiple-value-list (retrodeck:play-menu-sound sound volume))
+                   values))
+    (assert (equal *play-arguments* arguments))
+    (when check-input-until-p
+      (assert (= retrodeck::*menu-sound-input-until-ms* input-until)))))
 (let ((notes '((784 35) (1047 40) (1319 55))))
   (setf *play-status* 1)
   (assert (= (retrodeck.native:play-tone-sequence notes 42) 1))
   (assert (equal *play-arguments* (list notes 42))))
-
-(setf *active-status* 1
-      retrodeck::*menu-sound-input-until-ms* 0)
-(assert (retrodeck:menu-sound-blocks-input-p :controller 100))
-(assert (not (retrodeck:menu-sound-blocks-input-p :touch 100)))
-(assert (not (retrodeck:menu-sound-blocks-input-p :keyboard 100)))
-
-(setf *active-status* 0
-      retrodeck::*menu-sound-input-until-ms* 100)
-(assert (retrodeck:menu-sound-blocks-input-p :controller 99))
-(assert (not (retrodeck:menu-sound-blocks-input-p :controller 100)))
-
-(setf retrodeck::*menu-sound-input-until-ms* 100)
-(assert (retrodeck:stop-menu-sound))
-(assert (= *stop-count* 1))
-(assert (= retrodeck::*menu-sound-input-until-ms* 0))
-
-(setf retrodeck::*menu-sound-input-until-ms* 100)
-(assert (retrodeck:finish-menu-sound))
-(assert (= *finish-count* 1))
-(assert (= retrodeck::*menu-sound-input-until-ms* 0))
+(setf *active-status* 1 retrodeck::*menu-sound-input-until-ms* 0)
+(assert-binary-table #'eq #'retrodeck:menu-sound-blocks-input-p
+                     '((:controller 100 t) (:touch 100 nil)
+                       (:keyboard 100 nil)))
+(setf *active-status* 0 retrodeck::*menu-sound-input-until-ms* 100)
+(assert-binary-table #'eq #'retrodeck:menu-sound-blocks-input-p
+                     '((:controller 99 t) (:controller 100 nil)))
+(dolist (function (list #'retrodeck:stop-menu-sound
+                        #'retrodeck:finish-menu-sound))
+  (setf retrodeck::*menu-sound-input-until-ms* 100)
+  (assert (funcall function))
+  (assert (zerop retrodeck::*menu-sound-input-until-ms*)))
+(assert (= *stop-count* *finish-count* 1))
 
 (assert (retrodeck:clear-canvas #x121212))
 (assert (= *canvas-clear-color* #x121212))
 (assert (= (retrodeck:canvas-rgb565-hash) #x0001000200030004))
 (assert (= (retrodeck:monotonic-nanoseconds) #x0001000200030004))
-(assert (retrodeck:draw-canvas-glyph -4 8 65 2 #xfe6c27))
-(assert (equal *canvas-glyph-arguments* '(-4 8 65 2 #xfe6c27)))
+(assert-native-call (retrodeck:draw-canvas-glyph -4 8 65 2 #xfe6c27) t
+                    *canvas-glyph-arguments* '(-4 8 65 2 #xfe6c27))
 (assert (retrodeck:draw-canvas-glyph 0 0 0 1 0))
 (assert (retrodeck:draw-canvas-glyph 0 0 255 1 #xffffff))
 (setf *canvas-glyph-status* 0)
 (assert (not (retrodeck:draw-canvas-glyph 0 0 65 1 0)))
-(setf *canvas-glyph-status* 1
-      *canvas-glyph-arguments* nil)
-(dolist (arguments '((#x80000000 0 65 1 0)
-                     (0 0 256 1 0)
-                     (0 0 65 0 0)
-                     (0 0 65 #x100000000 0)))
+(setf *canvas-glyph-status* 1 *canvas-glyph-arguments* nil)
+(dolist (arguments '((#x80000000 0 65 1 0) (0 0 256 1 0)
+                     (0 0 65 0 0) (0 0 65 #x100000000 0)))
   (assert-signals type-error (apply #'retrodeck:draw-canvas-glyph arguments)))
 (assert (null *canvas-glyph-arguments*))
-(assert (retrodeck:fill-canvas-rect -4 8 12 16 #xfe6c27))
-(assert (equal *canvas-fill-arguments* '(-4 8 12 16 #xfe6c27)))
+(assert-native-call (retrodeck:fill-canvas-rect -4 8 12 16 #xfe6c27) t
+                    *canvas-fill-arguments* '(-4 8 12 16 #xfe6c27))
 (setf *canvas-fill-arguments* nil)
-(assert-signals type-error (retrodeck:fill-canvas-rect #x80000000 0 1 1 0))
-(assert-signals type-error (retrodeck:fill-canvas-rect 0 0 #x100000000 1 0))
+(dolist (arguments '((#x80000000 0 1 1 0) (0 0 #x100000000 1 0)))
+  (assert-signals type-error (apply #'retrodeck:fill-canvas-rect arguments)))
 (assert (null *canvas-fill-arguments*))
 
 (setf *regular-file-result* "project\trole\tlicense\n")
-(assert-native-call (retrodeck:read-bounded-regular-file
-                     "/tmp/credits.tsv" 1 32768)
+(assert-native-call (retrodeck:read-bounded-regular-file "/tmp/credits.tsv" 1 32768)
                     *regular-file-result* *regular-file-arguments*
                     '("/tmp/credits.tsv" 1 32768))
 (assert-signals type-error (retrodeck:read-bounded-regular-file "/tmp/x" -1 2))
-(assert-signals type-error
-                (retrodeck:read-bounded-regular-file "/tmp/x" 1 4194305))
+(assert-signals type-error (retrodeck:read-bounded-regular-file "/tmp/x" 1 4194305))
 
 (setf *control-file-read-result* (test-line "12")
       *control-file-read-paths* nil)
@@ -612,16 +601,10 @@
 (setf *control-file-read-result* nil)
 (assert-signals error (retrodeck:read-native-control-file "/tmp/brightness"))
 (assert-signals type-error (retrodeck:read-native-control-file 4))
-(setf *control-file-write-status* 1
-      *control-file-write-arguments* nil
-      *control-file-write-calls* nil)
-(assert (retrodeck:write-native-control-file "/tmp/brightness"
-                                               (test-line "14")))
-(assert (equal *control-file-write-arguments*
-               (list "/tmp/brightness" (test-line "14"))))
-(setf *control-file-write-status* 0)
-(assert (not (retrodeck:write-native-control-file "/tmp/brightness" "0")))
-(assert-signals type-error (retrodeck:write-native-control-file "/tmp/x" 4))
+(setf *control-file-write-calls* nil)
+(assert-native-writer retrodeck:write-native-control-file
+                      *control-file-write-status* *control-file-write-arguments*
+                      "/tmp/brightness" (test-line "14"))
 
 (setf *state-file-read-result* '(0))
 (assert-values (retrodeck:read-native-state-file "/tmp/volume.state") nil nil)
@@ -629,20 +612,14 @@
 (let ((contents (test-line "42")))
   (setf *state-file-read-result* (list 1 contents))
   (assert-values (retrodeck:read-native-state-file "/tmp/volume.state")
-                   contents t))
+                 contents t))
 (dolist (invalid '(nil (0 nil) (1) (1 42) (2)))
   (setf *state-file-read-result* invalid)
-  (assert-signals error
-                  (retrodeck:read-native-state-file "/tmp/volume.state")))
+  (assert-signals error (retrodeck:read-native-state-file "/tmp/volume.state")))
 (assert-signals type-error (retrodeck:read-native-state-file 4))
-(let ((contents (test-line "37")))
-  (setf *state-file-write-status* 1)
-  (assert (retrodeck:write-native-state-file "/tmp/volume.state" contents))
-  (assert (equal *state-file-write-arguments*
-                 (list "/tmp/volume.state" contents))))
-(setf *state-file-write-status* 0)
-(assert (not (retrodeck:write-native-state-file "/tmp/volume.state" "0")))
-(assert-signals type-error (retrodeck:write-native-state-file "/tmp/x" 4))
+(assert-native-writer retrodeck:write-native-state-file
+                      *state-file-write-status* *state-file-write-arguments*
+                      "/tmp/volume.state" (test-line "37"))
 (assert-unary-table #'= #'retrodeck:parse-dashboard-volume-state
                     (list (list (test-line "0") 0)
                           (list (test-line "5") 5)
