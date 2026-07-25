@@ -1940,3 +1940,92 @@
               (play-menu-sound cue volume-percent)))
           (values next next-layout effect))
         (values next layout nil))))
+
+(defparameter *dashboard-main-usage*
+  "usage: deck-menu --manifest PATH --palette PATH [--FLAG VALUE ...]")
+
+(defun dashboard-main-options (arguments)
+  "Parse the launcher's --flag value pairs into a keyword plist."
+  (check-type arguments list)
+  (let ((options nil))
+    (loop while arguments
+          do (let ((flag (pop arguments)))
+               (unless (and (stringp flag) (> (length flag) 2)
+                            (string= "--" (subseq flag 0 2)) arguments)
+                 (error "~A" *dashboard-main-usage*))
+               (push (intern (string-upcase (subseq flag 2)) :keyword)
+                     options)
+               (push (pop arguments) options)))
+    (nreverse options)))
+
+(defun run-dashboard-main (&optional arguments)
+  (cond
+    ((equal arguments '("--help"))
+     (format t "~A~%" *dashboard-main-usage*)
+     (finish-output)
+     0)
+    ((and (= (length arguments) 2)
+          (string= (first arguments) "--validate-manifest"))
+     (load-dashboard-games (second arguments))
+     0)
+    ((and (= (length arguments) 2)
+          (string= (first arguments) "--validate-palette"))
+     (load-dashboard-palette (second arguments))
+     0)
+    (t
+     (let* ((options (dashboard-main-options arguments))
+            (manifest (getf options :manifest))
+            (palette-path (getf options :palette)))
+       (unless (and manifest palette-path)
+         (error "~A" *dashboard-main-usage*))
+       (multiple-value-bind (state runtime palette palette-loaded-p
+                             credits-loaded-p)
+           (load-dashboard-candidate-session
+            manifest palette-path
+            :credits-path (or (getf options :credits)
+                              *dashboard-credits-path*)
+            :runtime (make-dashboard-runtime
+                      :auto-presentation t
+                      :volume-state
+                      (or (getf options :volume-state)
+                          (dashboard-settings-path :volume-state))
+                      :brightness-device
+                      (or (getf options :brightness)
+                          (dashboard-settings-path :brightness))
+                      :brightness-maximum-path
+                      (or (getf options :brightness-max)
+                          (dashboard-settings-path :brightness-maximum))
+                      :brightness-state
+                      (or (getf options :brightness-state)
+                          (dashboard-settings-path :brightness-state))
+                      :keymap-state
+                      (or (getf options :keymap-state)
+                          (dashboard-settings-path :keymap-state))
+                      :network-status-path
+                      (or (getf options :wifi-status)
+                          (dashboard-wifi-path :selector-status))))
+         (unless palette-loaded-p
+           (format *error-output*
+                   "deck-menu: palette failed to load; using defaults~%")
+           (finish-output *error-output*))
+         (unless credits-loaded-p
+           (format *error-output*
+                   "deck-menu: credits failed to load~%")
+           (finish-output *error-output*))
+         (let ((*dashboard-palette* palette)
+               (*dashboard-cover-directory*
+                 (or (getf options :cover-directory)
+                     *dashboard-cover-directory*))
+               (owned nil))
+           (unwind-protect
+               (progn
+                 (setf state (dashboard-runtime-initialize
+                              state runtime
+                              (dashboard-runtime-read-clock runtime))
+                       owned t)
+                 (loop while (dashboard-runtime-running-p runtime)
+                       do (setf state (dashboard-runtime-run-iteration
+                                       state runtime))))
+             (when owned
+               (dashboard-runtime-shutdown runtime)))))
+       0))))

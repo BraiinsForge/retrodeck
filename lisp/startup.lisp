@@ -294,7 +294,10 @@
            #:*main-routes*
            #:native-program-arguments
            #:run-chiptune-main
+           #:run-dashboard-main
            #:run-ten-seconds-main
+           #:dashboard-main-options
+           #:*dashboard-main-usage*
            #:make-dashboard-runtime
            #:make-ten-seconds-runtime
            #:make-project-credits-crawl
@@ -771,6 +774,7 @@
   (multiple-value-bind (route arguments)
       (main-route (native-program-arguments))
     (case route
+      (:dashboard (run-dashboard-main arguments))
       (:ten-seconds (run-ten-seconds-main arguments))
       (:chiptunes (run-chiptune-main arguments))
       (otherwise

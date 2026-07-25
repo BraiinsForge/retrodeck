@@ -973,6 +973,17 @@
 (let ((*program-arguments-result* '("/usr/bin/retrodeck-native"))
       (*standard-output* (make-broadcast-stream)))
   (assert (zerop (retrodeck:main))))
+(assert (equal (retrodeck:dashboard-main-options
+                '("--manifest" "/tmp/games.tsv" "--palette" "/tmp/palette.tsv"
+                  "--chip8-emulator" "/bin/false"))
+               '(:manifest "/tmp/games.tsv" :palette "/tmp/palette.tsv"
+                 :chip8-emulator "/bin/false")))
+(assert (null (retrodeck:dashboard-main-options nil)))
+(assert-signals error (retrodeck:dashboard-main-options '("--manifest")))
+(assert-signals error (retrodeck:dashboard-main-options '("manifest" "x")))
+(assert-signals error (retrodeck:run-dashboard-main '("--manifest" "/tmp/x")))
+(let ((*standard-output* (make-broadcast-stream)))
+  (assert (zerop (retrodeck:run-dashboard-main '("--help")))))
 (assert-unary-table #'equal #'retrodeck:chiptune-control-commands
                     '(((:kind :keyboard :code 28 :shift nil :repeat nil) nil)
                       ((:kind :gamepad :edges #x001) (:back))
