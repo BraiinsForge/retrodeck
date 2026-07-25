@@ -68,8 +68,7 @@ done
 for executable in \
   retrodeck-native menu/deck-menu menu/deck-menu-launcher menu/fetch-covers \
   terminal/fbterm terminal/loadkeys terminal/retro-terminal terminal/rlwrap \
-  langs/lua langs/python langs/chibi/chibi-scheme ecl/bin/ecl.bin \
-  uploader/rom-uploader; do
+  langs/lua langs/python langs/chibi/chibi-scheme ecl/bin/ecl.bin; do
   [ -x "$stage/nes-deck/$executable" ] || {
     echo "Staged runtime is missing: $executable" >&2
     exit 1
@@ -162,19 +161,18 @@ ECLDIR="$stage/nes-deck/ecl/lib/ecl/" \
 "$stage/nes-deck/menu/deck-menu" --validate-palette \
   "$stage/nes-deck/menu/palette.tsv"
 uploader_deploy_config=$stage/nes-deck/uploader/password.conf
-uploader_address_config=$stage/nes-deck/uploader/address.conf
 [ -f "$uploader_deploy_config" ] && [ ! -L "$uploader_deploy_config" ] || {
   echo "Staged uploader password configuration is missing or unsafe" >&2
   exit 1
 }
-"$stage/nes-deck/uploader/rom-uploader" --check-password-config \
+"$stage/nes-deck/retrodeck-native" --check-uploader-password-config \
   "$uploader_deploy_config"
-[ -f "$uploader_address_config" ] && [ ! -L "$uploader_address_config" ] || {
-  echo "Staged uploader address configuration is missing or unsafe" >&2
-  exit 1
-}
-"$stage/nes-deck/uploader/rom-uploader" --check-address \
-  "$uploader_address_config"
+for source in run.lisp uploader.lisp uploader-paper.css uploader-palette.js; do
+  [ -f "$stage/nes-deck/uploader/$source" ] || {
+    echo "Staged uploader source is missing: $source" >&2
+    exit 1
+  }
+done
 
 # All preflight checks passed. Service interruption begins here.
 mkdir -p "$base" /mnt/data/roms /mnt/data/langs \
@@ -219,13 +217,19 @@ chmod 0600 "$base/lisp/startup.lisp" "$base/lisp/ui.lisp" \
   "$base/lisp/settings.lisp" "$base/lisp/wifi.lisp" \
   "$base/lisp/credits.lisp" \
   "$base/lisp/dashboard.lisp"
-cp -p "$stage/nes-deck/uploader/rom-uploader" \
-  "$base/uploader/rom-uploader"
-chmod 0700 "$base/uploader" "$base/uploads" \
-  "$base/uploader/rom-uploader"
+cp -p "$stage/nes-deck/uploader/run.lisp" \
+  "$stage/nes-deck/uploader/uploader.lisp" \
+  "$stage/nes-deck/uploader/uploader-paper.css" \
+  "$stage/nes-deck/uploader/uploader-palette.js" "$base/uploader/"
+rm -rf "$base/uploader/lisp-libraries.new"
+cp -Rp "$stage/nes-deck/uploader/lisp-libraries" \
+  "$base/uploader/lisp-libraries.new"
+rm -rf "$base/uploader/lisp-libraries"
+mv "$base/uploader/lisp-libraries.new" "$base/uploader/lisp-libraries"
+rm -f "$base/uploader/rom-uploader" "$base/uploader/address.conf"
+chmod 0700 "$base/uploader" "$base/uploads"
 cp -p "$uploader_deploy_config" "$base/uploader/password.conf"
-cp -p "$uploader_address_config" "$base/uploader/address.conf"
-chmod 0600 "$base/uploader/password.conf" "$base/uploader/address.conf"
+chmod 0600 "$base/uploader/password.conf"
 
 mkdir -p "$base/menu" "$base/terminal" "$base/licenses"
 cp -Rp "$stage/nes-deck/menu/." "$base/menu/"
@@ -256,8 +260,8 @@ if [ "$bmc_mode" -eq 1 ]; then
     echo "BMC configuration is missing: /etc/bmc_config.json" >&2
     exit 1
   }
-  "$stage/nes-deck/uploader/rom-uploader" \
-    --install-bmc-scene /etc/bmc_config.json
+  "$stage/nes-deck/langs/python" "$stage/install-bmc-scene.py" \
+    /etc/bmc_config.json
 fi
 
 rm -rf "$base/ecl.new" "$base/langs/chibi.new"
@@ -338,7 +342,7 @@ while [ "$attempt" -lt 120 ]; do
   fi
   if [ "$dashboard_ready" -eq 1 ] && \
      /etc/init.d/nes-deck-uploader status >/dev/null 2>&1 && \
-     pidof rom-uploader >/dev/null 2>&1; then
+     wget -q -O /dev/null http://127.0.0.1:8080/ 2>/dev/null; then
     break
   fi
   attempt=$((attempt + 1))
@@ -369,7 +373,7 @@ fi
   echo "ROM uploader service did not start" >&2
   exit 1
 }
-pidof rom-uploader >/dev/null 2>&1 || {
+wget -q -O /dev/null http://127.0.0.1:8080/ 2>/dev/null || {
   echo "ROM uploader did not reach its ready state" >&2
   exit 1
 }

@@ -1427,7 +1427,7 @@ fn decode_exit_code(object: ClObject) -> Result<u8, String> {
     u8::try_from(value).map_err(|_| "RETRODECK:MAIN returned an invalid exit status".to_owned())
 }
 
-fn verify_uploader_password(path: &OsStr) -> Result<u8, String> {
+fn parse_uploader_password_config(path: &OsStr) -> Result<(u32, Vec<u8>, Vec<u8>), String> {
     let path = Path::new(path);
     let metadata = std::fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect uploader password configuration: {error}"))?;
@@ -1473,6 +1473,11 @@ fn verify_uploader_password(path: &OsStr) -> Result<u8, String> {
     if salt.len() != 16 || digest.len() != 32 {
         return Err("uploader password configuration has invalid byte lengths".to_owned());
     }
+    Ok((iterations, salt, digest))
+}
+
+fn verify_uploader_password(path: &OsStr) -> Result<u8, String> {
+    let (iterations, salt, digest) = parse_uploader_password_config(path)?;
     let mut password = Vec::new();
     std::io::stdin()
         .take(129)
@@ -1510,14 +1515,21 @@ fn startup_path() -> Result<PathBuf, String> {
 fn run() -> Result<u8, String> {
     let mut arguments = env::args_os();
     let _program = arguments.next();
-    if arguments.next().as_deref() == Some(OsStr::new("--verify-uploader-password")) {
-        let path = arguments.next().ok_or_else(|| {
-            "usage: retrodeck-native --verify-uploader-password PASSWORD.CONF".to_owned()
-        })?;
+    let flag = arguments.next();
+    if let Some(flag) = flag.as_deref().and_then(OsStr::to_str)
+        && matches!(
+            flag,
+            "--verify-uploader-password" | "--check-uploader-password-config"
+        )
+    {
+        let usage = || format!("usage: retrodeck-native {flag} PASSWORD.CONF");
+        let path = arguments.next().ok_or_else(usage)?;
         if arguments.next().is_some() {
-            return Err(
-                "usage: retrodeck-native --verify-uploader-password PASSWORD.CONF".to_owned(),
-            );
+            return Err(usage());
+        }
+        if flag == "--check-uploader-password-config" {
+            parse_uploader_password_config(&path)?;
+            return Ok(0);
         }
         return verify_uploader_password(&path);
     }

@@ -90,9 +90,9 @@ lua=$(build_flake .#lua-deck)
 python=$(build_flake .#python-deck)
 chibi=$(build_flake .#chibi-deck)
 chiptune=$(build_flake .#chiptune-deck)
-uploader=$(build_flake .#rom-uploader)
+uploader_libraries=$(build_flake .#uploader-lisp-libraries)
 runtime_licenses=$(build_flake .#runtime-licenses)
-ecl=$(nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix | tail -n 1)
+ecl=$(build_flake .#ecl-arm-network)
 
 mkdir -p \
   "$payload/nes-deck/menu" \
@@ -122,13 +122,14 @@ cp lisp/startup.lisp lisp/ui.lisp lisp/timer.lisp lisp/policy.lisp \
   lisp/credits.lisp \
   lisp/dashboard.lisp "$payload/nes-deck/lisp/"
 cp "$chiptune/bin/chiptune-deck" "$payload/nes-deck/chiptune-deck"
-cp "$uploader/bin/rom-uploader" \
-  "$payload/nes-deck/uploader/rom-uploader"
+cp lisp/uploader.lisp lisp/uploader-paper.css lisp/uploader-palette.js \
+  deploy/uploader/run.lisp "$payload/nes-deck/uploader/"
+cp -a "$uploader_libraries/share/common-lisp/source" \
+  "$payload/nes-deck/uploader/lisp-libraries"
+chmod -R u+w "$payload/nes-deck/uploader/lisp-libraries"
 printf '%s\n' "$uploader_password" |
-  (cd uploader && nix shell nixpkgs#go -c go run . --set-password \
-    "$payload/nes-deck/uploader/password.conf")
-printf '%s\n' '0.0.0.0:8080' \
-  >"$payload/nes-deck/uploader/address.conf"
+  nix shell nixpkgs#python3 -c python3 ops/lib/set-uploader-password.py \
+    "$payload/nes-deck/uploader/password.conf"
 cp "$lua/bin/lua" "$payload/nes-deck/langs/lua"
 cp "$python/bin/python" "$payload/nes-deck/langs/python"
 cp "$chibi/bin/chibi-scheme" \
@@ -173,6 +174,7 @@ cp deploy/menu/deck-keyboard-quirks \
   "$payload/usr/sbin/deck-keyboard-quirks"
 cp deploy/uploader/nes-deck-uploader.init \
   "$payload/etc/init.d/nes-deck-uploader"
+cp ops/lib/install-bmc-scene.py "$payload/install-bmc-scene.py"
 
 for result in "$nes" "$gb" "$zx" "$fbterm" "$rlwrap" "$lua" \
               "$python" "$chibi" "$chiptune" "$runtime_licenses" "$ecl"; do
@@ -205,7 +207,6 @@ find "$payload/nes-deck" -type f \( \
   -name 'rlwrap' -o \
   -name 'lua' -o -name 'python' -o -name 'chibi-scheme' -o \
   -name 'ecl.bin' \) -exec chmod 0700 {} +
-chmod 0700 "$payload/nes-deck/uploader/rom-uploader"
 chmod 0600 "$payload/nes-deck/lisp/startup.lisp" \
   "$payload/nes-deck/lisp/ui.lisp" \
   "$payload/nes-deck/lisp/timer.lisp" \
@@ -216,8 +217,11 @@ chmod 0600 "$payload/nes-deck/lisp/startup.lisp" \
   "$payload/nes-deck/lisp/wifi.lisp" \
   "$payload/nes-deck/lisp/credits.lisp" \
   "$payload/nes-deck/lisp/dashboard.lisp"
-chmod 0600 "$payload/nes-deck/uploader/password.conf"
-chmod 0600 "$payload/nes-deck/uploader/address.conf"
+chmod 0600 "$payload/nes-deck/uploader/password.conf" \
+  "$payload/nes-deck/uploader/uploader.lisp" \
+  "$payload/nes-deck/uploader/uploader-paper.css" \
+  "$payload/nes-deck/uploader/uploader-palette.js" \
+  "$payload/nes-deck/uploader/run.lisp"
 chmod 0700 "$payload/usr/bin/ecl" \
   "$payload/usr/sbin/deck-keyboard-quirks" \
   "$payload/usr/sbin/deck-wifi-profile-add" \
