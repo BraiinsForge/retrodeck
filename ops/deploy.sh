@@ -81,15 +81,12 @@ echo "Building static ARM payloads..."
 nes=$(build_flake .#nes-deck)
 gb=$(build_flake .#gb-deck)
 zx=$(build_flake .#zx-deck)
-timer=$(build_flake .#ten-seconds-deck)
-menu=$(build_flake .#deck-menu)
 native=$(build_flake .#retrodeck-native)
 fbterm=$(build_flake .#fbterm-deck)
 rlwrap=$(build_flake .#rlwrap-deck)
 lua=$(build_flake .#lua-deck)
 python=$(build_flake .#python-deck)
 chibi=$(build_flake .#chibi-deck)
-chiptune=$(build_flake .#chiptune-deck)
 uploader_libraries=$(build_flake .#uploader-lisp-libraries)
 runtime_licenses=$(build_flake .#runtime-licenses)
 ecl=$(build_flake .#ecl-arm-network)
@@ -114,14 +111,14 @@ mkdir -p \
 cp "$nes/bin/nes-deck" "$payload/nes-deck/nes-deck"
 cp "$gb/bin/gb-deck" "$payload/nes-deck/gb-deck"
 cp "$zx/bin/zx-deck" "$payload/nes-deck/zx-deck"
-cp "$timer/bin/ten-seconds-deck" "$payload/nes-deck/ten-seconds-deck"
-cp "$menu/bin/deck-menu" "$payload/nes-deck/menu/deck-menu"
+ln -sfn retrodeck-native "$payload/nes-deck/ten-seconds-deck"
+ln -sfn ../retrodeck-native "$payload/nes-deck/menu/deck-menu"
 cp "$native/bin/retrodeck-native" "$payload/nes-deck/retrodeck-native"
 cp lisp/startup.lisp lisp/ui.lisp lisp/timer.lisp lisp/policy.lisp \
   lisp/chiptune.lisp lisp/process.lisp lisp/settings.lisp lisp/wifi.lisp \
   lisp/credits.lisp \
   lisp/dashboard.lisp "$payload/nes-deck/lisp/"
-cp "$chiptune/bin/chiptune-deck" "$payload/nes-deck/chiptune-deck"
+ln -sfn retrodeck-native "$payload/nes-deck/chiptune-deck"
 cp lisp/uploader.lisp lisp/uploader-paper.css lisp/uploader-palette.js \
   deploy/uploader/run.lisp "$payload/nes-deck/uploader/"
 cp -a "$uploader_libraries/share/common-lisp/source" \
@@ -177,7 +174,7 @@ cp deploy/uploader/nes-deck-uploader.init \
 cp ops/lib/install-bmc-scene.py "$payload/install-bmc-scene.py"
 
 for result in "$nes" "$gb" "$zx" "$fbterm" "$rlwrap" "$lua" \
-              "$python" "$chibi" "$chiptune" "$runtime_licenses" "$ecl"; do
+              "$python" "$chibi" "$runtime_licenses" "$ecl"; do
   if [[ -d $result/share/licenses ]]; then
     cp -a "$result/share/licenses/." "$payload/nes-deck/licenses/"
   fi
