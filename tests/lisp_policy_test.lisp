@@ -241,6 +241,15 @@
   `(dolist (value ,values)
      (assert-signals ,condition (funcall ,function value))))
 
+(defmacro assert-touch-release
+    (transition state layout press release &body assertions)
+  `(multiple-value-bind (pressed press-effect)
+       (,transition ,state ,layout ,press)
+     (assert (null press-effect))
+     (multiple-value-bind (released release-effect)
+         (,transition pressed ,layout ,release)
+       ,@assertions)))
+
 (defun assert-rect-target-boundaries (finder layout target)
   (destructuring-bind (x y width height) (getf layout target)
     (assert (eq (funcall finder layout x y) target))
@@ -896,15 +905,12 @@
     (assert (eq (retrodeck:credits-target-at layout 1212 12) :close))
     (assert (eq (retrodeck:credits-target-at layout 1267 67) :close))
     (assert (null (retrodeck:credits-target-at layout 1268 67)))
-    (multiple-value-bind (pressed effect)
-        (retrodeck:credits-touch-transition
-         (retrodeck:credits-initial-state) layout '(1240 40 t t nil))
-      (assert (null effect))
-      (multiple-value-bind (released release-effect)
-          (retrodeck:credits-touch-transition
-           pressed layout '(1240 40 nil nil t))
-        (assert (null (getf released :pressed-target)))
-        (assert (equal release-effect '(:close t :cue :back))))))
+    (assert-touch-release
+     retrodeck:credits-touch-transition
+     (retrodeck:credits-initial-state) layout
+     '(1240 40 t t nil) '(1240 40 nil nil t)
+     (assert (null (getf released :pressed-target)))
+     (assert (equal release-effect '(:close t :cue :back)))))
 
   (setf *regular-file-result* nil)
   (assert-signals error (retrodeck:load-project-credits "/tmp/missing.tsv"))
@@ -1102,35 +1108,20 @@
                  :keymap (1036 208 112 104)))
        (state (retrodeck:settings-initial-state
                :volume 42 :brightness 60 :keymap "us")))
-  (multiple-value-bind (pressed effect)
-      (retrodeck:settings-touch-transition
-       state layout '(128 228 t t nil))
-    (assert (null effect))
-    (multiple-value-bind (released plan)
-        (retrodeck:settings-touch-transition
-         pressed layout '(128 228 nil nil t))
-      (assert (null (getf released :pressed-target)))
-      (assert (eq (getf released :selected) :volume-down))
-      (assert (= (getf plan :value) 37))))
-  (multiple-value-bind (pressed effect)
-      (retrodeck:settings-touch-transition
-       state layout '(128 228 t t nil))
-    (declare (ignore effect))
-    (multiple-value-bind (released plan)
-        (retrodeck:settings-touch-transition
-         pressed layout '(248 228 nil nil t))
-      (assert (null plan))
-      (assert (null (getf released :pressed-target)))))
-  (multiple-value-bind (pressed effect)
-      (retrodeck:settings-touch-transition
-       state layout '(1240 40 t t nil))
-    (declare (ignore effect))
-    (multiple-value-bind (released plan)
-        (retrodeck:settings-touch-transition
-         pressed layout '(1240 40 nil nil t))
-      (assert (eq (getf plan :action) :close))
-      (assert (eq (getf plan :cue) :back))
-      (assert (eq (getf released :selected) :close)))))
+  (assert-touch-release retrodeck:settings-touch-transition state layout
+                        '(128 228 t t nil) '(128 228 nil nil t)
+    (assert (null (getf released :pressed-target)))
+    (assert (eq (getf released :selected) :volume-down))
+    (assert (= (getf release-effect :value) 37)))
+  (assert-touch-release retrodeck:settings-touch-transition state layout
+                        '(128 228 t t nil) '(248 228 nil nil t)
+    (assert (null release-effect))
+    (assert (null (getf released :pressed-target))))
+  (assert-touch-release retrodeck:settings-touch-transition state layout
+                        '(1240 40 t t nil) '(1240 40 nil nil t)
+    (assert (eq (getf release-effect :action) :close))
+    (assert (eq (getf release-effect :cue) :back))
+    (assert (eq (getf released :selected) :close))))
 
 (let* ((network '(:ssid "net1" :wlan-ipv4 "10.249.110.248"
                   :wireguard-ipv4 "10.0.0.10" :selector "CONNECTED"))
@@ -1411,34 +1402,22 @@ secret!9
        (state (retrodeck:wifi-initial-state
                :ssid "test net" :passphrase "secret!9"))
        (layout (retrodeck:render-dashboard-wifi state network)))
-  (multiple-value-bind (pressed effect)
-      (retrodeck:wifi-touch-transition state layout '(18 86 t t nil))
-    (assert (null effect))
-    (multiple-value-bind (released release-effect)
-        (retrodeck:wifi-touch-transition pressed layout '(18 86 nil nil t))
-      (assert (string= (getf released :ssid) "test netq"))
-      (assert (equal release-effect '(:cue :next)))))
-  (multiple-value-bind (pressed effect)
-      (retrodeck:wifi-touch-transition state layout '(18 86 t t nil))
-    (declare (ignore effect))
-    (multiple-value-bind (released release-effect)
-        (retrodeck:wifi-touch-transition pressed layout '(143 86 nil nil t))
-      (assert (string= (getf released :ssid) "test net"))
-      (assert (null release-effect))))
-  (multiple-value-bind (pressed effect)
-      (retrodeck:wifi-touch-transition state layout '(1000 20 t t nil))
-    (declare (ignore effect))
-    (multiple-value-bind (released plan)
-        (retrodeck:wifi-touch-transition pressed layout '(1000 20 nil nil t))
-      (assert (eq (getf plan :action) :save))
-      (assert (string= (getf released :passphrase) "secret!9"))))
-  (multiple-value-bind (pressed effect)
-      (retrodeck:wifi-touch-transition state layout '(20 20 t t nil))
-    (declare (ignore effect))
-    (multiple-value-bind (released plan)
-        (retrodeck:wifi-touch-transition pressed layout '(20 20 nil nil t))
-      (assert (not (getf released :open)))
-      (assert (eq (getf plan :action) :close)))))
+  (assert-touch-release retrodeck:wifi-touch-transition state layout
+                        '(18 86 t t nil) '(18 86 nil nil t)
+    (assert (string= (getf released :ssid) "test netq"))
+    (assert (equal release-effect '(:cue :next))))
+  (assert-touch-release retrodeck:wifi-touch-transition state layout
+                        '(18 86 t t nil) '(143 86 nil nil t)
+    (assert (string= (getf released :ssid) "test net"))
+    (assert (null release-effect)))
+  (assert-touch-release retrodeck:wifi-touch-transition state layout
+                        '(1000 20 t t nil) '(1000 20 nil nil t)
+    (assert (eq (getf release-effect :action) :save))
+    (assert (string= (getf released :passphrase) "secret!9")))
+  (assert-touch-release retrodeck:wifi-touch-transition state layout
+                        '(20 20 t t nil) '(20 20 nil nil t)
+    (assert (not (getf released :open)))
+    (assert (eq (getf release-effect :action) :close))))
 
 (let* ((games '((:id "alpha" :title "ALPHA" :system :nes :color #x5f87ff)
                 (:id "beta" :title "BETA" :system :nes :color #xafd75f)
@@ -2504,75 +2483,45 @@ secret!9
   (assert (null (retrodeck:dashboard-target-at layout 68 412)))
 
   (setf (getf state :status) "STALE")
-  (multiple-value-bind (pressed effect)
-      (retrodeck:dashboard-touch-transition state layout
-                                            '(1084 282 t t nil))
+  (assert-touch-release retrodeck:dashboard-touch-transition state layout
+                        '(1084 282 t t nil) '(1084 282 nil nil t)
     (assert (eq (getf pressed :pressed-target) :next))
-    (assert (null effect))
     (assert (null (getf state :pressed-target)))
-    (multiple-value-bind (released release-effect)
-        (retrodeck:dashboard-touch-transition pressed layout
-                                              '(1084 282 nil nil t))
-      (assert (= (getf released :game-position) 1))
-      (assert (string= (getf released :status) ""))
-      (assert (null (getf released :pressed-target)))
-      (assert (equal release-effect '(:render t :cue :next)))))
+    (assert (= (getf released :game-position) 1))
+    (assert (string= (getf released :status) ""))
+    (assert (null (getf released :pressed-target)))
+    (assert (equal release-effect '(:render t :cue :next))))
 
-  (multiple-value-bind (pressed effect)
-      (retrodeck:dashboard-touch-transition state layout
-                                            '(196 282 t t nil))
-    (assert (null effect))
-    (multiple-value-bind (released release-effect)
-        (retrodeck:dashboard-touch-transition pressed layout
-                                              '(196 282 nil nil t))
-      (assert (= (getf released :game-position) 3))
-      (assert (equal release-effect '(:render t :cue :previous)))))
+  (assert-touch-release retrodeck:dashboard-touch-transition state layout
+                        '(196 282 t t nil) '(196 282 nil nil t)
+    (assert (= (getf released :game-position) 3))
+    (assert (equal release-effect '(:render t :cue :previous))))
 
   (let ((positioned (copy-list state)))
     (setf (getf positioned :game-position) 3)
-    (multiple-value-bind (pressed effect)
-        (retrodeck:dashboard-touch-transition positioned layout
-                                              '(346 102 t t nil))
-      (assert (null effect))
-      (multiple-value-bind (released release-effect)
-          (retrodeck:dashboard-touch-transition pressed layout
-                                                '(346 102 nil nil t))
-        (assert (eq (getf released :active-system) :nes))
-        (assert (zerop (getf released :game-position)))
-        (assert (equal release-effect '(:render t))))))
-
-  (multiple-value-bind (pressed effect)
-      (retrodeck:dashboard-touch-transition state layout
-                                            '(934 102 t t nil))
-    (assert (null effect))
-    (multiple-value-bind (released release-effect)
-        (retrodeck:dashboard-touch-transition pressed layout
-                                              '(934 102 nil nil t))
-      (assert (eq (getf released :active-system) :gb))
+    (assert-touch-release retrodeck:dashboard-touch-transition positioned layout
+                          '(346 102 t t nil) '(346 102 nil nil t)
+      (assert (eq (getf released :active-system) :nes))
       (assert (zerop (getf released :game-position)))
-      (assert (equal release-effect '(:render t :cue :next)))))
+      (assert (equal release-effect '(:render t)))))
 
-  (multiple-value-bind (pressed effect)
-      (retrodeck:dashboard-touch-transition state layout
-                                            '(1084 282 t t nil))
-    (assert (null effect))
-    (multiple-value-bind (released release-effect)
-        (retrodeck:dashboard-touch-transition pressed layout
-                                              '(196 282 nil nil t))
-      (assert (zerop (getf released :game-position)))
-      (assert (null (getf released :pressed-target)))
-      (assert (null release-effect))))
+  (assert-touch-release retrodeck:dashboard-touch-transition state layout
+                        '(934 102 t t nil) '(934 102 nil nil t)
+    (assert (eq (getf released :active-system) :gb))
+    (assert (zerop (getf released :game-position)))
+    (assert (equal release-effect '(:render t :cue :next))))
 
-  (multiple-value-bind (pressed effect)
-      (retrodeck:dashboard-touch-transition state layout
-                                            '(1084 282 t t nil))
-    (assert (null effect))
-    (multiple-value-bind (released release-effect)
-        (retrodeck:dashboard-touch-transition pressed layout
-                                              '(-1 -1 nil nil t))
-      (assert (zerop (getf released :game-position)))
-      (assert (null (getf released :pressed-target)))
-      (assert (null release-effect)))))
+  (assert-touch-release retrodeck:dashboard-touch-transition state layout
+                        '(1084 282 t t nil) '(196 282 nil nil t)
+    (assert (zerop (getf released :game-position)))
+    (assert (null (getf released :pressed-target)))
+    (assert (null release-effect)))
+
+  (assert-touch-release retrodeck:dashboard-touch-transition state layout
+                        '(1084 282 t t nil) '(-1 -1 nil nil t)
+    (assert (zerop (getf released :game-position)))
+    (assert (null (getf released :pressed-target)))
+    (assert (null release-effect))))
 
 (let* ((games '((:id "alpha" :title "ALPHA" :system :nes :color #x5f87ff)
                 (:id "beta" :title "BETA" :system :nes :color #xafd75f)
