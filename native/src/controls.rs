@@ -714,12 +714,8 @@ mod tests {
         assert_handle!(state, key(KeyCode::KEY_LEFTSHIFT, 1), ControlAction::Ignore);
         assert_keyboard_report(&mut state, KeyCode::KEY_TAB, 1, KEYBOARD_SHIFT);
         assert_handle!(state, key(KeyCode::KEY_TAB, 2), ControlAction::Ignore);
-        assert_keyboard_report(
-            &mut state,
-            KeyCode::KEY_RIGHT,
-            2,
-            KEYBOARD_SHIFT | KEYBOARD_REPEAT,
-        );
+        let shifted_repeat = KEYBOARD_SHIFT | KEYBOARD_REPEAT;
+        assert_keyboard_report(&mut state, KeyCode::KEY_RIGHT, 2, shifted_repeat);
         state.handle(key(KeyCode::KEY_RIGHTSHIFT, 1));
         state.handle(key(KeyCode::KEY_LEFTSHIFT, 0));
         assert_keyboard_report(&mut state, KeyCode::KEY_ENTER, 1, KEYBOARD_SHIFT);
@@ -730,11 +726,8 @@ mod tests {
     #[test]
     fn keyboard_drop_waits_for_report_and_resynchronizes_without_an_edge() {
         let mut state = KeyboardState::default();
-        assert_handle!(
-            state,
-            syn(SynchronizationCode::SYN_DROPPED),
-            ControlAction::Ignore
-        );
+        let dropped = syn(SynchronizationCode::SYN_DROPPED);
+        assert_handle!(state, dropped, ControlAction::Ignore);
         assert_handle!(state, key(KeyCode::KEY_LEFTSHIFT, 1), ControlAction::Ignore);
         assert_handle!(state, key(KeyCode::KEY_TAB, 1), ControlAction::Ignore);
         assert_handle!(state, report_boundary(), ControlAction::Resynchronize);
@@ -744,32 +737,24 @@ mod tests {
 
     #[test]
     fn gamepad_uses_exact_thirds_and_reports_rising_edges_on_syn_report() {
-        assert_eq!(axis_state(axis_info(0, 255, 84), 1, 2), 1);
-        assert_eq!(axis_state(axis_info(0, 255, 85), 1, 2), 1);
-        assert_eq!(axis_state(axis_info(0, 255, 86), 1, 2), 0);
-        assert_eq!(axis_state(axis_info(0, 255, 169), 1, 2), 0);
-        assert_eq!(axis_state(axis_info(0, 255, 170), 1, 2), 2);
+        let state = |value| axis_state(axis_info(0, 255, value), 1, 2);
+        assert_eq!([84, 85, 86, 169, 170].map(state), [1, 1, 0, 0, 2]);
         assert_eq!(axis_state(axis_info(4, 4, 4), 1, 2), 0);
 
         let mut state = GamepadState::new(gamepad_snapshot(127, 127, 0));
+        let thumb2 = 1 << (KeyCode::BTN_THUMB2.0 - KeyCode::BTN_TRIGGER.0);
         state.handle(axis(AbsoluteAxisCode::ABS_X, 255));
         state.handle(key(KeyCode::BTN_THUMB2, 1));
         assert_handle!(
             state,
             report_boundary(),
-            gamepad_report(
-                GAMEPAD_X_POSITIVE | (1 << (KeyCode::BTN_THUMB2.0 - KeyCode::BTN_TRIGGER.0))
-            )
+            gamepad_report(GAMEPAD_X_POSITIVE | thumb2)
         );
         assert_handle!(state, report_boundary(), ControlAction::Ignore);
         state.handle(key(KeyCode::BTN_THUMB2, 0));
         state.handle(report_boundary());
         state.handle(key(KeyCode::BTN_THUMB2, 1));
-        assert_handle!(
-            state,
-            report_boundary(),
-            gamepad_report(1 << (KeyCode::BTN_THUMB2.0 - KeyCode::BTN_TRIGGER.0))
-        );
+        assert_handle!(state, report_boundary(), gamepad_report(thumb2));
     }
 
     #[test]

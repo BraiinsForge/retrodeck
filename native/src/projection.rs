@@ -295,10 +295,7 @@ mod tests {
             (50000, 0x1b6e_2c79_2c1c_8f1b),
             (55000, 0xe693_4df8_e360_bd4b),
         ] {
-            let mut canvas = vec![0; size.0 as usize * size.1 as usize * 4];
-            for pixel in canvas.chunks_exact_mut(4) {
-                pixel.copy_from_slice(&[0, 0, 0, 255]);
-            }
+            let mut canvas = [0, 0, 0, 255].repeat(size.0 as usize * size.1 as usize);
             draw_starfield(&mut canvas, size, color_rgb565(0x949494));
             let projection = Projection::new(
                 elapsed_ms, 1, 20, 4044, 420, 4000, 56, 72, 104, 210, 480, 0xffffaf, size.1,

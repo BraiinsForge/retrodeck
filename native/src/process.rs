@@ -512,6 +512,7 @@ fn duration_ms(duration: Duration) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use HelperPhase::{Complete, Input, Start};
     use std::env;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
@@ -571,19 +572,14 @@ mod tests {
         extra: &[(OsString, OsString)],
     ) -> (PathBuf, Vec<OsString>, Vec<(OsString, OsString)>) {
         let executable = env::current_exe().unwrap();
-        let arguments = [
-            "--exact",
-            "process::tests::managed_child_fixture",
-            "--test-threads=1",
-        ]
-        .map(OsString::from)
-        .to_vec();
+        let arguments = vec![
+            "--exact".into(),
+            "process::tests::managed_child_fixture".into(),
+            "--test-threads=1".into(),
+        ];
         let mut environment = vec![
-            (
-                OsString::from("RETRODECK_PROCESS_FIXTURE"),
-                OsString::from(action),
-            ),
-            (OsString::from("RETRO_DECK_KEYMAP"), OsString::from("cz")),
+            environment_variable("RETRODECK_PROCESS_FIXTURE", action),
+            environment_variable("RETRO_DECK_KEYMAP", "cz"),
         ];
         environment.extend_from_slice(extra);
         (executable, arguments, environment)
@@ -606,44 +602,45 @@ mod tests {
         path
     }
 
+    fn environment_variable(name: &str, value: &str) -> (OsString, OsString) {
+        (name.into(), value.into())
+    }
+
+    type HelperOutcome = (HelperPhase, Option<i32>, Option<i32>, bool);
+
+    const HELPER_EXIT_7: HelperOutcome = (Complete, Some(7), None, false);
+    const HELPER_SIGTERM: HelperOutcome = (Complete, None, Some(libc::SIGTERM), false);
+    const HELPER_INPUT_EXIT_7: HelperOutcome = (Input, Some(7), None, true);
+
+    fn assert_script(body: &str, input: &[u8], expected: HelperOutcome) {
+        let helper = helper_script(body);
+        let result = run_helper(&helper, input);
+        std::fs::remove_file(helper).unwrap();
+        assert_eq!(result.phase, expected.0);
+        assert_eq!(result.exit_code, expected.1);
+        assert_eq!(result.signal, expected.2);
+        assert_eq!(result.error.is_some(), expected.3);
+    }
+
     #[test]
     fn helper_writes_exact_input_and_classifies_failures() {
         let capture = temporary_path("helper-input");
-        let helper = helper_script(&format!(
-            "cat > '{}'
-",
-            capture.display()
-        ));
+        let body = format!("cat > '{}'\n", capture.display());
+        let helper = helper_script(&body);
         let input = b"test net\nsecret!9\n";
         let result = run_helper(&helper, input);
-        assert_eq!(result.phase, HelperPhase::Complete);
+        assert_eq!(result.phase, Complete);
         assert_eq!(result.exit_code, Some(0));
         assert_eq!(std::fs::read(&capture).unwrap(), input);
         std::fs::remove_file(&capture).unwrap();
         std::fs::remove_file(&helper).unwrap();
 
-        let helper = helper_script("cat >/dev/null\nexit 7\n");
-        let result = run_helper(&helper, input);
-        assert_eq!(result.phase, HelperPhase::Complete);
-        assert_eq!(result.exit_code, Some(7));
-        std::fs::remove_file(&helper).unwrap();
-
-        let helper = helper_script("cat >/dev/null\nkill -TERM $$\n");
-        let result = run_helper(&helper, input);
-        assert_eq!(result.phase, HelperPhase::Complete);
-        assert_eq!(result.signal, Some(libc::SIGTERM));
-        std::fs::remove_file(&helper).unwrap();
-
-        let helper = helper_script("exit 7\n");
-        let result = run_helper(&helper, &vec![b'x'; 1024 * 1024]);
-        assert_eq!(result.phase, HelperPhase::Input);
-        assert_eq!(result.exit_code, Some(7));
-        assert_eq!(result.signal, None);
-        assert!(result.error.is_some());
-        std::fs::remove_file(&helper).unwrap();
+        assert_script("cat >/dev/null\nexit 7\n", input, HELPER_EXIT_7);
+        assert_script("cat >/dev/null\nkill -TERM $$\n", input, HELPER_SIGTERM);
+        assert_script("exit 7\n", &vec![b'x'; 1024 * 1024], HELPER_INPUT_EXIT_7);
 
         let result = run_helper(Path::new("/no/such/retrodeck-helper"), input);
-        assert_eq!(result.phase, HelperPhase::Start);
+        assert_eq!(result.phase, Start);
         assert!(result.error.is_some());
     }
 
@@ -669,9 +666,9 @@ mod tests {
         )
     }
 
-    fn run_fixture(action: &str) -> ChildResult {
+    fn run_fixture(action: &str, request: StopRequest) -> ChildResult {
         let (executable, arguments, environment) = fixture_command(action, &[]);
-        supervise_fixture(&executable, &arguments, &environment, StopRequest::None)
+        supervise_fixture(&executable, &arguments, &environment, request)
     }
 
     #[test]
@@ -685,27 +682,23 @@ mod tests {
         ));
         let arguments = [OsString::from("first argument"), OsString::from("second")];
         let environment = [
-            (
-                OsString::from("RETRODECK_ALPHA"),
-                OsString::from("alpha value"),
-            ),
-            (OsString::from("RETRODECK_BETA"), OsString::from("beta")),
+            environment_variable("RETRODECK_ALPHA", "alpha value"),
+            environment_variable("RETRODECK_BETA", "beta"),
         ];
         let result = supervise_fixture(&child, &arguments, &environment, StopRequest::None);
         assert_eq!(result.exit_code, Some(0));
-        assert_eq!(
-            std::fs::read_to_string(&capture).unwrap(),
-            "first argument\nsecond\nalpha value\nbeta\n"
-        );
+        let captured = std::fs::read_to_string(&capture).unwrap();
+        assert_eq!(captured, "first argument\nsecond\nalpha value\nbeta\n");
         std::fs::remove_file(capture).unwrap();
         std::fs::remove_file(child).unwrap();
     }
 
     #[test]
     fn classifies_clean_nonzero_signal_and_exec_failure() {
-        assert_eq!(run_fixture("clean").exit_code, Some(0));
-        assert_eq!(run_fixture("exit-7").exit_code, Some(7));
-        assert_eq!(run_fixture("signal").signal, Some(libc::SIGUSR1));
+        assert_eq!(run_fixture("clean", StopRequest::None).exit_code, Some(0));
+        assert_eq!(run_fixture("exit-7", StopRequest::None).exit_code, Some(7));
+        let signaled = run_fixture("signal", StopRequest::None);
+        assert_eq!(signaled.signal, Some(libc::SIGUSR1));
         let result = spawn_and_supervise(
             Path::new("/no/such/retrodeck-terminal"),
             &[],
@@ -721,9 +714,7 @@ mod tests {
 
     #[test]
     fn reports_shutdown_requests() {
-        let (executable, arguments, environment) = fixture_command("wait", &[]);
-        let result =
-            supervise_fixture(&executable, &arguments, &environment, StopRequest::Shutdown);
+        let result = run_fixture("wait", StopRequest::Shutdown);
         assert!(result.started);
         assert!(!result.exited_for_touch);
         assert!(result.shutdown_requested);
@@ -778,21 +769,14 @@ mod tests {
     }
 
     #[test]
-    fn kills_descendants_when_the_group_leader_exits_on_term() {
-        let (result, pids) = run_stopped_group_fixture("leader-exits");
-        assert!(result.started);
-        assert!(result.exited_for_touch);
-        assert_eq!(result.signal, Some(libc::SIGTERM));
-        assert_processes_exit(&pids);
-    }
-
-    #[test]
-    fn terminates_the_complete_child_process_group_after_touch() {
-        let (result, pids) = run_stopped_group_fixture("group");
-        assert!(result.started);
-        assert!(result.exited_for_touch);
-        assert_eq!(result.signal, Some(libc::SIGKILL));
-        assert_processes_exit(&pids);
+    fn terminates_complete_child_process_groups_after_touch() {
+        for (action, signal) in [("leader-exits", libc::SIGTERM), ("group", libc::SIGKILL)] {
+            let (result, pids) = run_stopped_group_fixture(action);
+            assert!(result.started, "{action} fixture did not start");
+            assert!(result.exited_for_touch, "{action} ignored touch");
+            assert_eq!(result.signal, Some(signal), "{action} exit signal");
+            assert_processes_exit(&pids);
+        }
     }
 
     fn process_alive(pid: libc::pid_t) -> bool {

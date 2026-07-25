@@ -461,6 +461,14 @@ mod tests {
         fnv1a(canvas.iter().flat_map(|pixel| pixel.to_le_bytes()))
     }
 
+    fn bitfield(offset: u32, length: u32) -> FbBitfield {
+        FbBitfield {
+            offset,
+            length,
+            msb_right: 0,
+        }
+    }
+
     fn valid_geometry() -> (FbVariableScreenInfo, FbFixedScreenInfo) {
         let variable = FbVariableScreenInfo {
             xres: PHYSICAL_WIDTH as u32,
@@ -468,21 +476,9 @@ mod tests {
             xres_virtual: PHYSICAL_WIDTH as u32,
             yres_virtual: PHYSICAL_HEIGHT as u32,
             bits_per_pixel: 16,
-            red: FbBitfield {
-                offset: 11,
-                length: 5,
-                msb_right: 0,
-            },
-            green: FbBitfield {
-                offset: 5,
-                length: 6,
-                msb_right: 0,
-            },
-            blue: FbBitfield {
-                offset: 0,
-                length: 5,
-                msb_right: 0,
-            },
+            red: bitfield(11, 5),
+            green: bitfield(5, 6),
+            blue: bitfield(0, 5),
             ..FbVariableScreenInfo::default()
         };
         let fixed = FbFixedScreenInfo {

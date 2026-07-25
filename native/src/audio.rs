@@ -337,6 +337,13 @@ mod tests {
         fnv1a(samples.iter().flat_map(|sample| sample.to_le_bytes()))
     }
 
+    fn tone(frequency: i32, duration_ms: i32) -> Tone {
+        Tone {
+            frequency,
+            duration_ms,
+        }
+    }
+
     #[test]
     fn matches_the_legacy_menu_waveforms() {
         let cases = [
@@ -354,52 +361,25 @@ mod tests {
         for (notes, expected_length, expected_digest) in cases {
             let tones = notes
                 .iter()
-                .map(|&(frequency, duration_ms)| Tone {
-                    frequency,
-                    duration_ms,
-                })
+                .map(|&(frequency, duration_ms)| tone(frequency, duration_ms))
                 .collect::<Vec<_>>();
             let samples = render_tones(&tones, 44100, 42).unwrap();
-            assert_eq!(samples.len(), expected_length);
-            assert_eq!(digest(&samples), expected_digest);
+            assert_eq!(
+                (samples.len(), digest(&samples)),
+                (expected_length, expected_digest)
+            );
         }
     }
 
     #[test]
     fn rejects_invalid_tone_requests() {
         assert!(tone_sequence(659, 25, 0, 30).is_err());
-        assert!(
-            render_tones(
-                &[Tone {
-                    frequency: 659,
-                    duration_ms: 25
-                }; 4],
-                44100,
-                42
-            )
-            .is_err()
-        );
-        assert!(
-            render_tones(
-                &[Tone {
-                    frequency: 0,
-                    duration_ms: 25
-                }],
-                44100,
-                42
-            )
-            .is_err()
-        );
-        assert!(
-            render_tones(
-                &[Tone {
-                    frequency: 659,
-                    duration_ms: 25
-                }],
-                44100,
-                0
-            )
-            .is_err()
-        );
+        for (tones, volume) in [
+            (&[tone(659, 25); 4][..], 42),
+            (&[tone(0, 25)][..], 42),
+            (&[tone(659, 25)][..], 0),
+        ] {
+            assert!(render_tones(tones, 44100, volume).is_err());
+        }
     }
 }

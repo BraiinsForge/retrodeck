@@ -402,22 +402,23 @@ fn clamp_y(value: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use evdev::EventType;
+    use TouchAction::{Ignore, Resynchronize};
+    use evdev::{AbsoluteAxisCode as Axis, EventType, KeyCode as Key, SynchronizationCode as Syn};
     use std::path::Path;
 
     fn event(event_type: EventType, code: u16, value: i32) -> InputEvent {
         InputEvent::new(event_type.0, code, value)
     }
 
-    fn axis(code: AbsoluteAxisCode, value: i32) -> InputEvent {
+    fn axis(code: Axis, value: i32) -> InputEvent {
         event(EventType::ABSOLUTE, code.0, value)
     }
 
-    fn key(code: KeyCode, value: i32) -> InputEvent {
+    fn key(code: Key, value: i32) -> InputEvent {
         event(EventType::KEY, code.0, value)
     }
 
-    fn syn(code: SynchronizationCode) -> InputEvent {
+    fn syn(code: Syn) -> InputEvent {
         event(EventType::SYNCHRONIZATION, code.0, 0)
     }
 
@@ -438,43 +439,30 @@ mod tests {
     #[test]
     fn reports_exact_goodix_press_motion_release() {
         let mut state = TouchState::new(0, 0, false);
-        assert_eq!(
-            state.handle(axis(AbsoluteAxisCode::ABS_X, 1400)),
-            TouchAction::Ignore
-        );
-        state.handle(axis(AbsoluteAxisCode::ABS_Y, -20));
-        state.handle(key(KeyCode::BTN_TOUCH, 1));
-        assert_eq!(
-            state.handle(syn(SynchronizationCode::SYN_REPORT)),
-            report(1279, 0, true, true, false)
-        );
-        state.handle(axis(AbsoluteAxisCode::ABS_X, 42));
-        assert_eq!(
-            state.handle(syn(SynchronizationCode::SYN_REPORT)),
-            report(42, 0, true, false, false)
-        );
-        state.handle(key(KeyCode::BTN_TOUCH, 0));
-        assert_eq!(
-            state.handle(syn(SynchronizationCode::SYN_REPORT)),
-            report(42, 0, false, false, true)
-        );
+        for (input, expected) in [
+            (axis(Axis::ABS_X, 1400), Ignore),
+            (axis(Axis::ABS_Y, -20), Ignore),
+            (key(Key::BTN_TOUCH, 1), Ignore),
+            (syn(Syn::SYN_REPORT), report(1279, 0, true, true, false)),
+            (axis(Axis::ABS_X, 42), Ignore),
+            (syn(Syn::SYN_REPORT), report(42, 0, true, false, false)),
+            (key(Key::BTN_TOUCH, 0), Ignore),
+            (syn(Syn::SYN_REPORT), report(42, 0, false, false, true)),
+        ] {
+            assert_eq!(state.handle(input), expected);
+        }
     }
 
     #[test]
     fn resynchronizes_only_after_dropped_report_boundary() {
         let mut state = TouchState::new(7, 9, false);
-        assert_eq!(
-            state.handle(syn(SynchronizationCode::SYN_DROPPED)),
-            TouchAction::Ignore
-        );
-        assert_eq!(
-            state.handle(axis(AbsoluteAxisCode::ABS_X, 900)),
-            TouchAction::Ignore
-        );
-        assert_eq!(
-            state.handle(syn(SynchronizationCode::SYN_REPORT)),
-            TouchAction::Resynchronize
-        );
+        for (input, expected) in [
+            (syn(Syn::SYN_DROPPED), Ignore),
+            (axis(Axis::ABS_X, 900), Ignore),
+            (syn(Syn::SYN_REPORT), Resynchronize),
+        ] {
+            assert_eq!(state.handle(input), expected);
+        }
         assert_eq!(
             state.resynchronize(1300, 480, true),
             touch_report(1279, 479, true, true, false)
@@ -487,18 +475,11 @@ mod tests {
         let y = AbsInfo::new(19, 0, 479, 0, 0, 0);
         assert!(valid_capabilities(true, x, y));
         assert!(!valid_capabilities(false, x, y));
-        assert!(!valid_capabilities(
-            true,
-            AbsInfo::new(0, 0, 1280, 0, 0, 0),
-            y
-        ));
-        assert_eq!(
-            event_path(Path::new("/dev/input/event12").to_path_buf()),
-            Some(Path::new("/dev/input/event12").to_path_buf())
-        );
-        assert_eq!(
-            event_path(Path::new("/dev/input/eventx").to_path_buf()),
-            None
-        );
+        let invalid_x = AbsInfo::new(0, 0, 1280, 0, 0, 0);
+        assert!(!valid_capabilities(true, invalid_x, y));
+        let valid_path = Path::new("/dev/input/event12").to_path_buf();
+        assert_eq!(event_path(valid_path.clone()), Some(valid_path));
+        let invalid_path = Path::new("/dev/input/eventx").to_path_buf();
+        assert_eq!(event_path(invalid_path), None);
     }
 }
