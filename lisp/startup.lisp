@@ -122,14 +122,23 @@
   (:export #:*chiptune-colors*
            #:*chiptune-controls*
            #:*chiptune-extensions*
+           #:*chiptune-gamepad-controls*
            #:*chiptune-maximum-depth*
            #:*chiptune-maximum-file-size*
            #:*chiptune-maximum-files*
+           #:chiptune-advance-plan
            #:chiptune-base-name
+           #:chiptune-control-commands
            #:chiptune-display-text
            #:chiptune-file-accepted-p
+           #:chiptune-file-candidates
            #:chiptune-format-time
+           #:chiptune-next-playback-mode
+           #:chiptune-next-random
+           #:chiptune-shuffle-candidates
            #:chiptune-touch-action
+           #:chiptune-touch-command
+           #:chiptune-volume-step
            #:close-chiptune-audio
            #:close-chiptune-file
            #:make-chiptune-render-state

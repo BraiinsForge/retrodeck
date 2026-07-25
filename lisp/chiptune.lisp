@@ -374,6 +374,84 @@
           (chiptune-control :pause) (getf checked :paused) text)
          (chiptune-draw-next-icon (chiptune-control :next-file) text))))
 
+(defparameter *chiptune-gamepad-controls*
+  '((#x001 . :back) (#x002 . :back)
+    (#x004 . :toggle-pause) (#x008 . :toggle-pause)
+    (#x010 . :previous-track) (#x020 . :next-track)
+    (#x080 . :playback-mode)
+    (#x100 . :previous-file) (#x200 . :next-file)
+    (#x400 . :volume-up) (#x800 . :volume-down)))
+
+(defun chiptune-control-commands (report)
+  (check-type report list)
+  (ecase (getf report :kind)
+    (:keyboard nil)
+    (:gamepad
+     (let ((edges (getf report :edges)))
+       (check-type edges (integer 1 4095))
+       (remove-duplicates
+        (loop for (mask . command) in *chiptune-gamepad-controls*
+              when (logtest mask edges) collect command)
+        :test #'eq)))))
+
+(defun chiptune-touch-command (action)
+  (ecase action
+    (:close :back)
+    (:pause :toggle-pause)
+    ((:previous-file :next-file :playback-mode) action)))
+
+(defun chiptune-next-playback-mode (mode)
+  (ecase mode
+    (:loop-all :loop-one)
+    (:loop-one :shuffle)
+    (:shuffle :loop-all)))
+
+(defun chiptune-next-random (state)
+  "Advance the C++ player's xorshift32 shuffle generator."
+  (check-type state (unsigned-byte 32))
+  (let ((x (if (zerop state) #x6d2b79f5 state)))
+    (setf x (logand #xffffffff (logxor x (ash x 13)))
+          x (logxor x (ash x -17))
+          x (logand #xffffffff (logxor x (ash x 5))))
+    x))
+
+(defun chiptune-file-candidates (count current direction)
+  "File indices to try for previous or next navigation, wrapping to CURRENT."
+  (check-type count (integer 1 *))
+  (check-type current (integer 0 *))
+  (loop for attempt from 1 to count
+        collect (if (minusp direction)
+                    (mod (- (+ current count) (mod attempt count)) count)
+                    (mod (+ current attempt) count))))
+
+(defun chiptune-shuffle-candidates (count current random)
+  "Shuffled file indices to try, skipping CURRENT while alternatives exist."
+  (check-type count (integer 1 *))
+  (check-type current (integer 0 *))
+  (check-type random (unsigned-byte 32))
+  (let ((offset (if (> count 1) (1+ (mod random (1- count))) 0)))
+    (loop for attempt below count
+          for candidate = (mod (+ current offset attempt) count)
+          unless (and (> count 1) (= candidate current))
+            collect candidate)))
+
+(defun chiptune-advance-plan (mode track-index track-count)
+  "Decide what follows a finished track under the given playback mode."
+  (check-type track-index (integer 0 *))
+  (check-type track-count (integer 1 *))
+  (ecase mode
+    (:loop-one '(:restart))
+    (:shuffle '(:shuffle))
+    (:loop-all (if (< (1+ track-index) track-count)
+                   (list :track (1+ track-index))
+                   '(:next-file)))))
+
+(defun chiptune-volume-step (volume direction)
+  (check-type volume (integer 0 100))
+  (if (minusp direction)
+      (if (>= volume 5) (- volume 5) 0)
+      (min 100 (+ volume 5))))
+
 (defun chiptune-touch-action (logical-x logical-y)
   (check-type logical-x integer)
   (check-type logical-y integer)
