@@ -384,6 +384,12 @@
      (with-runtime-device-fixture ,device-options
        (with-initialized-dashboard-runtime (,state ,runtime ,initialize-now)
          ,@body))))
+(defmacro with-runtime-begin ((state trace) current runtime input &body body)
+  `(multiple-value-bind (,state ,trace)
+       (retrodeck:dashboard-runtime-begin-iteration ,current ,runtime ,input) ,@body))
+(defmacro with-runtime-dispatch ((state trace) current runtime input &body body)
+  `(multiple-value-bind (,state ,trace)
+       (retrodeck:dashboard-runtime-dispatch-input ,current ,runtime ,input) ,@body))
 (defmacro assert-dashboard-runtime-initialization-failure
     (now runtime-options device-options diagnostic &rest observations)
   `(let ((state (retrodeck:dashboard-loop-initial-state nil :now ,now))
@@ -3825,14 +3831,10 @@ secret!9
                        :touch-reports nil :touch-times nil :touch-lost-p nil
                        :gamepad-actions nil :keyboard-actions nil
                        :rescan-controls-p t :shutdown-p nil)))
-      (multiple-value-bind (after-timeout trace)
-          (retrodeck:dashboard-runtime-dispatch-input
-           initialized runtime snapshot)
+      (with-runtime-dispatch (after-timeout trace) initialized runtime snapshot
         (assert (null trace))
         (assert (getf runtime :rescan-controls-p))
-        (multiple-value-bind (after-scan scan-trace)
-            (retrodeck:dashboard-runtime-begin-iteration
-             after-timeout runtime '(:now 103))
+        (with-runtime-begin (after-scan scan-trace) after-timeout runtime '(:now 103)
           (declare (ignore after-scan))
           (assert (equal scan-trace
                          '((:reap-sound) (:scan-controls :force t))))
@@ -4164,9 +4166,7 @@ secret!9
   (with-dashboard-runtime-fixture
       (state runtime nil 58 58 () (:wayland t))
       (:wayland-size '(1280 480))
-    (multiple-value-bind (begun trace)
-        (retrodeck:dashboard-runtime-begin-iteration
-         initialized runtime '(:now 59))
+    (with-runtime-begin (begun trace) initialized runtime '(:now 59)
       (assert (equal trace '((:reap-sound))))
       (assert-runtime-observations :active-count 1 :sound-active t :audio-owned nil)
       (assert (null (runtime-effect runtime '(:cue :next) begun)))
@@ -4184,9 +4184,7 @@ secret!9
       (state runtime nil 0 5000 (:touch-connected-p nil) ()) ()
     (assert (getf initialized :touch-connected-p))
     (assert (= *evdev-open-count* 1))
-    (multiple-value-bind (begun trace)
-        (retrodeck:dashboard-runtime-begin-iteration
-         initialized runtime '(:now 5001))
+    (with-runtime-begin (begun trace) initialized runtime '(:now 5001)
       (assert (getf begun :touch-connected-p))
       (assert (string= (getf (getf begun :dashboard) :status) ""))
       (assert (= *evdev-open-count* 1))
@@ -4227,11 +4225,9 @@ secret!9
     (assert (equal (nreverse *interaction-trace*)
                    '(:network-action :render :present)))
     (setf *interaction-trace* nil)
-    (multiple-value-bind (lost trace)
-        (retrodeck:dashboard-runtime-dispatch-input
-         initialized runtime
-         '(:gamepad-actions nil :keyboard-actions nil :touch-reports nil
-           :touch-lost-p t :tick-now 7000 :now 7001))
+    (with-runtime-dispatch (lost trace) initialized runtime
+        '(:gamepad-actions nil :keyboard-actions nil :touch-reports nil
+          :touch-lost-p t :tick-now 7000 :now 7001)
       (assert (equal (getf lost :network) network))
       (assert (= network-reads 2))
       (assert (not (getf lost :touch-connected-p)))
@@ -4257,22 +4253,17 @@ secret!9
       (retrodeck::*menu-sound-input-until-ms* 0))
   (with-dashboard-runtime-fixture
       (state runtime (runtime-test-games t) 70 70 () ()) ()
-    (multiple-value-bind (moved ignored-trace)
-        (retrodeck:dashboard-runtime-dispatch-input
-         initialized runtime
-         '(:gamepad-actions nil :keyboard-actions (:right)
-           :touch-reports nil :now 71))
+    (with-runtime-dispatch (moved ignored-trace) initialized runtime
+        '(:gamepad-actions nil :keyboard-actions (:right)
+          :touch-reports nil :now 71)
       (declare (ignore ignored-trace))
       (assert (getf runtime :audio-owned-p))
       (setf retrodeck::*menu-sound-input-until-ms* 1000)
-      (multiple-value-bind (reaped reap-trace)
-          (retrodeck:dashboard-runtime-begin-iteration
-           moved runtime '(:now 72))
+      (with-runtime-begin (reaped reap-trace) moved runtime '(:now 72)
         (assert (equal reap-trace '((:reap-sound))))
         (assert-runtime-observations :sound-active nil :audio-owned t)
-        (multiple-value-bind (stopped trace)
-            (retrodeck:dashboard-runtime-dispatch-input
-             reaped runtime '(:now 73 :poll-ready-p nil :shutdown-p t))
+        (with-runtime-dispatch (stopped trace) reaped runtime
+            '(:now 73 :poll-ready-p nil :shutdown-p t)
           (declare (ignore stopped))
           (assert (null trace))
           (assert (zerop retrodeck::*menu-sound-input-until-ms*))
@@ -4297,11 +4288,9 @@ secret!9
                :result (:started t :exited-for-touch nil
                         :exit-code nil :signal nil :error nil)))
             (otherwise (error "Unexpected external effect ~S" effect)))))) ()
-    (multiple-value-bind (stopped trace)
-        (retrodeck:dashboard-runtime-dispatch-input
-         initialized runtime
-         '(:gamepad-actions nil :keyboard-actions (:confirm)
-           :touch-reports nil :now 81))
+    (with-runtime-dispatch (stopped trace) initialized runtime
+        '(:gamepad-actions nil :keyboard-actions (:confirm)
+          :touch-reports nil :now 81)
       (assert (null (getf stopped :active-launch)))
       (assert-runtime-observations :running nil :finish-count 1 :stop-count 0
        :controls-scan 1 :controls-close 1 :evdev-close 1 :fbdev-close 1)
@@ -4316,35 +4305,27 @@ secret!9
        (:volume-state "/tmp/volume.state")) ()
     (assert-runtime-observations :fbdev-open 1 :evdev-open 1 :controls-scan 1 :fbdev-canvas 1)
     (assert (= (getf initialized :last-control-scan-ms) 100))
-    (multiple-value-bind (begun begin-trace)
-        (retrodeck:dashboard-runtime-begin-iteration
-         initialized runtime '(:now 150))
+    (with-runtime-begin (begun begin-trace) initialized runtime '(:now 150)
       (assert (equal begin-trace '((:reap-sound))))
       (assert (= *active-count* 1))
       (assert (retrodeck:dashboard-runtime-controller-quarantined-p
                runtime 151))
-      (multiple-value-bind (blocked blocked-trace)
-          (retrodeck:dashboard-runtime-dispatch-input
-           begun runtime
-           '(:gamepad-actions (:right) :keyboard-actions nil
-             :touch-reports nil :now 151))
+      (with-runtime-dispatch (blocked blocked-trace) begun runtime
+          '(:gamepad-actions (:right) :keyboard-actions nil
+            :touch-reports nil :now 151)
         (assert (null blocked-trace))
         (assert (zerop (getf (getf blocked :dashboard) :game-position)))
         (assert (= *active-count* 1))
-        (multiple-value-bind (moved move-trace)
-            (retrodeck:dashboard-runtime-dispatch-input
-             blocked runtime
-             '(:gamepad-actions nil :keyboard-actions (:right)
-               :touch-reports nil :rescan-controls-p t :now 152))
+        (with-runtime-dispatch (moved move-trace) blocked runtime
+            '(:gamepad-actions nil :keyboard-actions (:right)
+              :touch-reports nil :rescan-controls-p t :now 152)
           (assert (= (getf (getf moved :dashboard) :game-position) 1))
           (assert-runtime-observations :active-count 1 :fbdev-canvas 2)
           (assert (equal move-trace
                          '((:discard-touch) (:render) (:present)
                            (:cue :next))))
           (setf *active-status* 0)
-          (multiple-value-bind (rescanned rescan-trace)
-              (retrodeck:dashboard-runtime-begin-iteration
-               moved runtime '(:now 153))
+          (with-runtime-begin (rescanned rescan-trace) moved runtime '(:now 153)
             (assert (= (getf rescanned :last-control-scan-ms) 153))
             (assert-runtime-observations :active-count 2 :controls-scan 2)
             (assert (equal rescan-trace
@@ -4375,15 +4356,11 @@ secret!9
              (push :reload-volume external-trace)
              '(:child-complete :volume 47))
             (otherwise (error "Unexpected external effect ~S" effect)))))) ()
-    (multiple-value-bind (begun begin-trace)
-        (retrodeck:dashboard-runtime-begin-iteration
-         initialized runtime '(:now 2001))
+    (with-runtime-begin (begun begin-trace) initialized runtime '(:now 2001)
       (assert (equal begin-trace '((:reap-sound))))
-      (multiple-value-bind (finished trace)
-          (retrodeck:dashboard-runtime-dispatch-input
-           begun runtime
-           '(:gamepad-actions (:confirm) :keyboard-actions nil
-             :touch-reports nil :now 2002))
+      (with-runtime-dispatch (finished trace) begun runtime
+          '(:gamepad-actions (:confirm) :keyboard-actions nil
+            :touch-reports nil :now 2002)
         (assert (null (getf finished :active-launch)))
         (assert (= (getf finished :last-control-scan-ms) 5000))
         (assert (= (getf (getf finished :settings) :volume) 47))
@@ -4399,9 +4376,7 @@ secret!9
                          :close-controls :launch :scan-controls
                          :open-presentation :reload-volume
                          :render :present)))
-        (multiple-value-bind (post-launch post-trace)
-            (retrodeck:dashboard-runtime-begin-iteration
-             finished runtime '(:now 5001))
+        (with-runtime-begin (post-launch post-trace) finished runtime '(:now 5001)
           (assert (= (getf post-launch :last-control-scan-ms) 5000))
           (assert (equal post-trace '((:reap-sound))))
           (assert (= *evdev-controls-scan-count* 2)))))
@@ -4430,15 +4405,11 @@ secret!9
         *fbdev-canvas-count* 0
         retrodeck::*menu-sound-input-until-ms* 0)
   (with-initialized-dashboard-runtime (state runtime 3000)
-    (multiple-value-bind (begun ignored-trace)
-        (retrodeck:dashboard-runtime-begin-iteration
-         initialized runtime '(:now 3001))
+    (with-runtime-begin (begun ignored-trace) initialized runtime '(:now 3001)
       (declare (ignore ignored-trace))
-      (multiple-value-bind (failed trace)
-          (retrodeck:dashboard-runtime-dispatch-input
-           begun runtime
-           '(:gamepad-actions (:confirm) :keyboard-actions nil
-             :touch-reports nil :now 3002))
+      (with-runtime-dispatch (failed trace) begun runtime
+          '(:gamepad-actions (:confirm) :keyboard-actions nil
+            :touch-reports nil :now 3002)
         (assert (= (getf (getf failed :settings) :volume) 37))
         (assert (string= (getf (getf failed :settings) :status)
                          "VOLUME SAVED; CONFIRMATION TONE FAILED"))
@@ -4453,25 +4424,20 @@ secret!9
       (retrodeck::*menu-sound-input-until-ms* 0))
   (with-dashboard-runtime-fixture
       (state runtime (runtime-test-games) 4000 4000 () ()) ()
-    (multiple-value-bind (lost lost-trace)
-        (retrodeck:dashboard-runtime-dispatch-input
-         initialized runtime
-         '(:gamepad-actions nil :keyboard-actions nil
-           :touch-reports nil :touch-lost-p t :now 4001))
+    (with-runtime-dispatch (lost lost-trace) initialized runtime
+        '(:gamepad-actions nil :keyboard-actions nil
+          :touch-reports nil :touch-lost-p t :now 4001)
       (assert (not (getf lost :touch-connected-p)))
       (assert (= *evdev-close-count* 1))
       (assert (equal lost-trace '((:render) (:present))))
-      (multiple-value-bind (restored reconnect-trace)
-          (retrodeck:dashboard-runtime-begin-iteration
-           lost runtime '(:now 4002))
+      (with-runtime-begin (restored reconnect-trace) lost runtime '(:now 4002)
         (assert (getf restored :touch-connected-p))
         (assert (= *evdev-open-count* 2))
         (assert (equal reconnect-trace
                        '((:reap-sound) (:reconnect-touch)
                          (:render) (:present))))
-        (multiple-value-bind (stopped stop-trace)
-            (retrodeck:dashboard-runtime-dispatch-input
-             restored runtime '(:now 4003 :poll-ready-p nil :shutdown-p t))
+        (with-runtime-dispatch (stopped stop-trace) restored runtime
+            '(:now 4003 :poll-ready-p nil :shutdown-p t)
           (declare (ignore stopped))
           (assert (null stop-trace))
           (assert (not (retrodeck:dashboard-runtime-running-p runtime))))))))
