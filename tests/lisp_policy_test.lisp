@@ -361,6 +361,8 @@
 (defun assert-dashboard-runtime-observations (runtime &rest expected)
   (loop for (name value) on expected by #'cddr
         do (assert (equal (dashboard-runtime-observation runtime name) value))))
+(defmacro assert-runtime-observations (&rest expected)
+  `(assert-dashboard-runtime-observations runtime ,@expected))
 (defun assert-plist-values (plist expected)
   (loop for (name value) on expected by #'cddr
         do (assert (equal (getf plist name) value))))
@@ -445,8 +447,7 @@
         (progn
           (assert (equal (reverse *storage-write-trace*) write-trace))
           (assert (= (getf (getf state :settings) :brightness) 40))))
-    (assert-dashboard-runtime-observations
-     runtime :brightness-maximum nil :fbdev-open 0 :evdev-open 0
+    (assert-runtime-observations :brightness-maximum nil :fbdev-open 0 :evdev-open 0
      :controls-scan 0 :running nil :initialized nil)))
 (defmacro check-dashboard-state-load
     (kind result expected &key default (write nil write-p) (write-status 1))
@@ -509,8 +510,7 @@
           (declare (ignore ignored-runtime))
           (let ((owned (getf runtime :audio-owned-p)))
             (retrodeck:ten-seconds-runtime-shutdown runtime)
-            (assert-dashboard-runtime-observations
-             runtime :active-count 1 :gamepads-scan 1 :controls-scan 0
+            (assert-runtime-observations :active-count 1 :gamepads-scan 1 :controls-scan 0
              :controls nil :touches nil :input-poll '(0 8) :evdev-open 1
              :fbdev-close (if wayland 0 1) :wayland-close (if wayland 1 0)
              :wayland-kind (and wayland :gameplay)
@@ -875,7 +875,6 @@
 (assert-recorded-calls *canvas-glyph-calls*
     (retrodeck:draw-centered-text 10 20 30 40 "AB" 2 #xeeeeee)
     '((14 33 65 2 #xeeeeee) (26 33 66 2 #xeeeeee)))
-
 (assert-recorded-calls *canvas-fill-calls*
     (retrodeck:stroke-canvas-rect 10 20 30 40 2 #xeeeeee)
     '((10 20 30 2 #xeeeeee) (10 58 30 2 #xeeeeee)
@@ -908,27 +907,25 @@
                    (:touch 1001 "10.01" :miss)
                    (:touch 10000 "99.99" :miss)))
   (destructuring-bind (input elapsed expected cue) fixture
-    (let* ((running
-             (assert-ten-seconds-reduction
-              (retrodeck:ten-seconds-initial-state) input 100
-              '((:cue :start) (:redraw)) :mode :running))
-           (stopped
-             (assert-ten-seconds-reduction
-              running input (+ 100 (* elapsed 10000000))
-              (list (list :result expected :input input) (list :cue cue) '(:redraw))
-              :mode :stopped :displayed (min elapsed 9999)))
+    (let* ((running (assert-ten-seconds-reduction
+                     (retrodeck:ten-seconds-initial-state) input 100
+                     '((:cue :start) (:redraw)) :mode :running))
+           (stopped (assert-ten-seconds-reduction
+                     running input (+ 100 (* elapsed 10000000))
+                     (list (list :result expected :input input) (list :cue cue)
+                           '(:redraw))
+                     :mode :stopped :displayed (min elapsed 9999)))
            (retry-at (+ 101 (* elapsed 10000000))))
-      (assert-ten-seconds-reduction
-       stopped input retry-at '((:cue :start) (:redraw))
-       :mode :running :started-at retry-at))))
+      (assert-ten-seconds-reduction stopped input retry-at
+                                    '((:cue :start) (:redraw))
+                                    :mode :running :started-at retry-at))))
 (let ((running (nth-value 0 (retrodeck:ten-seconds-reduce
                              (retrodeck:ten-seconds-initial-state) :touch 100))))
-  (assert-ten-seconds-reduction running :tick 99 nil :identity running)
-  (assert-ten-seconds-reduction
-   running :tick 100 '((:redraw)) :displayed 0 :redraw-at 16000100)
-  (assert-ten-seconds-reduction
-   running :tick 1230000100 '((:redraw))
-   :displayed 123 :redraw-at 1246000100))
+  (dolist (fixture `((99 nil :identity ,running)
+                     (100 ((:redraw)) :displayed 0 :redraw-at 16000100)
+                     (1230000100 ((:redraw)) :displayed 123
+                      :redraw-at 1246000100)))
+    (apply #'assert-ten-seconds-reduction running :tick fixture)))
 (setf *canvas-fill-calls* nil *canvas-glyph-calls* nil)
 (assert (retrodeck:render-ten-seconds
          (retrodeck:ten-seconds-initial-state)))
@@ -1011,8 +1008,7 @@
   (assert-signals error
     (retrodeck:ten-seconds-candidate-rehearse
      (retrodeck:ten-seconds-initial-state) runtime :iteration-limit 1))
-  (assert-dashboard-runtime-observations
-   runtime :wayland-open 1 :wayland-kind :gameplay :fbdev-open 0
+  (assert-runtime-observations :wayland-open 1 :wayland-kind :gameplay :fbdev-open 0
    :wayland-close 0 :evdev-close 1 :controls-close 1 :initialized nil))
 
 (with-ten-seconds-runtime-fixture
@@ -1026,8 +1022,7 @@
       (declare (ignore ignored))
       (assert (eq returned state))
       (assert (equal trace '((:shutdown))))
-      (assert-dashboard-runtime-observations
-       runtime :active-count 0 :input-poll nil))
+      (assert-runtime-observations :active-count 0 :input-poll nil))
     (retrodeck:ten-seconds-runtime-shutdown runtime)))
 
 (with-ten-seconds-runtime-fixture
@@ -1052,8 +1047,7 @@
                   nil)
               (error (condition) condition))))
       (assert (search "10 Seconds render failed" (princ-to-string failure))))
-    (assert-dashboard-runtime-observations
-     runtime :stop-count 1 :fbdev-close 1 :evdev-close 1 :controls-close 1
+    (assert-runtime-observations :stop-count 1 :fbdev-close 1 :evdev-close 1 :controls-close 1
      :menu-sound-until 777 :initialized nil :dirty nil)
     (assert (not (getf runtime :running)))))
 
@@ -1070,8 +1064,7 @@
         (assert (eq returned runtime))
         (assert (= (length traces) trace-count))
         (assert (eq reason expected))
-        (assert-dashboard-runtime-observations
-         runtime :initialized nil :fbdev-close 1)))))
+        (assert-runtime-observations :initialized nil :fbdev-close 1)))))
 
 (let* ((credits-path (test-menu-path "credits.tsv"))
        (*regular-file-result* (test-file-string credits-path))
@@ -3892,8 +3885,7 @@ secret!9
         (declare (ignore after-shutdown))
         (assert (eq shutdown-runtime runtime))
         (assert (equal shutdown-trace '((:reap-sound))))
-        (assert-dashboard-runtime-observations
-         runtime :running nil :fbdev-close 1 :evdev-close 1 :controls-close 1))))))
+        (assert-runtime-observations :running nil :fbdev-close 1 :evdev-close 1 :controls-close 1))))))
 
 (labels ((exercise (input times function &optional games palette)
            (let* ((state (retrodeck:dashboard-loop-initial-state games :now 90))
@@ -3967,8 +3959,7 @@ secret!9
                               "mario"))
              (assert (= (getf (getf final :settings) :volume) 37))
              (assert (= *canvas-clear-color* #x010203))
-             (assert-dashboard-runtime-observations
-              runtime :active-count 2 :fbdev-open 1 :fbdev-close 1
+             (assert-runtime-observations :active-count 2 :fbdev-open 1 :fbdev-close 1
               :evdev-open 1 :evdev-close 1 :controls-close 1
               :initialized nil :running nil))))))
     (assert
@@ -3995,8 +3986,7 @@ secret!9
          (assert (eq reason :operator-stop))
          (assert (equal stops '(0)))
          (assert (null *input-poll-arguments*))
-         (assert-dashboard-runtime-observations
-          runtime :fbdev-close 1 :evdev-close 1 :controls-close 1)))))
+         (assert-runtime-observations :fbdev-close 1 :evdev-close 1 :controls-close 1)))))
   (exercise
    '(0 0 0 0 0 1) '(300 301 302)
    (lambda (state runtime)
@@ -4006,16 +3996,14 @@ secret!9
        (assert (eq returned-runtime runtime))
        (assert (equal traces '(((:reap-sound)))))
        (assert (eq reason :shutdown))
-       (assert-dashboard-runtime-observations
-        runtime :active-count 1 :fbdev-close 1 :evdev-close 1
+       (assert-runtime-observations :active-count 1 :fbdev-close 1 :evdev-close 1
         :controls-close 1))))
   (exercise
    nil '(400 401)
    (lambda (state runtime)
      (assert-signals error
                      (retrodeck:dashboard-runtime-rehearse state runtime))
-     (assert-dashboard-runtime-observations
-      runtime :active-count 1 :fbdev-close 1 :evdev-close 1
+     (assert-runtime-observations :active-count 1 :fbdev-close 1 :evdev-close 1
       :controls-close 1 :initialized nil :running nil)))
   (exercise
    '(0 0 0 0 0 0) '(500)
@@ -4023,12 +4011,10 @@ secret!9
      (with-initialized-dashboard-runtime (state runtime 500)
        (assert-signals error
                        (retrodeck:dashboard-runtime-rehearse state runtime))
-       (assert-dashboard-runtime-observations
-        runtime :initialized t :running t :fbdev-close 0 :evdev-close 0
+       (assert-runtime-observations :initialized t :running t :fbdev-close 0 :evdev-close 0
         :controls-close 0)
        (retrodeck:dashboard-runtime-shutdown runtime)
-       (assert-dashboard-runtime-observations
-        runtime :fbdev-close 1 :evdev-close 1 :controls-close 1)))))
+       (assert-runtime-observations :fbdev-close 1 :evdev-close 1 :controls-close 1)))))
 
 (labels ((check-presentation
              (display expected diagnostic
@@ -4095,8 +4081,7 @@ secret!9
       (state runtime nil 190 190 ()
        (:wayland t :clock (lambda () (or (pop times) 999))))
       (:wayland-touch-queue '((33 44 1 1 0)) :controls '((0 28 0)))
-    (assert-dashboard-runtime-observations
-     runtime :wayland-open 1 :wayland-display :environment)
+    (assert-runtime-observations :wayland-open 1 :wayland-display :environment)
     (let ((snapshot (retrodeck:dashboard-runtime-poll-input runtime 40)))
       (assert (equal snapshot
                      '(:now 201 :tick-now 201 :poll-ready-p t
@@ -4107,8 +4092,7 @@ secret!9
       (assert (equal *input-poll-arguments* '(1 40)))
       (assert (zerop *evdev-open-count*))
       (retrodeck:dashboard-runtime-dispatch-input initialized runtime snapshot)
-      (assert-dashboard-runtime-observations
-       runtime :running nil :wayland-close 1 :controls-close 1))))
+      (assert-runtime-observations :running nil :wayland-close 1 :controls-close 1))))
 
 (assert-dashboard-runtime-initialization-failure
  10 (:auto-presentation t :wayland-display "wayland-1")
@@ -4162,20 +4146,17 @@ secret!9
     (assert-signals error
       (runtime-effect runtime '(:launch (:executable "/tmp/noop")) initialized))
     (retrodeck:dashboard-runtime-shutdown runtime)
-    (assert-dashboard-runtime-observations
-     runtime :fbdev-open 0 :fbdev-close 0 :evdev-close 1 :controls-close 1)))
+    (assert-runtime-observations :fbdev-open 0 :fbdev-close 0 :evdev-close 1 :controls-close 1)))
 
 (with-dashboard-runtime-fixture
     (state runtime nil 56 56 () (:adopt-presentation t))
     (:fbdev-size '(1280 480))
-  (assert-dashboard-runtime-observations
-   runtime :presentation-owned t :running t)
+  (assert-runtime-observations :presentation-owned t :running t)
   (assert-signals error
     (retrodeck:dashboard-runtime-initialize initialized runtime 57))
   (assert (getf runtime :presentation-owned-p))
   (retrodeck:dashboard-runtime-shutdown runtime)
-  (assert-dashboard-runtime-observations
-   runtime :fbdev-open 0 :fbdev-close 1 :evdev-close 1 :controls-close 1))
+  (assert-runtime-observations :fbdev-open 0 :fbdev-close 1 :evdev-close 1 :controls-close 1))
 
 (let ((*active-status* 1) (*active-count* 0) (*play-status* 2)
       (*stop-count* 0) (*finish-count* 0)
@@ -4187,18 +4168,14 @@ secret!9
         (retrodeck:dashboard-runtime-begin-iteration
          initialized runtime '(:now 59))
       (assert (equal trace '((:reap-sound))))
-      (assert-dashboard-runtime-observations
-       runtime :active-count 1 :sound-active t :audio-owned nil)
+      (assert-runtime-observations :active-count 1 :sound-active t :audio-owned nil)
       (assert (null (runtime-effect runtime '(:cue :next) begun)))
-      (assert-dashboard-runtime-observations
-       runtime :sound-active t :audio-owned nil)
+      (assert-runtime-observations :sound-active t :audio-owned nil)
       (runtime-effect runtime '(:stop-sound) begun)
       (runtime-effect runtime '(:finish-sound) begun)
-      (assert-dashboard-runtime-observations
-       runtime :stop-count 0 :finish-count 0 :sound-active t)
+      (assert-runtime-observations :stop-count 0 :finish-count 0 :sound-active t)
       (retrodeck:dashboard-runtime-shutdown runtime)
-      (assert-dashboard-runtime-observations
-       runtime :stop-count 0 :finish-count 0
+      (assert-runtime-observations :stop-count 0 :finish-count 0
        :wayland-close 0 :controls-close 1))))
 
 (let ((*active-status* 0)
@@ -4269,15 +4246,12 @@ secret!9
 (with-dashboard-runtime-fixture
     (state runtime nil 60 60 () (:wayland t))
     (:wayland-size '(1280 480))
-  (assert-dashboard-runtime-observations
-   runtime :presentation-owned nil :controls-owned t)
+  (assert-runtime-observations :presentation-owned nil :controls-owned t)
   (retrodeck:dashboard-runtime-shutdown runtime)
-  (assert-dashboard-runtime-observations
-   runtime :wayland-close 0 :wayland-canvas 1
+  (assert-runtime-observations :wayland-close 0 :wayland-canvas 1
    :controls-scan 1 :controls-close 1 :running nil)
   (retrodeck:dashboard-runtime-shutdown runtime)
-  (assert-dashboard-runtime-observations
-   runtime :wayland-close 0 :controls-close 1))
+  (assert-runtime-observations :wayland-close 0 :controls-close 1))
 
 (let ((*active-status* 0) (*play-status* 1) (*stop-count* 0)
       (retrodeck::*menu-sound-input-until-ms* 0))
@@ -4295,20 +4269,17 @@ secret!9
           (retrodeck:dashboard-runtime-begin-iteration
            moved runtime '(:now 72))
         (assert (equal reap-trace '((:reap-sound))))
-        (assert-dashboard-runtime-observations
-         runtime :sound-active nil :audio-owned t)
+        (assert-runtime-observations :sound-active nil :audio-owned t)
         (multiple-value-bind (stopped trace)
             (retrodeck:dashboard-runtime-dispatch-input
              reaped runtime '(:now 73 :poll-ready-p nil :shutdown-p t))
           (declare (ignore stopped))
           (assert (null trace))
           (assert (zerop retrodeck::*menu-sound-input-until-ms*))
-          (assert-dashboard-runtime-observations
-           runtime :stop-count 1 :controls-close 1 :evdev-close 1
+          (assert-runtime-observations :stop-count 1 :controls-close 1 :evdev-close 1
            :fbdev-close 1 :layout nil :running nil)
           (retrodeck:dashboard-runtime-shutdown runtime)
-          (assert-dashboard-runtime-observations
-           runtime :stop-count 1 :controls-close 1
+          (assert-runtime-observations :stop-count 1 :controls-close 1
            :evdev-close 1 :fbdev-close 1))))))
 
 (let ((*active-status* 0) (*play-status* 1)
@@ -4332,8 +4303,7 @@ secret!9
          '(:gamepad-actions nil :keyboard-actions (:confirm)
            :touch-reports nil :now 81))
       (assert (null (getf stopped :active-launch)))
-      (assert-dashboard-runtime-observations
-       runtime :running nil :finish-count 1 :stop-count 0
+      (assert-runtime-observations :running nil :finish-count 1 :stop-count 0
        :controls-scan 1 :controls-close 1 :evdev-close 1 :fbdev-close 1)
       (assert (equal (mapcar #'first trace)
                      '(:discard-touch :cue :render :present :finish-sound
@@ -4344,8 +4314,7 @@ secret!9
   (with-dashboard-runtime-fixture
       (state runtime (runtime-test-games t) 100 100 ()
        (:volume-state "/tmp/volume.state")) ()
-    (assert-dashboard-runtime-observations
-     runtime :fbdev-open 1 :evdev-open 1 :controls-scan 1 :fbdev-canvas 1)
+    (assert-runtime-observations :fbdev-open 1 :evdev-open 1 :controls-scan 1 :fbdev-canvas 1)
     (assert (= (getf initialized :last-control-scan-ms) 100))
     (multiple-value-bind (begun begin-trace)
         (retrodeck:dashboard-runtime-begin-iteration
@@ -4368,8 +4337,7 @@ secret!9
              '(:gamepad-actions nil :keyboard-actions (:right)
                :touch-reports nil :rescan-controls-p t :now 152))
           (assert (= (getf (getf moved :dashboard) :game-position) 1))
-          (assert-dashboard-runtime-observations
-           runtime :active-count 1 :fbdev-canvas 2)
+          (assert-runtime-observations :active-count 1 :fbdev-canvas 2)
           (assert (equal move-trace
                          '((:discard-touch) (:render) (:present)
                            (:cue :next))))
@@ -4378,8 +4346,7 @@ secret!9
               (retrodeck:dashboard-runtime-begin-iteration
                moved runtime '(:now 153))
             (assert (= (getf rescanned :last-control-scan-ms) 153))
-            (assert-dashboard-runtime-observations
-             runtime :active-count 2 :controls-scan 2)
+            (assert-runtime-observations :active-count 2 :controls-scan 2)
             (assert (equal rescan-trace
                            '((:reap-sound)
                              (:scan-controls :force t))))))))
@@ -4423,8 +4390,7 @@ secret!9
         (assert (string= (getf (getf finished :dashboard) :status)
                          "ALPHA EXITED"))
         (assert (equal (nreverse external-trace) '(:launch :reload-volume)))
-        (assert-dashboard-runtime-observations
-         runtime :finish-count 1 :controls-close 1 :controls-scan 2
+        (assert-runtime-observations :finish-count 1 :controls-close 1 :controls-scan 2
          :fbdev-open 2 :fbdev-canvas 3)
         (assert (not (retrodeck:dashboard-runtime-controller-quarantined-p
                       runtime 2002)))
