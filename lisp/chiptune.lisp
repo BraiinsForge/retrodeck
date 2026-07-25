@@ -839,3 +839,16 @@
           (push trace traces)
           (incf iteration)))
       (values current runtime (nreverse traces) reason))))
+
+(defun run-chiptune-main (&optional arguments)
+  (unless (and (= (length arguments) 1) (stringp (first arguments)))
+    (format *error-output* "usage: chiptune-deck CHIPTUNE_DIRECTORY~%")
+    (finish-output *error-output*)
+    (return-from run-chiptune-main 2))
+  (let ((runtime (make-chiptune-runtime :directory (first arguments))))
+    (let ((state (chiptune-runtime-initialize runtime)))
+      (unwind-protect
+          (loop while (getf runtime :running)
+                do (setf state (chiptune-runtime-run-iteration state runtime)))
+        (chiptune-runtime-shutdown runtime))
+      0)))

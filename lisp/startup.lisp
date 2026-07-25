@@ -38,6 +38,7 @@
            #:network-status
            #:play-tone-sequence
            #:process-shutdown-p
+           #:program-arguments
            #:play-tones
            #:raster-clear
            #:raster-load-cover
@@ -97,6 +98,7 @@
                 #:network-status
                 #:play-tone-sequence
                 #:process-shutdown-p
+                #:program-arguments
                 #:play-tones
                 #:read-control-file
                 #:read-regular-file
@@ -287,6 +289,12 @@
            #:list-native-directory
            #:load-text-mask
            #:main
+           #:main-invocation-name
+           #:main-route
+           #:*main-routes*
+           #:native-program-arguments
+           #:run-chiptune-main
+           #:run-ten-seconds-main
            #:make-dashboard-runtime
            #:make-ten-seconds-runtime
            #:make-project-credits-crawl
@@ -367,7 +375,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 25)
+(defconstant +native-abi-version+ 26)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -521,6 +529,12 @@
   (when (> minimum-bytes maximum-bytes)
     (error "Regular file byte bounds are invalid"))
   (read-regular-file (native-path-string path) minimum-bytes maximum-bytes))
+
+(defun native-program-arguments ()
+  (let ((arguments (program-arguments)))
+    (unless (and (listp arguments) (every #'stringp arguments))
+      (error "Invalid native program arguments ~S" arguments))
+    arguments))
 
 (defun list-native-directory (path)
   (check-type path string)
@@ -754,9 +768,15 @@
 (defun main ()
   (unless (= (abi-version) +native-abi-version+)
     (error "Native ABI mismatch"))
-  (format t "retrodeck: Common Lisp startup loaded~%")
-  (finish-output)
-  0)
+  (multiple-value-bind (route arguments)
+      (main-route (native-program-arguments))
+    (case route
+      (:ten-seconds (run-ten-seconds-main arguments))
+      (:chiptunes (run-chiptune-main arguments))
+      (otherwise
+       (format t "retrodeck: Common Lisp startup loaded~%")
+       (finish-output)
+       0))))
 
 (let ((startup *load-truename*))
   (load (merge-pathnames "ui.lisp" startup) :verbose nil :print nil)

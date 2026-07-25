@@ -314,3 +314,17 @@
           (push trace traces)
           (incf iteration)))
       (values current runtime (nreverse traces) reason))))
+
+(defun run-ten-seconds-main (&optional arguments)
+  (unless (null arguments)
+    (format *error-output* "usage: ten-seconds-deck~%")
+    (finish-output *error-output*)
+    (return-from run-ten-seconds-main 2))
+  (let ((runtime (make-ten-seconds-runtime))
+        (state (ten-seconds-initial-state)))
+    (ten-seconds-runtime-initialize runtime)
+    (unwind-protect
+        (loop while (getf runtime :running)
+              do (setf state (ten-seconds-runtime-run-iteration state runtime)))
+      (ten-seconds-runtime-shutdown runtime))
+    0))

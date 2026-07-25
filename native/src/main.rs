@@ -44,7 +44,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 25;
+const ABI_VERSION: ClFixnum = 26;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -247,6 +247,10 @@ impl Ecl {
             (
                 "PROCESS-SHUTDOWN-P",
                 native_process_shutdown as EclFixedFunction,
+            ),
+            (
+                "PROGRAM-ARGUMENTS",
+                native_program_arguments as EclFixedFunction,
             ),
             (
                 "CANVAS-RGB565-HASH-WORDS",
@@ -829,6 +833,13 @@ unsafe extern "C" fn native_read_regular_file(
         )
     })();
     native_optional_string(result)
+}
+
+unsafe extern "C" fn native_program_arguments() -> ClObject {
+    let items = env::args_os()
+        .map(|argument| make_base_string(argument.as_bytes(), "program argument"))
+        .collect::<Vec<_>>();
+    make_object_list(&items)
 }
 
 unsafe extern "C" fn native_list_directory(path: ClObject) -> ClObject {
@@ -1478,7 +1489,17 @@ fn verify_uploader_password(path: &OsStr) -> Result<u8, String> {
 
 fn startup_path() -> Result<PathBuf, String> {
     let mut arguments = env::args_os();
-    let _program = arguments.next();
+    let program = arguments.next();
+    // App symlinks (deck-menu, chiptune-deck, ...) keep their arguments for
+    // the Lisp router; only direct invocation selects a startup file.
+    let dedicated = program
+        .as_deref()
+        .map(Path::new)
+        .and_then(Path::file_name)
+        .is_some_and(|name| name != "retrodeck-native");
+    if dedicated {
+        return Ok(PathBuf::from(DEFAULT_STARTUP));
+    }
     match (arguments.next(), arguments.next()) {
         (None, None) => Ok(PathBuf::from(DEFAULT_STARTUP)),
         (Some(path), None) => Ok(path.into()),

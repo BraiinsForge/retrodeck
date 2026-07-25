@@ -591,6 +591,24 @@
                           (subseq path dot))
                      *chiptune-extensions* :test #'string=))))))
 
+(defparameter *main-routes*
+  '(("deck-menu" . :dashboard)
+    ("ten-seconds-deck" . :ten-seconds)
+    ("chiptune-deck" . :chiptunes)))
+
+(defun main-invocation-name (program)
+  (check-type program string)
+  (let ((slash (position #\/ program :from-end t)))
+    (if slash (subseq program (1+ slash)) program)))
+
+(defun main-route (arguments)
+  "Choose the app entry point from the launcher invocation name."
+  (check-type arguments list)
+  (let* ((program (or (first arguments) ""))
+         (route (cdr (assoc (main-invocation-name program) *main-routes*
+                            :test #'string=))))
+    (values (or route :startup) (rest arguments))))
+
 (defun scan-chiptune-files (directory &key (lister #'list-native-directory))
   "Collect supported chiptune paths the way the C++ player scanned them."
   (check-type directory string)

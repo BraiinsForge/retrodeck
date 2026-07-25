@@ -46,7 +46,8 @@
        *child-arguments* *chiptune-open-result* *chiptune-step-result*
        *chiptune-open-path* *chiptune-start-track-index*
        *chiptune-audio-open-volume* *chiptune-audio-write-pcm*
-       *list-directory-path* *list-directory-result*)
+       *list-directory-path* *list-directory-result*
+       *program-arguments-result*)
       (0 *chiptune-rewind-count*)
   ("" *control-file-read-result*)
   ('(1 2 3 4) *canvas-hash-words* *monotonic-words*)
@@ -112,7 +113,8 @@
     (push :sound *interaction-trace*))
   *play-status*)
 (define-native-test-functions
-  (abi-version () 25)
+  (abi-version () 26)
+  (program-arguments () *program-arguments-result*)
   (list-directory (path)
     (setf *list-directory-path* path)
     *list-directory-result*)
@@ -948,6 +950,29 @@
 (assert-unary-table #'string= #'retrodeck:chiptune-format-time
                     '((-1 "0:00") (0 "0:00") (999 "0:00") (1000 "0:01")
                       (59999 "0:59") (60000 "1:00") (3600000 "60:00")))
+(assert-unary-table #'string= #'retrodeck:main-invocation-name
+                    '(("/mnt/data/nes-deck/chiptune-deck" "chiptune-deck")
+                      ("deck-menu" "deck-menu")
+                      ("" "")))
+(flet ((route (arguments)
+         (multiple-value-list (retrodeck:main-route arguments))))
+  (assert (equal (route '("/mnt/data/nes-deck/ten-seconds-deck"))
+                 '(:ten-seconds nil)))
+  (assert (equal (route '("/mnt/data/nes-deck/chiptune-deck"
+                          "/mnt/data/chiptunes"))
+                 '(:chiptunes ("/mnt/data/chiptunes"))))
+  (assert (equal (route '("./deck-menu")) '(:dashboard nil)))
+  (assert (equal (route '("/usr/bin/retrodeck-native" "startup.lisp"))
+                 '(:startup ("startup.lisp"))))
+  (assert (equal (route nil) '(:startup nil))))
+(assert-signals type-error (retrodeck:main-route "deck-menu"))
+(let ((*error-output* (make-broadcast-stream)))
+  (assert (= (retrodeck:run-ten-seconds-main '("extra")) 2))
+  (assert (= (retrodeck:run-chiptune-main nil) 2))
+  (assert (= (retrodeck:run-chiptune-main '("/a" "/b")) 2)))
+(let ((*program-arguments-result* '("/usr/bin/retrodeck-native"))
+      (*standard-output* (make-broadcast-stream)))
+  (assert (zerop (retrodeck:main))))
 (assert-unary-table #'equal #'retrodeck:chiptune-control-commands
                     '(((:kind :keyboard :code 28 :shift nil :repeat nil) nil)
                       ((:kind :gamepad :edges #x001) (:back))
