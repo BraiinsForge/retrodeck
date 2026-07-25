@@ -818,31 +818,6 @@
           };
         });
 
-        rom-uploader = pkgsCross.buildGoModule {
-          pname = "rom-uploader";
-          version = "1.0.0";
-
-          src = ./uploader;
-          vendorHash = null;
-          env.CGO_ENABLED = 0;
-          nativeBuildInputs = [ pkgs.nukeReferences ];
-          allowedReferences = [ ];
-          ldflags = [ "-s" "-w" ];
-
-          postInstall = ''
-            mv $out/bin/uploader $out/bin/rom-uploader
-          '';
-
-          postFixup = ''
-            nuke-refs $out/bin/rom-uploader
-          '';
-
-          meta = {
-            description = "Passworded ROM intake service for Retro Deck";
-            platforms = [ "armv7l-linux" ];
-          };
-        };
-
         default = self.packages.${system}.nes-deck;
       };
 
@@ -1055,10 +1030,6 @@
           export UPLOADER_ASSET_ROOT=${./lisp}
           export UPLOADER_PALETTE=${./deploy/menu/palette.tsv}
           export UPLOADER_SHELL=${pkgs.bash}/bin/bash
-          { printf '\n'; sed -n '87,274p' ${./uploader/ui.go}; } | \
-            cmp - ${./lisp/uploader-paper.css}
-          { printf '\n'; sed -n '278,298p' ${./uploader/ui.go}; } | \
-            cmp - ${./lisp/uploader-palette.js}
           ${pkgs.bash}/bin/bash ${./tests/uploader-http-smoke.sh} host \
             ${pkgs.sbcl}/bin/sbcl --noinform --disable-debugger --script
           ECLDIR=${eclArmNetwork}/lib/ecl/ \

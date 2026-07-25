@@ -12,7 +12,6 @@ let
   zlib = staticCross.zlib;
   libffi = staticCross.libffi;
   glibc = pkgsCross.glibc;
-  go = pkgs.go;
 in
 pkgs.runCommand "retro-deck-runtime-licenses" {
   allowedReferences = [ ];
@@ -105,7 +104,6 @@ pkgs.runCommand "retro-deck-runtime-licenses" {
     > "$licenses/glibc-COPYING"
   tar -xOf ${glibc.src} glibc-${glibc.version}/COPYING.LIB \
     > "$licenses/glibc-COPYING.LIB"
-  tar -xOf ${go.src} go/LICENSE > "$licenses/Go-LICENSE"
   install -m444 ${nixpkgsSource}/COPYING "$licenses/Nixpkgs-COPYING"
   install -m444 ${../assets/settings-cog/UPSTREAM.txt} \
     "$licenses/knekko-CC0-NOTICE.txt"

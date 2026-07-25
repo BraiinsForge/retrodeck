@@ -1,11 +1,15 @@
 # ROM intake web server
 
-The native `rom-uploader` service accepts owner-supplied ROMs at the Deck's
-active Wi-Fi or WireGuard IPv4 address on port 8080. Deployment writes
-`0.0.0.0:8080` to `/mnt/data/nes-deck/uploader/address.conf`, so the listener
-accepts connections on every IPv4 interface. Requests must use an IPv4 or
-IPv4-mapped literal host on port 8080, and form origins must match that exact
-address.
+The Common Lisp uploader service (`lisp/uploader.lisp`, one Hunchentoot file)
+accepts owner-supplied ROMs at the Deck's active Wi-Fi or WireGuard IPv4
+address on port 8080. It listens on every IPv4 interface; requests must use an
+IPv4 literal host on port 8080, and form origins must match that exact
+address. The `nes-deck-uploader` init script runs it on the deployed
+network-enabled ECL with `deploy/uploader/run.lisp` as the entry point and
+the bundled `lisp-libraries` source tree on `CL_SOURCE_REGISTRY`. Password
+verification calls `retrodeck-native --verify-uploader-password`;
+`ops/lib/set-uploader-password.py` writes the matching configuration at
+deployment time.
 
 The service uses a PBKDF2-HMAC-SHA256 password record, bounded login attempts,
 eight-hour same-site sessions, CSRF tokens, strict origin and host checks, and
@@ -22,34 +26,6 @@ the dashboard. Existing version-3 overrides remain readable: their colors are
 preserved and their retired settings-icon choice is ignored. Built-in defaults
 remain available when the optional override is malformed.
 
-The Go service remains authoritative. Startup-loaded `lisp/policy.lisp` now
-exposes a non-authoritative copy of its editable HTTP, authentication, ROM,
-catalog, palette, persistence, system, color, label, and restart policy. Focused
-tests pin that snapshot to the current Go sources. Lisp also exposes an opt-in
-palette save plan that accepts decoded color fields, rejects unknown, repeated,
-missing, or malformed values with the existing response policy, normalizes RGB
-to uppercase, emits the exact version-2 override bytes, and returns the private
-atomic-write and timed dashboard-restart contract. This does not change the Go
-server, dashboard, launcher, or `RETRODECK:MAIN`.
-
-`ops/configure-deck.sh` asks for the uploader password during setup and stores
-it in the local, Git-ignored `deck.conf` with mode `0600`. Each deployment
-derives a fresh password record and installs only that record at
-`/mnt/data/nes-deck/uploader/password.conf`; the clear password is not retained
-on the Deck. Change the local configuration and deploy again to rotate it.
-
-To replace it directly without placing the value in argv or shell history,
-run this from a trusted machine:
-
-```sh
-read -rsp 'New ROM uploader password: ' password
-printf '\n'
-printf '%s\n' "$password" |
-  ssh root@10.0.0.10 \
-    '/mnt/data/nes-deck/uploader/rom-uploader --set-password /mnt/data/nes-deck/uploader/password.conf && /etc/init.d/nes-deck-uploader restart'
-unset password
-```
-
-Eight bytes are accepted for a Deck that remains in a trusted location. Use at
-least 16 bytes for a Deck that may leave one. The service never changes Wi-Fi,
-WireGuard, routes, or firewall rules.
+The Lisp service is authoritative. `tests/uploader_lisp_test.lisp` and
+`tests/uploader-http-smoke.sh` exercise its policy and full HTTP contract on
+host SBCL and on the ARM network ECL under QEMU through the flake checks.

@@ -61,7 +61,6 @@ nix build --no-link --print-out-paths .#lua-deck
 nix build --no-link --print-out-paths .#python-deck
 nix build --no-link --print-out-paths .#chibi-deck
 nix build --no-link --print-out-paths .#chiptune-deck
-nix build --no-link --print-out-paths .#rom-uploader
 nix build --no-link --print-out-paths .#runtime-licenses
 nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 ```
@@ -80,7 +79,6 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 | `python-deck` | `bin/python` |
 | `chibi-deck` | `bin/chibi-scheme` plus Scheme modules |
 | `chiptune-deck` | `bin/chiptune-deck` |
-| `rom-uploader` | `bin/rom-uploader` |
 | `runtime-licenses` | Shared runtime and asset notices |
 | ECL expression | `bin/ecl.bin`, runtime library, and notices |
 
@@ -233,8 +231,8 @@ behavior, ROM catalog, cover cache, Wi-Fi profile helper, rlwrap-backed
 terminal lifecycle, shared framebuffer/audio runtime, and timer
 configuration.
 
-The suite also runs the uploader's Go tests for authentication, request
-boundaries, ROM validation, atomic storage, and the Paper UI contract.
+The flake checks exercise the Lisp uploader's policy and full HTTP contract
+on host SBCL and on the ARM network ECL under QEMU.
 
 Run shell checks on deployment code with:
 
@@ -385,7 +383,6 @@ retrodeck/
 │   └── joypad_input.cpp        stable two-controller input
 ├── terminal/                   vendored fbterm source and provenance
 ├── tests/                      host regression suite
-├── uploader/                   authenticated ROM intake web service
 ├── flake.nix                   pinned cross-build definitions
 └── README.md                   deployment and operation guide
 ```

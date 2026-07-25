@@ -133,6 +133,5 @@ wayland_flags=$(pkg-config --cflags --libs wayland-client)
   "$work/wlr-layer-shell-unstable-v1-protocol.o" \
   $wayland_flags -pthread -o "$work/deck-runtime-wayland-test"
 "$work/deck-runtime-wayland-test"
-(cd uploader && nix shell nixpkgs#go -c go test ./...)
 
 echo "All host tests passed."

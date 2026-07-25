@@ -23,8 +23,8 @@ Copy these files to the Deck without changing their basenames:
 | `nes-deck-swap.init` | `/etc/init.d/nes-deck-swap` |
 
 The separate uploader bundle installs `nes-deck-uploader.init` as
-`/etc/init.d/nes-deck-uploader` and the static service as
-`/mnt/data/nes-deck/uploader/rom-uploader`.
+`/etc/init.d/nes-deck-uploader` and the Lisp service sources under
+`/mnt/data/nes-deck/uploader/`.
 
 On a BMC compositor installation, the deployment also installs the Retro Deck
 widget manifest and launcher under `/mnt/data/bmc-widgets/retro-deck`. The
