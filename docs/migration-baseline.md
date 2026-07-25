@@ -1423,6 +1423,25 @@ focused Rust and Lisp tests. This leaves 3,244 production lines and 9 total line
 below the 15,909/18,584 budgets without compressed or generated first-party
 source.
 
+## Lisp-owned chiptune catalog policy checkpoint
+
+Startup-loaded Lisp now owns the authoritative chiptune extension catalog, scan
+limits, file acceptance, ASCII title cleanup and clipping, base-name conversion,
+and playback-time formatting needed by the direct player candidate. ASCII-only
+extension folding matches the C++ byte loop, including rejection of Unicode case
+lookalikes. `RETRODECK:MAIN`, the launcher, and C++ player authority remain
+unchanged.
+
+Fresh SBCL policy tests, the complete host suite, `nix flake check`, and focused
+independent review passed. No Deck was allocated. The three preceding fixture
+consolidations recovered 91 test lines without changing production behavior.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 12,723
+production lines, including the existing catalog compiler, and 18,572 lines with
+focused Rust and Lisp tests. This leaves 3,186 production lines and 12 total lines
+below the 15,909/18,584 budgets without compressed or generated first-party
+source.
+
 ## Validation baseline
 
 Updated on 2026-07-25:

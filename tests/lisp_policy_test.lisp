@@ -851,6 +851,36 @@
                         (lambda () (retrodeck:draw-canvas-raster 0 0 0 1 1))))
   (assert-signals type-error (funcall function)))
 
+(assert (equal retrodeck:*chiptune-extensions*
+               '(".ay" ".gbs" ".gym" ".hes" ".kss" ".nsf" ".nsfe" ".sap"
+                 ".spc" ".vgm" ".vgz" ".ogg")))
+(assert (and (= retrodeck:*chiptune-maximum-depth* 4)
+             (= retrodeck:*chiptune-maximum-files* 1024)
+             (= retrodeck:*chiptune-maximum-file-size* 16777216)))
+(assert-binary-table #'eq #'retrodeck:chiptune-file-accepted-p
+                     `(("demo.NSFE" 16777216 t) ("demo.ogg" 1 t)
+                       ("demo.mp3" 1 nil) ("demo.ogg" 0 nil)
+                       ("demo.ogg" 16777217 nil) ("demo" 1 nil)
+                       (,(format nil "demo.~CSS" (code-char #x212a)) 1 nil)))
+(assert-binary-table #'string= #'retrodeck:chiptune-display-text
+                     '(("a_z 9.:+-/Č!" 64 "A Z 9.:+-/")
+                       ("abcdef" 6 "ABCDEF") ("abcdef" 5 "AB...")
+                       ("abcdef" 3 "ABC") ("abcdef" 0 "")))
+(assert (string= (retrodeck:chiptune-display-text
+                  (format nil "x~Cy" #\Tab) 3) "X Y"))
+(assert-unary-table #'string= #'retrodeck:chiptune-base-name
+                    '(("/tmp/my-song_name.ogg" "my song name")
+                      ("archive.tar.NSF" "archive.tar")
+                      (".hidden" "") ("plain" "plain")))
+(assert-unary-table #'string= #'retrodeck:chiptune-format-time
+                    '((-1 "0:00") (0 "0:00") (999 "0:00") (1000 "0:01")
+                      (59999 "0:59") (60000 "1:00") (3600000 "60:00")))
+(assert-signals type-error (retrodeck:chiptune-file-accepted-p 4 1))
+(assert-signals type-error (retrodeck:chiptune-file-accepted-p "x.ogg" 1.5))
+(assert-signals type-error (retrodeck:chiptune-display-text "x" -1))
+(assert-signals type-error (retrodeck:chiptune-base-name 4))
+(assert-signals type-error (retrodeck:chiptune-format-time 1.5))
+
 (assert (string= (retrodeck:display-ascii "AČz") "A?z"))
 (labels ((bytes (&rest values)
            (map 'string #'code-char values)))

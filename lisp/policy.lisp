@@ -571,3 +571,53 @@
 
 (defun reboot-confirmation-active-p (deadline now)
   (and (plusp deadline) (< now deadline)))
+
+(defparameter *chiptune-extensions*
+  '(".ay" ".gbs" ".gym" ".hes" ".kss" ".nsf" ".nsfe" ".sap" ".spc"
+    ".vgm" ".vgz" ".ogg"))
+(defparameter *chiptune-maximum-files* 1024)
+(defparameter *chiptune-maximum-file-size* (* 16 1024 1024))
+(defparameter *chiptune-maximum-depth* 4)
+
+(defun chiptune-file-accepted-p (path size)
+  (check-type path string)
+  (check-type size integer)
+  (let ((dot (position #\. path :from-end t)))
+    (and (<= 1 size *chiptune-maximum-file-size*) dot
+         (not (null (member
+                     (map 'string (lambda (character)
+                                    (if (char<= #\A character #\Z)
+                                        (char-downcase character) character))
+                          (subseq path dot))
+                     *chiptune-extensions* :test #'string=))))))
+
+(defun chiptune-display-text (input maximum)
+  (check-type input string)
+  (check-type maximum (integer 0 *))
+  (let ((clean
+          (with-output-to-string (output)
+            (loop for character across input do
+              (cond ((char<= #\a character #\z)
+                     (write-char (char-upcase character) output))
+                    ((or (char<= #\A character #\Z)
+                         (char<= #\0 character #\9)
+                         (find character " .:-+/" :test #'char=))
+                     (write-char character output))
+                    ((or (char= character #\_) (char= character #\Tab))
+                     (write-char #\Space output)))))))
+    (cond ((<= (length clean) maximum) clean)
+          ((<= maximum 3) (subseq clean 0 maximum))
+          (t (concatenate 'string (subseq clean 0 (- maximum 3)) "...")))))
+
+(defun chiptune-base-name (path)
+  (check-type path string)
+  (let* ((slash (position #\/ path :from-end t))
+         (name (subseq path (if slash (1+ slash) 0)))
+         (dot (position #\. name :from-end t))
+         (stem (subseq name 0 (or dot (length name)))))
+    (substitute #\Space #\_ (substitute #\Space #\- stem))))
+
+(defun chiptune-format-time (milliseconds)
+  (check-type milliseconds integer)
+  (let ((seconds (max 0 (truncate milliseconds 1000))))
+    (format nil "~D:~2,'0D" (truncate seconds 60) (mod seconds 60))))

@@ -109,7 +109,15 @@
                 #:wayland-present-solid
                 #:wayland-shutdown-p
                 #:wayland-size)
-  (:export #:*dashboard-brightness-minimum*
+  (:export #:*chiptune-extensions*
+           #:*chiptune-maximum-depth*
+           #:*chiptune-maximum-file-size*
+           #:*chiptune-maximum-files*
+           #:chiptune-base-name
+           #:chiptune-display-text
+           #:chiptune-file-accepted-p
+           #:chiptune-format-time
+           #:*dashboard-brightness-minimum*
            #:*dashboard-brightness-step*
            #:*dashboard-built-in-applications*
            #:*dashboard-controller-burst-limit*
