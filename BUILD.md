@@ -39,10 +39,12 @@ cd retrodeck
 The first Nix build downloads the pinned cross toolchain and may take several
 minutes. Later builds reuse the Nix store.
 
-Each native runtime receives an explicit local source set. Editing the menu,
-for example, invalidates `deck-menu` without rebuilding unrelated emulators.
-Keep new source and header files in the corresponding source set near the top
-of `flake.nix`; do not add the complete `src/` directory as a build input.
+Each native runtime receives an explicit local source set. Keep new source
+and header files in the corresponding source set near the top of `flake.nix`;
+do not add the complete `src/` directory as a build input. The dashboard,
+timer, and chiptune player are startup-loaded Common Lisp served by
+`retrodeck-native`; deployment installs them as `deck-menu`,
+`ten-seconds-deck`, and `chiptune-deck` symlinks to that binary.
 
 ## Build packages individually
 
@@ -53,14 +55,11 @@ nix build --no-link --print-out-paths .#retrodeck-native
 nix build --no-link --print-out-paths .#nes-deck
 nix build --no-link --print-out-paths .#gb-deck
 nix build --no-link --print-out-paths .#zx-deck
-nix build --no-link --print-out-paths .#ten-seconds-deck
-nix build --no-link --print-out-paths .#deck-menu
 nix build --no-link --print-out-paths .#fbterm-deck
 nix build --no-link --print-out-paths .#rlwrap-deck
 nix build --no-link --print-out-paths .#lua-deck
 nix build --no-link --print-out-paths .#python-deck
 nix build --no-link --print-out-paths .#chibi-deck
-nix build --no-link --print-out-paths .#chiptune-deck
 nix build --no-link --print-out-paths .#runtime-licenses
 nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 ```
@@ -71,14 +70,11 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 | `nes-deck` | `bin/nes-deck` |
 | `gb-deck` | `bin/gb-deck` |
 | `zx-deck` | `bin/zx-deck` |
-| `ten-seconds-deck` | `bin/ten-seconds-deck` |
-| `deck-menu` | `bin/deck-menu` |
 | `fbterm-deck` | `bin/{fbterm,loadkeys}` plus font and keymaps |
 | `rlwrap-deck` | `bin/rlwrap` |
 | `lua-deck` | `bin/lua` |
 | `python-deck` | `bin/python` |
 | `chibi-deck` | `bin/chibi-scheme` plus Scheme modules |
-| `chiptune-deck` | `bin/chiptune-deck` |
 | `runtime-licenses` | Shared runtime and asset notices |
 | ECL expression | `bin/ecl.bin`, runtime library, and notices |
 
@@ -196,8 +192,8 @@ ECLDIR=/mnt/data/nes-deck/ecl/lib/ecl/ \
 Check that a package has no Nix runtime references before deploying it:
 
 ```sh
-out=$(nix build --no-link --print-out-paths .#chiptune-deck | tail -n 1)
-file "$out/bin/chiptune-deck"
+out=$(nix build --no-link --print-out-paths .#retrodeck-native | tail -n 1)
+file "$out/bin/retrodeck-native"
 test -z "$(nix-store -q --references "$out")"
 ```
 
@@ -257,30 +253,7 @@ binary:
 /mnt/data/nes-deck/langs/python -c 'print(6 * 7)'
 CHIBI_MODULE_PATH=/mnt/data/nes-deck/langs/chibi/lib \
   /mnt/data/nes-deck/langs/chibi/chibi-scheme -q -p '(+ 20 22)'
-/mnt/data/nes-deck/chiptune-deck --probe \
-  /mnt/data/chiptunes/crazy.ogg
 ```
-
-The chiptune player can render its UI without opening the framebuffer:
-
-```sh
-/mnt/data/nes-deck/chiptune-deck --render-preview \
-  /mnt/data/chiptunes/crazy.ogg /tmp/chiptune-player.ppm
-```
-
-## Render dashboard screenshots
-
-Copy the persistent cover cache from a Deck, then run the native renderer:
-
-```sh
-scp -r root@10.0.0.10:/mnt/data/nes-deck/covers /tmp/deck-covers
-ops/deck-menu/render-screenshots.sh deploy/menu/games.tsv \
-  /tmp/deck-covers "$HOME/retro-deck-screens"
-```
-
-The output contains every game selection, settings variants, animated and
-reduced-motion FOSS credits, the Wi-Fi keyboard, reboot confirmation, timer,
-and a contact sheet.
 
 ## Platform details
 
@@ -356,7 +329,7 @@ retrodeck/
 ├── nix/                        ECL and runtime-specific Nix expressions
 ├── ops/
 │   ├── bmc/                    external BMC patch application
-│   ├── deck-menu/              covers and screenshots
+│   ├── deck-menu/              cover cache tooling
 │   ├── deck-wifi/              profile-only Wi-Fi helper
 │   ├── deploy/                 validated on-Deck activation transaction
 │   ├── lib/                    shared strict deployment configuration parser
@@ -366,20 +339,9 @@ retrodeck/
 ├── protocol/                   Deck widget and layer-shell client protocols
 ├── roms/                       private canonical ROM library and checksums
 ├── src/
-│   ├── deck_menu.cpp           dashboard, settings, and child supervision
-│   ├── menu_catalog.cpp        game model, manifest, and ROM validation
-│   ├── menu_credits.cpp        FOSS manifest and perspective crawl
-│   ├── menu_io.cpp             checked low-level menu I/O primitives
-│   ├── menu_network.cpp        sanitized Wi-Fi and interface status
-│   ├── menu_sound.cpp          dashboard cue synthesis and OSS playback
-│   ├── menu_state.cpp          atomic volume, brightness, and keymap state
-│   ├── menu_text.cpp           path and display-text validation
-│   ├── menu_ui.cpp             shared dashboard drawing primitives
 │   ├── deck_runtime.cpp        video selection, audio, and frame clock
 │   ├── deck_wayland.cpp        shared-memory widget and game surfaces
 │   ├── libretro_deck.cpp       NES, GB/GBC, and ZX host
-│   ├── chiptune_deck.cpp       GME and Ogg native music player
-│   ├── ten_seconds_deck.cpp    native timing game
 │   └── joypad_input.cpp        stable two-controller input
 ├── terminal/                   vendored fbterm source and provenance
 ├── tests/                      host regression suite

@@ -72,14 +72,11 @@ echo "uploader-password-smoke: OK"
 verify_package nes-deck bin/nes-deck
 verify_package gb-deck bin/gb-deck
 verify_package zx-deck bin/zx-deck
-verify_package ten-seconds-deck bin/ten-seconds-deck
-verify_package deck-menu bin/deck-menu
 verify_package fbterm-deck bin/fbterm bin/loadkeys
 verify_package rlwrap-deck bin/rlwrap
 verify_package lua-deck bin/lua
 verify_package python-deck bin/python
 verify_package chibi-deck bin/chibi-scheme
-verify_package chiptune-deck bin/chiptune-deck
 verify_package rom-uploader bin/rom-uploader
 verify_package ecl-arm-network bin/ecl.bin
 build_flake .#checks.x86_64-linux.ecl-arm-network-smoke >/dev/null

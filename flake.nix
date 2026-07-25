@@ -60,8 +60,8 @@
 
       waylandNativeInputs = [ pkgs.wayland-scanner ];
       waylandStaticInputs = [ staticCross.wayland staticCross.libffi ];
-      # chiptune-deck also builds libgme.a from this source with the glibc
-      # cross toolchain; pkgsStatic would mix musl objects into a glibc link.
+      # Build libgme.a with the glibc cross toolchain; pkgsStatic would mix
+      # musl objects into a glibc link.
       gmeStaticCross = pkgsCross.stdenv.mkDerivation {
         pname = "gme-static";
         version = pkgs.game-music-emu.version;
@@ -88,33 +88,6 @@
       nesSources = sourceTree (libretroSources ++ [ ./src/nes_sram.h ]);
       gbSources = sourceTree libretroSources;
       zxSources = sourceTree (libretroSources ++ [ ./src/zx_keyboard.h ]);
-      chiptuneSources = sourceTree (runtimeSources ++ [
-        ./src/chiptune_deck.cpp
-      ]);
-      timerSources = sourceTree (runtimeSources ++ [
-        ./src/ten_seconds_deck.cpp
-      ]);
-      menuSources = sourceTree [
-        ./src/deck_menu.cpp
-        ./src/deck_wayland.cpp
-        ./src/deck_wayland.h
-        ./src/menu_catalog.cpp
-        ./src/menu_catalog.h
-        ./src/menu_credits.cpp
-        ./src/menu_credits.h
-        ./src/menu_io.cpp
-        ./src/menu_io.h
-        ./src/menu_network.cpp
-        ./src/menu_network.h
-        ./src/menu_sound.cpp
-        ./src/menu_sound.h
-        ./src/menu_state.cpp
-        ./src/menu_state.h
-        ./src/menu_text.cpp
-        ./src/menu_text.h
-        ./src/menu_ui.cpp
-        ./src/menu_ui.h
-      ];
       waylandProtocolBuild = ''
         wayland-scanner client-header \
           ${./protocol/deck-widget-v1.xml} \
@@ -272,170 +245,6 @@
           };
         };
 
-
-        deck-menu = pkgsCross.stdenv.mkDerivation {
-          pname = "deck-menu";
-          version = "1.0.0";
-
-          dontUnpack = true;
-          nativeBuildInputs = [ pkgs.nukeReferences ] ++ waylandNativeInputs;
-          buildInputs = [
-            pkgsCross.glibc.static
-            staticCross.libpng
-            staticCross.zlib
-          ] ++ waylandStaticInputs;
-          allowedReferences = [ ];
-
-          NIX_CFLAGS_COMPILE = "-static -Os";
-          NIX_LDFLAGS = "-static";
-
-          buildPhase = ''
-            runHook preBuild
-            ${waylandProtocolBuild}
-            cp ${menuSources}/deck_menu.cpp deck_menu.cpp
-            cp ${menuSources}/menu_sound.cpp menu_sound.cpp
-            cp ${menuSources}/menu_sound.h menu_sound.h
-            cp ${menuSources}/menu_catalog.cpp menu_catalog.cpp
-            cp ${menuSources}/menu_catalog.h menu_catalog.h
-            cp ${menuSources}/menu_credits.cpp menu_credits.cpp
-            cp ${menuSources}/menu_credits.h menu_credits.h
-            cp ${menuSources}/menu_io.cpp menu_io.cpp
-            cp ${menuSources}/menu_io.h menu_io.h
-            cp ${menuSources}/menu_network.cpp menu_network.cpp
-            cp ${menuSources}/menu_network.h menu_network.h
-            cp ${menuSources}/menu_state.cpp menu_state.cpp
-            cp ${menuSources}/menu_state.h menu_state.h
-            cp ${menuSources}/menu_text.cpp menu_text.cpp
-            cp ${menuSources}/menu_text.h menu_text.h
-            cp ${menuSources}/menu_ui.cpp menu_ui.cpp
-            cp ${menuSources}/menu_ui.h menu_ui.h
-            $CXX -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
-              -DRETRO_DECK_WAYLAND=1 -I. -I${menuSources} \
-              deck_menu.cpp menu_sound.cpp menu_catalog.cpp \
-              menu_credits.cpp menu_io.cpp \
-              menu_network.cpp menu_state.cpp menu_text.cpp menu_ui.cpp \
-              ${menuSources}/deck_wayland.cpp \
-              deck-widget-v1-protocol.o \
-              wlr-layer-shell-unstable-v1-protocol.o \
-              -static -lpng -lz -lwayland-client -lffi -o deck-menu
-            runHook postBuild
-          '';
-
-          installPhase = ''
-            runHook preInstall
-            mkdir -p $out/bin
-            install -m755 deck-menu $out/bin/deck-menu
-            nuke-refs $out/bin/deck-menu
-            runHook postInstall
-          '';
-
-          meta = {
-            description = "Touch-first game launcher for the Braiins Forge Deck";
-            platforms = [ "armv7l-linux" ];
-          };
-        };
-
-        chiptune-deck = pkgsCross.stdenv.mkDerivation {
-          pname = "chiptune-deck";
-          version = pkgs.game-music-emu.version;
-
-          src = pkgs.game-music-emu.src;
-          nativeBuildInputs =
-            [ pkgs.cmake pkgs.nukeReferences ] ++ waylandNativeInputs;
-          buildInputs = [
-            pkgsCross.glibc.static
-            staticCross.libvorbis
-            staticCross.zlib
-          ] ++ waylandStaticInputs;
-          allowedReferences = [ ];
-
-          cmakeFlags = [
-            "-DBUILD_SHARED_LIBS=OFF"
-            "-DENABLE_UBSAN=OFF"
-          ];
-
-          buildPhase = ''
-            runHook preBuild
-            cmake --build . --parallel $NIX_BUILD_CORES
-            ${waylandProtocolBuild}
-            $CXX -std=c++11 -Os -Wall -Wextra -Wpedantic -Werror \
-              -DRETRO_DECK_WAYLAND=1 -I. -I${chiptuneSources} -I.. \
-              ${chiptuneSources}/chiptune_deck.cpp \
-              ${chiptuneSources}/deck_runtime.cpp \
-              ${chiptuneSources}/deck_wayland.cpp \
-              deck-widget-v1-protocol.o \
-              wlr-layer-shell-unstable-v1-protocol.o \
-              gme/libgme.a \
-              -static -Wl,-s -pthread -lvorbisfile -lvorbis -logg -lm -lz \
-              -lwayland-client -lffi \
-              -o chiptune-deck
-            runHook postBuild
-          '';
-
-          installPhase = ''
-            runHook preInstall
-            mkdir -p $out/bin $out/share/licenses/chiptune-deck
-            install -m755 chiptune-deck $out/bin/chiptune-deck
-            install -m644 ../license.txt \
-              $out/share/licenses/chiptune-deck/license.txt
-            tar -xOf ${pkgs.libvorbis.src} \
-              libvorbis-${pkgs.libvorbis.version}/COPYING \
-              > $out/share/licenses/chiptune-deck/libvorbis-COPYING
-            tar -xOf ${pkgs.libogg.src} \
-              libogg-${pkgs.libogg.version}/COPYING \
-              > $out/share/licenses/chiptune-deck/libogg-COPYING
-            nuke-refs $out/bin/chiptune-deck
-            runHook postInstall
-          '';
-
-          meta = {
-            description = "Native chiptune music player for the Braiins Forge Deck";
-            homepage = "https://github.com/libgme/game-music-emu";
-            license = [ pkgs.lib.licenses.lgpl21Plus pkgs.lib.licenses.bsd3 ];
-            platforms = [ "armv7l-linux" ];
-          };
-        };
-
-        ten-seconds-deck = pkgsCross.stdenv.mkDerivation {
-          pname = "ten-seconds-deck";
-          version = "1.0.0";
-
-          dontUnpack = true;
-          nativeBuildInputs = [ pkgs.nukeReferences ] ++ waylandNativeInputs;
-          buildInputs = [ pkgsCross.glibc.static ] ++ waylandStaticInputs;
-          allowedReferences = [ ];
-
-          NIX_CFLAGS_COMPILE = "-static -O3";
-          NIX_LDFLAGS = "-static";
-
-          buildPhase = ''
-            runHook preBuild
-            ${waylandProtocolBuild}
-            $CXX -std=c++11 -O3 -Wall -Wextra -Wpedantic -Werror \
-              -DRETRO_DECK_WAYLAND=1 -I. -I${timerSources} \
-              ${timerSources}/ten_seconds_deck.cpp \
-              ${timerSources}/deck_runtime.cpp \
-              ${timerSources}/deck_wayland.cpp \
-              deck-widget-v1-protocol.o \
-              wlr-layer-shell-unstable-v1-protocol.o \
-              -static -pthread -lm -lwayland-client -lffi \
-              -o ten-seconds-deck
-            runHook postBuild
-          '';
-
-          installPhase = ''
-            runHook preInstall
-            mkdir -p $out/bin
-            install -m755 ten-seconds-deck $out/bin/ten-seconds-deck
-            nuke-refs $out/bin/ten-seconds-deck
-            runHook postInstall
-          '';
-
-          meta = {
-            description = "Touch-controlled ten-second game for the Deck";
-            platforms = [ "armv7l-linux" ];
-          };
-        };
 
         gb-deck = pkgsCross.stdenv.mkDerivation {
           pname = "gb-deck";
