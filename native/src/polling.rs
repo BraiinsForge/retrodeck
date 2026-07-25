@@ -1,4 +1,4 @@
-use crate::{input, wayland};
+use crate::{input, process, wayland};
 use rustix::event::{PollFd, Timespec, poll};
 use rustix::time::{ClockId, clock_gettime};
 use std::time::{Duration, Instant};
@@ -19,11 +19,13 @@ pub fn monotonic_nanoseconds() -> u64 {
 }
 
 pub fn dispatch(wayland_backend: bool, timeout_ms: u32) -> Result<InputDispatch, String> {
-    if wayland_backend {
-        wayland::dispatch_inputs(timeout_ms)
+    let mut dispatch = if wayland_backend {
+        wayland::dispatch_inputs(timeout_ms)?
     } else {
-        input::dispatch_inputs(timeout_ms)
-    }
+        input::dispatch_inputs(timeout_ms)?
+    };
+    dispatch.shutdown |= process::shutdown_requested();
+    Ok(dispatch)
 }
 
 pub(crate) fn wait(descriptors: &mut [PollFd<'_>], timeout_ms: u32) -> Result<usize, String> {
@@ -40,6 +42,7 @@ pub(crate) fn wait_for(descriptors: &mut [PollFd<'_>], timeout: Duration) -> Res
         };
         match poll(descriptors, Some(&timeout)) {
             Ok(ready) => return Ok(ready),
+            Err(rustix::io::Errno::INTR) if process::shutdown_requested() => return Ok(0),
             Err(rustix::io::Errno::INTR) if Instant::now() < deadline => continue,
             Err(rustix::io::Errno::INTR) => return Ok(0),
             Err(error) => return Err(format!("cannot poll dashboard input: {error}")),

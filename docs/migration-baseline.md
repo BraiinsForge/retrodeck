@@ -1388,6 +1388,41 @@ focused Rust and Lisp tests. This leaves 3,710 production lines and 7 total line
 below the 15,909/18,584 budgets without compressed or generated first-party
 source.
 
+## 10 Seconds candidate runtime checkpoint
+
+Native ABI 21 adds only the mechanisms needed by the opt-in startup-loaded Lisp
+candidate: process shutdown observation, THEGamepad-only discovery, and an exact
+display-selected gameplay layer-shell open. The gameplay presenter matches the
+original two-surface protocol with an anchored exclusive black background, the
+presence-triggered exit hint, a centered 1248x448 non-exclusive game layer, and
+empty input regions. Native canvas colors pass through the original RGB565
+quantization before XRGB presentation. A failed delayed open remains local and
+cannot silently fall back to fbdev.
+
+Startup-loaded Lisp owns the selector, initialization and delayed-open order,
+Goodix evdev touch under both presentation backends, controller diagnostics,
+inherited volume and cue policy, sound reaping, monotonic deadlines, redraws,
+exact 8 ms polling, Back then controller-A then sequential-touch priority, and a
+fresh clock for each accepted activation. Process signals stop the loop before
+clock or input work. Cleanup releases every owned resource, retains dashboard
+audio quarantine state, and preserves a primary initialization or runtime error
+when cleanup also fails. The bounded rehearsal remains opt-in;
+`RETRODECK:MAIN`, the launcher, and the authoritative C++ executable are
+unchanged.
+
+Direct Cargo checks and 47 mechanism tests, fresh SBCL policy tests, the complete
+host suite, the x86_64 native smoke boundary, complete ARM/ECL payload
+verification, and `nix flake check` passed. No Deck was allocated for this
+checkpoint, so physical layer-shell placement, Goodix timing, THEGamepad input,
+audio concurrency, and application return remain pending while C++ stays
+authoritative.
+
+At this checkpoint the physical Rust and Common Lisp footprint is 12,665
+production lines, including the existing catalog compiler, and 18,575 lines with
+focused Rust and Lisp tests. This leaves 3,244 production lines and 9 total lines
+below the 15,909/18,584 budgets without compressed or generated first-party
+source.
+
 ## Validation baseline
 
 Updated on 2026-07-25:
@@ -1468,6 +1503,13 @@ Updated on 2026-07-25:
 - ABI 20 matched the exact three-note C++ waveform, rejected a fourth note before
   unbounded ECL traversal, started and stopped the native sequence through ECL,
   and reconstructed portable `CLOCK_MONOTONIC` nanoseconds on x86_64 and ARM
+- ABI 21 matched process-shutdown propagation, THEGamepad-only discovery, exact
+  two-layer gameplay construction, RGB565-expanded Wayland colors, exit-hint
+  pixels, and rejected gameplay opens through x86_64 and ARM/ECL boundaries
+- The opt-in Lisp 10 Seconds runtime matched authoritative initialization,
+  sound/clock/redraw ordering, 8 ms polling, Back/controller/touch priority,
+  primary-error-preserving cleanup, and bounded stop reasons through host and
+  ARM/ECL fixtures; no Deck was allocated for physical acceptance
 - Development Deck: `root@10.0.0.17`, ARMv7, BOS 2025-11-18 nightly
 - `/dev/mmcblk0p4`: ext4 and persistently mounted at `/mnt/data`
 

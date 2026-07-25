@@ -371,7 +371,7 @@ pub(crate) struct Controls {
 }
 
 impl Controls {
-    fn scan(&mut self) -> Result<(usize, usize), String> {
+    fn scan(&mut self, include_keyboards: bool) -> Result<(usize, usize), String> {
         let paths = match event_paths() {
             Ok(paths) => paths,
             Err(error) => {
@@ -391,10 +391,14 @@ impl Controls {
         });
         gamepads.truncate(MAXIMUM_GAMEPADS);
 
-        let mut keyboards = paths
-            .iter()
-            .filter_map(|path| KeyboardDevice::open(path))
-            .collect::<Vec<_>>();
+        let mut keyboards = if include_keyboards {
+            paths
+                .iter()
+                .filter_map(|path| KeyboardDevice::open(path))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         keyboards.sort_by(|left, right| left.path.cmp(&right.path));
         keyboards.truncate(MAXIMUM_KEYBOARDS);
 
@@ -548,7 +552,14 @@ pub(crate) fn with_controls<T>(function: impl FnOnce(&mut Controls) -> T) -> T {
 }
 
 pub fn scan() -> Result<(usize, usize), String> {
-    with_controls(Controls::scan)
+    with_controls(|controls| controls.scan(true))
+}
+
+pub fn scan_gamepads() -> Result<usize, String> {
+    with_controls(|controls| {
+        *controls = Controls::default();
+        controls.scan(false).map(|counts| counts.0)
+    })
 }
 
 pub fn close() {

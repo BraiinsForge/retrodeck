@@ -1,14 +1,11 @@
 (defpackage #:retrodeck.test
   (:use #:cl))
-
 (in-package #:retrodeck.test)
-
 (defmacro define-test-parameters (&body groups)
   `(progn
      ,@(loop for (initial-value . names) in groups append
              (loop for name in names
                    collect `(defparameter ,name ,initial-value)))))
-
 (define-test-parameters
   (1 *play-status* *canvas-clear-status* *canvas-glyph-status*
      *canvas-fill-status* *projection-status* *projected-text-status*
@@ -19,7 +16,8 @@
   (0 *active-status* *active-count* *stop-count* *finish-count*
      *text-mask-result* *text-mask-clear-count* *raster-clear-count*
      *raster-cover-result* *raster-png-result* *evdev-controls-scan-count*
-     *evdev-controls-close-count* *evdev-open-count* *evdev-close-count*
+     *evdev-gamepads-scan-count* *evdev-controls-close-count* *evdev-open-count*
+       *process-shutdown-status* *evdev-close-count*
      *evdev-dispatch-result* *fbdev-open-count* *fbdev-close-count*
      *fbdev-canvas-count* *wayland-open-count* *wayland-close-count*
      *wayland-canvas-count* *wayland-dispatch-result*
@@ -40,7 +38,7 @@
        *evdev-controls-dispatch-timeout* *evdev-controls*
        *input-poll-arguments* *evdev-dispatch-timeout* *evdev-touch*
        *evdev-touch-queue* *fbdev-present-color* *fbdev-size*
-       *wayland-open-display* *wayland-present-color*
+       *wayland-open-display* *wayland-open-kind* *wayland-present-color*
        *wayland-dispatch-timeout* *wayland-touch* *wayland-touch-queue*
        *wayland-size* *helper-arguments* *terminal-arguments*
        *child-arguments*)
@@ -49,21 +47,21 @@
   ('(0) *state-file-read-result*)
   ('("" "" "" "STATUS UNAVAILABLE") *network-status-result*)
   ('(0 0) *evdev-controls-scan-result* *evdev-controls-dispatch-result*)
+  ('(0 nil) *evdev-gamepads-scan-result*)
   ('(0 0 0 0 0 0) *input-poll-result*)
   ('(0 0 -1 nil) *helper-result*)
   ('(1 0 0 -1 nil 0) *terminal-result* *child-result*))
-
 (defpackage #:retrodeck.native (:use))
-
 (defmacro with-runtime-device-fixture
-    ((&key (fbdev-size nil) (fbdev-canvas-status 1)
+    ((&key (fbdev-size nil) (fbdev-open-status 1) (fbdev-canvas-status 1)
            (wayland-size nil) (wayland-open-status 1)
            (wayland-canvas-status 1) (evdev-open-status 1)
-           (controls-scan-result ''(0 0)) (controls nil)
+           (controls-scan-result ''(0 0)) (gamepads-scan-result ''(0 nil))
+             (controls nil)
            (wayland-touch-queue nil))
      &body body)
   `(let ((*fbdev-size* ,fbdev-size)
-         (*fbdev-open-status* 1)
+         (*fbdev-open-status* ,fbdev-open-status)
          (*fbdev-open-count* 0)
          (*fbdev-close-count* 0)
          (*fbdev-canvas-status* ,fbdev-canvas-status)
@@ -72,47 +70,49 @@
          (*wayland-open-status* ,wayland-open-status)
          (*wayland-open-count* 0)
          (*wayland-open-display* nil)
+          (*wayland-open-kind* nil)
          (*wayland-close-count* 0)
          (*wayland-canvas-status* ,wayland-canvas-status)
          (*wayland-canvas-count* 0)
          (*wayland-touch* nil)
          (*wayland-touch-queue* ,wayland-touch-queue)
          (*evdev-open-status* ,evdev-open-status)
+          (*process-shutdown-status* 0)
          (*evdev-open-count* 0)
          (*evdev-close-count* 0)
          (*evdev-controls-scan-result* ,controls-scan-result)
+          (*evdev-gamepads-scan-result* ,gamepads-scan-result)
+          (*evdev-gamepads-scan-count* 0)
          (*evdev-controls-scan-count* 0)
          (*evdev-controls-close-count* 0)
          (*evdev-controls* ,controls)
          (*evdev-touch* nil)
          (*evdev-touch-queue* nil))
      ,@body))
-
 (defmacro define-native-test-functions (&body definitions)
   `(progn
      ,@(loop for (name parameters . body) in definitions
              collect `(setf (symbol-function
                              (intern ,(string name) "RETRODECK.NATIVE"))
                             (lambda ,parameters ,@body)))))
-
 (defmacro record-native-call (arguments last-call result &optional calls)
   `(progn
      (setf ,last-call ,arguments)
      ,@(when calls `((push ,arguments ,calls)))
      ,result))
-
 (defun record-native-play (arguments)
   (setf *play-arguments* arguments)
   (when *record-interaction*
     (push :sound *interaction-trace*))
   *play-status*)
-
 (define-native-test-functions
-  (abi-version () 20)
+  (abi-version () 21)
   (audio-active-p () (incf *active-count*) *active-status*)
+  (process-shutdown-p () *process-shutdown-status*)
   (play-tones (&rest arguments) (record-native-play arguments))
   (play-tone-sequence (&rest arguments) (record-native-play arguments))
-  (stop-audio () (incf *stop-count*) 0)
+  (stop-audio () (incf *stop-count*)
+    (if (eq *record-interaction* :cleanup-error) (error "stop failed") 0))
   (finish-audio () (incf *finish-count*) 0)
   (canvas-clear (color)
     (setf *canvas-clear-color* color)
@@ -184,6 +184,9 @@
   (evdev-controls-scan ()
     (incf *evdev-controls-scan-count*)
     *evdev-controls-scan-result*)
+  (evdev-gamepads-scan ()
+    (incf *evdev-gamepads-scan-count*)
+    *evdev-gamepads-scan-result*)
   (evdev-controls-close () (incf *evdev-controls-close-count*) 0)
   (evdev-controls-dispatch (timeout-ms)
     (record-native-call timeout-ms *evdev-controls-dispatch-timeout*
@@ -211,11 +214,15 @@
   (fbdev-size () *fbdev-size*)
   (wayland-open-widget ()
     (incf *wayland-open-count*)
-    (setf *wayland-open-display* :environment)
+    (setf *wayland-open-display* :environment *wayland-open-kind* :widget)
     *wayland-open-status*)
   (wayland-open-widget-at (display)
     (incf *wayland-open-count*)
-    (setf *wayland-open-display* display)
+    (setf *wayland-open-display* display *wayland-open-kind* :widget)
+    *wayland-open-status*)
+  (wayland-open-gameplay-at (display)
+    (incf *wayland-open-count*)
+    (setf *wayland-open-display* display *wayland-open-kind* :gameplay)
     *wayland-open-status*)
   (wayland-close () (incf *wayland-close-count*) 0)
   (wayland-present-canvas ()
@@ -231,17 +238,13 @@
   (wayland-next-touch () (or (pop *wayland-touch-queue*) *wayland-touch*))
   (wayland-size () *wayland-size*)
   (wayland-shutdown-p () *wayland-shutdown-status*))
-
 (load (truename (merge-pathnames "../lisp/startup.lisp" *load-truename*))
       :verbose nil :print nil)
-
 (defmacro signals-p (condition &body body)
   `(handler-case (progn ,@body nil)
      (,condition () t)))
-
 (defmacro assert-signals (condition &body body)
   `(assert (signals-p ,condition ,@body)))
-
 (defun runtime-test-games (&optional include-beta-p)
   (let ((games
           '((:id "alpha" :title "ALPHA" :system :nes
@@ -249,31 +252,44 @@
             (:id "beta" :title "BETA" :system :nes
              :color #xafd75f :rom "/tmp/beta.nes"))))
     (copy-tree (if include-beta-p games (subseq games 0 1)))))
-
 (defun test-file-string (path)
   (with-open-file (input path)
     (let ((contents (make-string (file-length input))))
       (read-sequence contents input)
       contents)))
-
+(defun test-menu-path (name &optional namestring-p)
+  (let ((path (truename (merge-pathnames name
+                                          (merge-pathnames "../deploy/menu/"
+                                                           *load-truename*)))))
+    (if namestring-p (namestring path) path)))
+(defun test-line (text)
+  (format nil "~A~%" text))
+(defun test-state-result (text)
+  (list 1 (test-line text)))
 (defun decode-native-unsigned-64 (text)
   (assert (= (length text) 16))
   (parse-integer text :radix 16))
-
 (defun assert-unary-table (test parser fixtures &rest fixed-arguments)
   (dolist (fixture fixtures)
     (assert (funcall test (apply parser (first fixture) fixed-arguments)
                      (second fixture)))))
-
 (defun assert-binary-table (test parser fixtures)
   (dolist (fixture fixtures)
     (assert (funcall test (funcall parser (first fixture) (second fixture))
                      (third fixture)))))
-
 (defmacro assert-signaled-table (condition function values)
   `(dolist (value ,values)
      (assert-signals ,condition (funcall ,function value))))
-
+(defmacro assert-recorded-calls (variable form expected)
+  `(progn
+     (setf ,variable nil)
+     (assert ,form)
+     (assert (equal (nreverse ,variable) ,expected))))
+(defmacro assert-native-call (form expected variable arguments)
+  `(progn (assert (equal ,form ,expected))
+          (assert (equal ,variable ,arguments))))
+(defmacro assert-values (form &rest expected)
+  `(assert (equal (multiple-value-list ,form) (list ,@expected))))
 (defmacro assert-touch-release
     (transition state layout press release &body assertions)
   `(multiple-value-bind (pressed press-effect)
@@ -282,14 +298,12 @@
      (multiple-value-bind (released release-effect)
          (,transition pressed ,layout ,release)
        ,@assertions)))
-
 (defun assert-rect-target-boundaries (finder layout target)
   (destructuring-bind (x y width height) (getf layout target)
     (assert (eq (funcall finder layout x y) target))
     (assert (eq (funcall finder layout (+ x width -1) (+ y height -1)) target))
     (assert (not (eq (funcall finder layout (+ x width) y) target)))
     (assert (not (eq (funcall finder layout x (+ y height)) target)))))
-
 (defun assert-settings-completion
     (state plan succeeded-p expected-effect fields
      &key (tone-succeeded-p t tone-supplied-p))
@@ -302,23 +316,200 @@
     (dolist (field fields)
       (assert (apply (first field) (getf result (second field)) (cddr field))))
     result))
-
 (defun runtime-effect (runtime effect state)
   (retrodeck::dashboard-runtime-handle-effect runtime effect state))
-
 (defun assert-runtime-effect (runtime effect state expected)
   (assert (equal (runtime-effect runtime effect state) expected)))
-
 (defun assert-runtime-write (runtime effect state expected path text)
   (assert-runtime-effect runtime effect state expected)
   (assert (equal *state-file-write-arguments* (list path text))))
-
 (defmacro with-initialized-dashboard-runtime ((state runtime now) &body body)
-  `(multiple-value-bind (initialized ignored-runtime)
+  `(multiple-value-bind (initialized returned-runtime)
        (retrodeck:dashboard-runtime-initialize ,state ,runtime ,now)
-     (declare (ignore ignored-runtime) (ignorable initialized))
+     (declare (ignorable initialized))
+     (assert (eq returned-runtime ,runtime))
      ,@body))
-
+(defun dashboard-runtime-observation (runtime name)
+  (ecase name
+    (:active-count *active-count*) (:audio-owned (getf runtime :audio-owned-p))
+    (:brightness-maximum (getf runtime :brightness-maximum))
+    (:controls *evdev-controls*) (:controls-close *evdev-controls-close-count*)
+    (:controls-owned (getf runtime :controls-owned-p))
+    (:controls-scan *evdev-controls-scan-count*) (:dirty (getf runtime :dirty))
+    (:evdev-close *evdev-close-count*) (:evdev-open *evdev-open-count*)
+    (:fbdev-canvas *fbdev-canvas-count*) (:fbdev-close *fbdev-close-count*)
+    (:fbdev-open *fbdev-open-count*) (:finish-count *finish-count*)
+    (:gamepads-scan *evdev-gamepads-scan-count*)
+    (:initialized (getf runtime :initialized-p)) (:input-poll *input-poll-arguments*)
+    (:layout (getf runtime :layout))
+    (:menu-sound-until retrodeck::*menu-sound-input-until-ms*)
+    (:presentation-owned (getf runtime :presentation-owned-p))
+    (:running (retrodeck:dashboard-runtime-running-p runtime))
+    (:sound-active (getf runtime :sound-active-p)) (:stop-count *stop-count*)
+    (:touch-owned (getf runtime :touch-owned-p)) (:touches *evdev-touch-queue*)
+    (:wayland (getf runtime :wayland)) (:wayland-canvas *wayland-canvas-count*)
+    (:wayland-close *wayland-close-count*) (:wayland-display *wayland-open-display*)
+    (:wayland-kind *wayland-open-kind*) (:wayland-open *wayland-open-count*)))
+(defun assert-dashboard-runtime-observations (runtime &rest expected)
+  (loop for (name value) on expected by #'cddr
+        do (assert (equal (dashboard-runtime-observation runtime name) value))))
+(defun assert-plist-values (plist expected)
+  (loop for (name value) on expected by #'cddr
+        do (assert (equal (getf plist name) value))))
+(defun assert-ten-seconds-reduction (state input now effects &rest expected)
+  (multiple-value-bind (next actual-effects)
+      (retrodeck:ten-seconds-reduce state input now)
+    (assert (equal actual-effects effects))
+    (loop for (name value) on expected by #'cddr
+          do (if (eq name :identity)
+                 (assert (eq next value))
+                 (assert (equal (getf next name) value))))
+    next))
+(defmacro with-dashboard-runtime-fixture
+    ((state runtime games state-now initialize-now state-options runtime-options)
+     device-options &body body)
+  `(let ((,state (retrodeck:dashboard-loop-initial-state
+                  ,games :now ,state-now ,@state-options))
+         (,runtime (retrodeck:make-dashboard-runtime ,@runtime-options)))
+     (with-runtime-device-fixture ,device-options
+       (with-initialized-dashboard-runtime (,state ,runtime ,initialize-now)
+         ,@body))))
+(defmacro assert-dashboard-runtime-initialization-failure
+    (now runtime-options device-options diagnostic &rest observations)
+  `(let ((state (retrodeck:dashboard-loop-initial-state nil :now ,now))
+         (runtime (retrodeck:make-dashboard-runtime ,@runtime-options))
+         (diagnostics (make-string-output-stream)))
+     (with-runtime-device-fixture ,device-options
+       (let ((*error-output* diagnostics))
+         (assert-signals error
+           (retrodeck:dashboard-runtime-initialize state runtime ,now)))
+       (when ,diagnostic
+         (assert (search ,diagnostic (get-output-stream-string diagnostics))))
+       (assert-dashboard-runtime-observations runtime ,@observations))))
+(defun check-dashboard-startup-storage-failure
+    (stage maximum current brightness keymap
+     &key (control-write-status 1) (state-write-status 1))
+  (let* ((keymap-p (eq stage :keymap))
+         (state (apply #'retrodeck:dashboard-loop-initial-state nil :now 1
+                       (unless keymap-p '(:brightness 40))))
+         (runtime (retrodeck:make-dashboard-runtime
+                   :volume-state "/tmp/volume.state" :default-volume 42
+                   :brightness-device "/tmp/brightness"
+                   :brightness-maximum-path "/tmp/max_brightness"
+                   :brightness-state "/tmp/brightness.state"
+                   :keymap-state "/tmp/keymap.state"))
+         (*control-file-read-result* nil) (*control-file-read-paths* nil)
+         (*control-file-read-results*
+           (list (cons "/tmp/max_brightness" (and maximum (test-line maximum)))
+                 (cons "/tmp/brightness" (and current (test-line current)))))
+         (*control-file-write-status* control-write-status)
+         (*control-file-write-calls* nil)
+         (*state-file-read-result* (test-state-result "42"))
+         (*state-file-read-results*
+           (list (cons "/tmp/brightness.state" (test-state-result brightness))
+                 (cons "/tmp/keymap.state" (test-state-result keymap))))
+         (*state-file-read-paths* nil) (*state-file-write-status* state-write-status)
+         (*state-file-write-arguments* nil) (*storage-write-trace* nil)
+         (*fbdev-open-count* 0) (*evdev-open-count* 0)
+         (*evdev-controls-scan-count* 0)
+         (control-write (list :control "/tmp/brightness" (test-line "12")))
+         (state-write (list :state "/tmp/brightness.state" (test-line "60")))
+         (control-reads (if (member stage '(:maximum-zero :maximum-missing))
+                            '("/tmp/max_brightness")
+                            '("/tmp/max_brightness" "/tmp/brightness")))
+         (state-reads (case stage
+                        (:keymap '("/tmp/volume.state" "/tmp/brightness.state"
+                                   "/tmp/keymap.state"))
+                        ((:brightness-state :control-write :state-write)
+                         '("/tmp/volume.state" "/tmp/brightness.state"))
+                        (otherwise '("/tmp/volume.state"))))
+         (write-trace (case stage
+                        (:control-write (list control-write))
+                        (:state-write (list control-write state-write)))))
+    (assert-signals error (retrodeck:dashboard-runtime-initialize state runtime 1))
+    (assert (equal (reverse *control-file-read-paths*) control-reads))
+    (assert (equal (reverse *state-file-read-paths*) state-reads))
+    (if keymap-p
+        (progn
+          (assert (equal (reverse *control-file-write-calls*)
+                         (list (rest control-write))))
+          (assert (equal *state-file-write-arguments* (rest state-write))))
+        (progn
+          (assert (equal (reverse *storage-write-trace*) write-trace))
+          (assert (= (getf (getf state :settings) :brightness) 40))))
+    (assert-dashboard-runtime-observations
+     runtime :brightness-maximum nil :fbdev-open 0 :evdev-open 0
+     :controls-scan 0 :running nil :initialized nil)))
+(defmacro check-dashboard-state-load
+    (kind result expected &key default (write nil write-p) (write-status 1))
+  (let* ((volume-p (eq kind :volume))
+         (path (if volume-p "/tmp/volume.state" "/tmp/keymap.state"))
+         (loader (if volume-p `(retrodeck:load-dashboard-volume-state ,path ,default)
+                     `(retrodeck:load-dashboard-keymap-state ,path))))
+    `(let ((*state-file-read-result* ,result) (*state-file-write-status* ,write-status)
+           (*state-file-write-arguments* nil))
+       ,(if (eq expected :error) `(assert-signals error ,loader)
+            `(assert (,(if volume-p '= 'string=) ,loader ,expected)))
+       ,@(when write-p
+           `((assert (equal *state-file-write-arguments*
+                            (and ,write (list ,path (test-line ,write))))))))))
+(defmacro check-dashboard-brightness-set
+    (control-status state-status percent expected expected-kinds
+     &key write-values check-state-write-p)
+  `(let ((*control-file-write-status* ,control-status)
+         (*state-file-write-status* ,state-status) (*storage-write-trace* nil)
+         (*control-file-write-arguments* nil) (*state-file-write-arguments* nil))
+     ,(if (eq expected :error)
+          `(assert-signals error (retrodeck:set-dashboard-brightness-percent
+                                  "/tmp/brightness" "/tmp/brightness.state" 20 ,percent))
+          `(assert (= (retrodeck:set-dashboard-brightness-percent
+                       "/tmp/brightness" "/tmp/brightness.state" 20 ,percent) ,expected)))
+     (let ((trace (reverse *storage-write-trace*)))
+       (assert (equal (mapcar #'first trace) ,expected-kinds))
+       ,@(when write-values
+           `((assert (equal trace (mapcar #'list '(:control :state)
+                                           '("/tmp/brightness" "/tmp/brightness.state")
+                                           (mapcar #'test-line ,write-values)))))))
+     ,@(when check-state-write-p '((assert (null *state-file-write-arguments*))))))
+(defmacro with-ten-seconds-runtime-fixture
+    ((runtime runtime-options device-options &rest bindings) &body body)
+  `(let* (,@bindings
+          (,runtime (retrodeck:make-ten-seconds-runtime ,@runtime-options)))
+     (with-runtime-device-fixture ,device-options
+       (let ((*error-output* (make-broadcast-stream)))
+         ,@body))))
+(defun exercise-ten-seconds-runtime
+    (controls touches times &key wayland (active 0) (play 1))
+  (let* ((runtime (retrodeck:make-ten-seconds-runtime
+                   :presentation (and wayland "layer-shell")
+                   :wayland-display (and wayland "wayland-test")
+                   :clock (lambda () (or (pop times) 999))))
+         (*active-status* active) (*active-count* 0)
+         (*play-status* play) (*play-arguments* nil) (*stop-count* 0)
+         (*input-poll-result* (list 1 (length controls) (length touches) 0 1 0))
+         (*input-poll-arguments* nil) (*canvas-clear-status* 1)
+         (*canvas-glyph-status* 1) (*canvas-fill-status* 1))
+    (with-runtime-device-fixture (:controls controls)
+      (let ((*error-output* (make-broadcast-stream))
+            (*evdev-touch-queue* touches)
+            (retrodeck::*menu-sound-input-until-ms* most-positive-fixnum))
+        (retrodeck:ten-seconds-runtime-initialize runtime)
+        (assert (zerop *wayland-open-count*))
+        (multiple-value-bind (state ignored-runtime trace)
+            (retrodeck:ten-seconds-runtime-run-iteration
+             (retrodeck:ten-seconds-initial-state) runtime)
+          (declare (ignore ignored-runtime))
+          (let ((owned (getf runtime :audio-owned-p)))
+            (retrodeck:ten-seconds-runtime-shutdown runtime)
+            (assert-dashboard-runtime-observations
+             runtime :active-count 1 :gamepads-scan 1 :controls-scan 0
+             :controls nil :touches nil :input-poll '(0 8) :evdev-open 1
+             :fbdev-close (if wayland 0 1) :wayland-close (if wayland 1 0)
+             :wayland-kind (and wayland :gameplay)
+             :menu-sound-until most-positive-fixnum)
+            (values state trace
+                    (list :owned owned :play *play-arguments*
+                          :poll *input-poll-arguments* :stops *stop-count*))))))))
 (assert-unary-table #'equal #'retrodeck:menu-sound-notes
                     '((:volume ((660 60) (880 60))) (:previous ((523 35)))
                       (:next ((659 35))) (:confirm ((659 25) (880 30)))
@@ -329,10 +520,7 @@
 
 (let ((before (retrodeck::monotonic-ms)))
   (setf *play-status* 1)
-  (multiple-value-bind (succeeded started)
-      (retrodeck:play-menu-sound :confirm 42)
-    (assert succeeded)
-    (assert started))
+  (assert-values (retrodeck:play-menu-sound :confirm 42) t t)
   (let ((after (retrodeck::monotonic-ms)))
     (assert (<= (+ before 115)
                 retrodeck::*menu-sound-input-until-ms*
@@ -345,10 +533,7 @@
 
 (setf retrodeck::*menu-sound-input-until-ms* 77
       *play-status* 2)
-(multiple-value-bind (succeeded started)
-    (retrodeck:play-menu-sound :next 42)
-  (assert succeeded)
-  (assert (not started)))
+(assert-values (retrodeck:play-menu-sound :next 42) t nil)
 (assert (= retrodeck::*menu-sound-input-until-ms* 77))
 
 (setf *play-status* 0)
@@ -411,19 +596,19 @@
 (assert (null *canvas-fill-arguments*))
 
 (setf *regular-file-result* "project\trole\tlicense\n")
-(assert (string= (retrodeck:read-bounded-regular-file
-                  "/tmp/credits.tsv" 1 32768)
-                 *regular-file-result*))
-(assert (equal *regular-file-arguments* '("/tmp/credits.tsv" 1 32768)))
+(assert-native-call (retrodeck:read-bounded-regular-file
+                     "/tmp/credits.tsv" 1 32768)
+                    *regular-file-result* *regular-file-arguments*
+                    '("/tmp/credits.tsv" 1 32768))
 (assert-signals type-error (retrodeck:read-bounded-regular-file "/tmp/x" -1 2))
 (assert-signals type-error
                 (retrodeck:read-bounded-regular-file "/tmp/x" 1 4194305))
 
-(setf *control-file-read-result* (format nil "12~%")
+(setf *control-file-read-result* (test-line "12")
       *control-file-read-paths* nil)
-(assert (string= (retrodeck:read-native-control-file "/tmp/brightness")
-                 (format nil "12~%")))
-(assert (equal *control-file-read-paths* '("/tmp/brightness")))
+(assert-native-call (retrodeck:read-native-control-file "/tmp/brightness")
+                    (test-line "12") *control-file-read-paths*
+                    '("/tmp/brightness"))
 (setf *control-file-read-result* nil)
 (assert-signals error (retrodeck:read-native-control-file "/tmp/brightness"))
 (assert-signals type-error (retrodeck:read-native-control-file 4))
@@ -431,29 +616,26 @@
       *control-file-write-arguments* nil
       *control-file-write-calls* nil)
 (assert (retrodeck:write-native-control-file "/tmp/brightness"
-                                               (format nil "14~%")))
+                                               (test-line "14")))
 (assert (equal *control-file-write-arguments*
-               (list "/tmp/brightness" (format nil "14~%"))))
+               (list "/tmp/brightness" (test-line "14"))))
 (setf *control-file-write-status* 0)
 (assert (not (retrodeck:write-native-control-file "/tmp/brightness" "0")))
 (assert-signals type-error (retrodeck:write-native-control-file "/tmp/x" 4))
 
 (setf *state-file-read-result* '(0))
-(multiple-value-bind (value present-p)
-    (retrodeck:read-native-state-file "/tmp/volume.state")
-  (assert (and (null value) (not present-p))))
+(assert-values (retrodeck:read-native-state-file "/tmp/volume.state") nil nil)
 (assert (string= *state-file-read-path* "/tmp/volume.state"))
-(let ((contents (format nil "42~%")))
+(let ((contents (test-line "42")))
   (setf *state-file-read-result* (list 1 contents))
-  (multiple-value-bind (value present-p)
-      (retrodeck:read-native-state-file "/tmp/volume.state")
-    (assert (and present-p (string= value contents)))))
+  (assert-values (retrodeck:read-native-state-file "/tmp/volume.state")
+                   contents t))
 (dolist (invalid '(nil (0 nil) (1) (1 42) (2)))
   (setf *state-file-read-result* invalid)
   (assert-signals error
                   (retrodeck:read-native-state-file "/tmp/volume.state")))
 (assert-signals type-error (retrodeck:read-native-state-file 4))
-(let ((contents (format nil "37~%")))
+(let ((contents (test-line "37")))
   (setf *state-file-write-status* 1)
   (assert (retrodeck:write-native-state-file "/tmp/volume.state" contents))
   (assert (equal *state-file-write-arguments*
@@ -462,15 +644,15 @@
 (assert (not (retrodeck:write-native-state-file "/tmp/volume.state" "0")))
 (assert-signals type-error (retrodeck:write-native-state-file "/tmp/x" 4))
 (assert-unary-table #'= #'retrodeck:parse-dashboard-volume-state
-                    (list (list (format nil "0~%") 0)
-                          (list (format nil "5~%") 5)
-                          (list (format nil "42~%") 42)
-                          (list (format nil "100~%") 100)))
+                    (list (list (test-line "0") 0)
+                          (list (test-line "5") 5)
+                          (list (test-line "42") 42)
+                          (list (test-line "100") 100)))
 (assert-signaled-table error #'retrodeck:parse-dashboard-volume-state
-                       (list "" (format nil "~%") (format nil "00~%")
-                             (format nil "042~%") (format nil "101~%") "42"
+                       (list "" (format nil "~%") (test-line "00")
+                             (test-line "042") (test-line "101") "42"
                              (format nil "42~%0") (format nil "42~%~%")
-                             (format nil "-1~%") (format nil "on~%")))
+                             (test-line "-1") (test-line "on")))
 (assert-signals type-error (retrodeck:parse-dashboard-volume-state 42))
 (assert (= (retrodeck:parse-dashboard-inherited-volume nil) 42))
 (assert-unary-table #'= #'retrodeck:parse-dashboard-inherited-volume
@@ -481,46 +663,25 @@
   (assert (zerop (retrodeck:parse-dashboard-inherited-volume nil))))
 (assert (= (retrodeck:dashboard-inherited-volume) 42))
 
-(setf *state-file-read-result* '(0)
-      *state-file-write-status* 1
-      *state-file-write-arguments* nil)
-(assert (= (retrodeck:load-dashboard-volume-state "/tmp/volume.state" 42)
-           42))
-(assert (equal *state-file-write-arguments*
-               (list "/tmp/volume.state" (format nil "42~%"))))
-(setf *state-file-read-result* (list 1 (format nil "37~%"))
-      *state-file-write-arguments* nil)
-(assert (= (retrodeck:load-dashboard-volume-state "/tmp/volume.state" 42)
-           37))
-(assert (null *state-file-write-arguments*))
-(dolist (fixture (list (list (format nil "on~%") 37 37)
-                       (list (format nil "off~%") 37 0)))
-  (setf *state-file-read-result* (list 1 (first fixture))
-        *state-file-write-arguments* nil)
-  (assert (= (retrodeck:load-dashboard-volume-state
-              "/tmp/volume.state" (second fixture))
-             (third fixture)))
-  (assert (equal *state-file-write-arguments*
-                 (list "/tmp/volume.state"
-                       (format nil "~D~%" (third fixture))))))
-(setf *state-file-read-result* (list 1 (format nil "042~%"))
-      *state-file-write-arguments* nil)
-(assert-signals error
-                (retrodeck:load-dashboard-volume-state "/tmp/volume.state" 42))
-(assert (null *state-file-write-arguments*))
-(setf *state-file-read-result* '(0)
-      *state-file-write-status* 0)
-(assert-signals error
-                (retrodeck:load-dashboard-volume-state "/tmp/volume.state" 42))
+(check-dashboard-state-load :volume '(0) 42 :default 42 :write "42")
+(check-dashboard-state-load :volume (test-state-result "37") 37
+                            :default 42 :write nil)
+(check-dashboard-state-load :volume (test-state-result "on") 37
+                            :default 37 :write "37")
+(check-dashboard-state-load :volume (test-state-result "off") 0
+                            :default 37 :write "0")
+(check-dashboard-state-load :volume (test-state-result "042") :error
+                            :default 42 :write nil)
+(check-dashboard-state-load :volume '(0) :error :default 42 :write-status 0)
 (setf *state-file-write-status* 1
       *state-file-write-arguments* nil)
 (assert (retrodeck:save-dashboard-volume-state "/tmp/volume.state" 63))
 (assert (equal *state-file-write-arguments*
-               (list "/tmp/volume.state" (format nil "63~%"))))
+               (list "/tmp/volume.state" (test-line "63"))))
 (assert-signals type-error
                 (retrodeck:save-dashboard-volume-state "/tmp/volume.state" 101))
 (assert-unary-table #'= #'retrodeck::parse-dashboard-control-integer
-                    (list (list (format nil "12~%") 12)
+                    (list (list (test-line "12") 12)
                           (list (format nil "~C~C~C12~C~C~C"
                                              #\Space #\Tab (code-char 11)
                                              (code-char 12) #\Return #\Newline)
@@ -533,13 +694,13 @@
  (list "" (format nil " ~C~C~%" #\Tab #\Return)
        "-1" "12x" "4294967296"))
 (assert-unary-table #'= #'retrodeck:parse-dashboard-brightness-state
-                    (list (list (format nil "10~%") 10)
-                          (list (format nil "60~%") 60)
-                          (list (format nil "100~%") 100)))
+                    (list (list (test-line "10") 10)
+                          (list (test-line "60") 60)
+                          (list (test-line "100") 100)))
 (assert-signaled-table error #'retrodeck:parse-dashboard-brightness-state
-                       (list "" (format nil "0~%") (format nil "5~%")
-                             (format nil "05~%") (format nil "55~%")
-                             (format nil "110~%") "60"
+                       (list "" (test-line "0") (test-line "5")
+                             (test-line "05") (test-line "55")
+                             (test-line "110") "60"
                              (format nil "60~%~%") (format nil " 60~%")))
 (assert (= (retrodeck::dashboard-brightness-raw-value 10 20) 2))
 (assert (= (retrodeck::dashboard-brightness-raw-value 60 20) 12))
@@ -551,76 +712,44 @@
                        (13 20 70) (19 20 100) (20 20 100)))
 (assert-signals error
                 (retrodeck::dashboard-observed-brightness-percent 21 20))
-(setf *control-file-write-status* 1
-      *state-file-write-status* 1
-      *control-file-write-arguments* nil
-      *state-file-write-arguments* nil
-      *storage-write-trace* nil)
-(assert (= (retrodeck:set-dashboard-brightness-percent
-            "/tmp/brightness" "/tmp/brightness.state" 20 70)
-           70))
-(assert (equal (reverse *storage-write-trace*)
-               (list (list :control "/tmp/brightness" (format nil "14~%"))
-                     (list :state "/tmp/brightness.state"
-                           (format nil "70~%")))))
-(setf *control-file-write-status* 0
-      *state-file-write-arguments* nil
-      *storage-write-trace* nil)
-(assert-signals error
-                (retrodeck:set-dashboard-brightness-percent
-                 "/tmp/brightness" "/tmp/brightness.state" 20 70))
-(assert (null *state-file-write-arguments*))
-(assert (equal (mapcar #'first (reverse *storage-write-trace*)) '(:control)))
-(setf *control-file-write-status* 1
-      *state-file-write-status* 0
-      *storage-write-trace* nil)
-(assert-signals error
-                (retrodeck:set-dashboard-brightness-percent
-                 "/tmp/brightness" "/tmp/brightness.state" 20 70))
-(assert (equal (mapcar #'first (reverse *storage-write-trace*))
-               '(:control :state)))
-(setf *state-file-write-status* 1
-      *storage-write-trace* nil)
-(assert-signals error
-                (retrodeck:set-dashboard-brightness-percent
-                 "/tmp/brightness" "/tmp/brightness.state" 20 65))
-(assert (null *storage-write-trace*))
+(check-dashboard-brightness-set
+ 1 1 70 70 '(:control :state) :write-values '("14" "70"))
+(check-dashboard-brightness-set
+ 0 1 70 :error '(:control) :check-state-write-p t)
+(check-dashboard-brightness-set 1 0 70 :error '(:control :state))
+(check-dashboard-brightness-set 1 1 65 :error nil)
 (setf *control-file-read-results*
-      (list (cons "/tmp/max_brightness" (format nil "20~%"))
-            (cons "/tmp/brightness" (format nil "12~%")))
+      (list (cons "/tmp/max_brightness" (test-line "20"))
+            (cons "/tmp/brightness" (test-line "12")))
       *control-file-read-paths* nil
       *state-file-read-results* (list (cons "/tmp/brightness.state" '(0)))
       *state-file-read-paths* nil
       *control-file-write-status* 1
       *state-file-write-status* 1
       *storage-write-trace* nil)
-(multiple-value-bind (percent maximum)
-    (retrodeck:load-dashboard-brightness
-     "/tmp/brightness" "/tmp/max_brightness" "/tmp/brightness.state")
-  (assert (= percent 60))
-  (assert (= maximum 20)))
+(assert-values (retrodeck:load-dashboard-brightness
+                "/tmp/brightness" "/tmp/max_brightness" "/tmp/brightness.state")
+               60 20)
 (assert (equal (reverse *control-file-read-paths*)
                '("/tmp/max_brightness" "/tmp/brightness")))
 (assert (equal (reverse *state-file-read-paths*)
                '("/tmp/brightness.state")))
 (assert (equal (reverse *storage-write-trace*)
-               (list (list :control "/tmp/brightness" (format nil "12~%"))
+               (list (list :control "/tmp/brightness" (test-line "12"))
                      (list :state "/tmp/brightness.state"
-                           (format nil "60~%")))))
+                           (test-line "60")))))
 (setf *state-file-read-results*
-      (list (cons "/tmp/brightness.state" (list 1 (format nil "70~%"))))
+      (list (cons "/tmp/brightness.state" (test-state-result "70")))
       *storage-write-trace* nil)
-(multiple-value-bind (percent maximum)
-    (retrodeck:load-dashboard-brightness
-     "/tmp/brightness" "/tmp/max_brightness" "/tmp/brightness.state")
-  (assert (= percent 70))
-  (assert (= maximum 20)))
+(assert-values (retrodeck:load-dashboard-brightness
+                "/tmp/brightness" "/tmp/max_brightness" "/tmp/brightness.state")
+               70 20)
 (assert (equal (reverse *storage-write-trace*)
-               (list (list :control "/tmp/brightness" (format nil "14~%"))
+               (list (list :control "/tmp/brightness" (test-line "14"))
                      (list :state "/tmp/brightness.state"
-                           (format nil "70~%")))))
+                           (test-line "70")))))
 (setf *state-file-read-results*
-      (list (cons "/tmp/brightness.state" (list 1 (format nil "05~%"))))
+      (list (cons "/tmp/brightness.state" (test-state-result "05")))
       *storage-write-trace* nil)
 (assert-signals error
                 (retrodeck:load-dashboard-brightness
@@ -628,8 +757,8 @@
                  "/tmp/brightness.state"))
 (assert (null *storage-write-trace*))
 (setf *control-file-read-results*
-      (list (cons "/tmp/max_brightness" (format nil "0~%"))
-            (cons "/tmp/brightness" (format nil "12~%")))
+      (list (cons "/tmp/max_brightness" (test-line "0"))
+            (cons "/tmp/brightness" (test-line "12")))
       *control-file-read-paths* nil
       *state-file-read-paths* nil)
 (assert-signals error
@@ -640,52 +769,37 @@
 (assert (null *state-file-read-paths*))
 
 (assert-unary-table #'string= #'retrodeck:parse-dashboard-keymap-state
-                    (list (list (format nil "us~%") "us")
-                          (list (format nil "cz~%") "cz")))
+                    (list (list (test-line "us") "us")
+                          (list (test-line "cz") "cz")))
 (assert-signaled-table error #'retrodeck:parse-dashboard-keymap-state
-                       (list "" "us" (format nil "US~%") (format nil "de~%")
+                       (list "" "us" (test-line "US") (test-line "de")
                              (format nil "us~%~%") (format nil "us ~%")
                              (format nil "us~C~%" #\Return)))
-(setf *state-file-read-result* '(0)
-      *state-file-write-status* 1
-      *state-file-write-arguments* nil)
-(assert (string= (retrodeck:load-dashboard-keymap-state "/tmp/keymap.state")
-                 "us"))
-(assert (equal *state-file-write-arguments*
-               (list "/tmp/keymap.state" (format nil "us~%"))))
-(setf *state-file-read-result* (list 1 (format nil "cz~%"))
-      *state-file-write-arguments* nil)
-(assert (string= (retrodeck:load-dashboard-keymap-state "/tmp/keymap.state")
-                 "cz"))
-(assert (null *state-file-write-arguments*))
-(setf *state-file-read-result* (list 1 (format nil "de~%")))
-(assert-signals error
-                (retrodeck:load-dashboard-keymap-state "/tmp/keymap.state"))
-(setf *state-file-read-result* '(0)
-      *state-file-write-status* 0)
-(assert-signals error
-                (retrodeck:load-dashboard-keymap-state "/tmp/keymap.state"))
+(check-dashboard-state-load :keymap '(0) "us" :write "us")
+(check-dashboard-state-load :keymap (test-state-result "cz") "cz" :write nil)
+(check-dashboard-state-load :keymap (test-state-result "de") :error)
+(check-dashboard-state-load :keymap '(0) :error :write-status 0)
 (setf *state-file-write-status* 1
       *state-file-write-arguments* nil)
 (assert (retrodeck:save-dashboard-keymap-state "/tmp/keymap.state" "cz"))
 (assert (equal *state-file-write-arguments*
-               (list "/tmp/keymap.state" (format nil "cz~%"))))
+               (list "/tmp/keymap.state" (test-line "cz"))))
 (assert-signals error
                 (retrodeck:save-dashboard-keymap-state "/tmp/keymap.state" "de"))
 (setf *control-file-read-result* ""
       *control-file-read-results*
       (list (cons "/sys/class/backlight/display-bl/max_brightness"
-                  (format nil "20~%"))
+                  (test-line "20"))
             (cons "/sys/class/backlight/display-bl/brightness"
-                  (format nil "12~%")))
+                  (test-line "12")))
       *control-file-read-paths* nil
       *control-file-write-status* 1
-      *state-file-read-result* (list 1 (format nil "42~%"))
+      *state-file-read-result* (test-state-result "42")
       *state-file-read-results*
       (list (cons "/mnt/data/nes-deck/state/menu-brightness.state"
-                  (list 1 (format nil "60~%")))
+                  (test-state-result "60"))
             (cons "/mnt/data/nes-deck/state/terminal-keymap.state"
-                  (list 1 (format nil "us~%"))))
+                  (test-state-result "us")))
       *state-file-read-paths* nil
       *state-file-write-status* 1
       *storage-write-trace* nil)
@@ -736,13 +850,13 @@
   (assert-signals type-error (funcall function)))
 
 (setf *raster-cover-result* 17)
-(assert (= (retrodeck:load-cover-raster #P"/tmp/cover.png" #x5f87ff) 17))
-(assert (equal *raster-cover-arguments* '("/tmp/cover.png" #x5f87ff)))
+(assert-native-call (retrodeck:load-cover-raster #P"/tmp/cover.png" #x5f87ff)
+                    17 *raster-cover-arguments* '("/tmp/cover.png" #x5f87ff))
 (setf *raster-png-result* 18)
-(assert (= (retrodeck:load-png-raster "/tmp/icon.png" 23 23) 18))
-(assert (equal *raster-png-arguments* '("/tmp/icon.png" 23 23)))
-(assert (retrodeck:draw-canvas-raster 18 -4 8 50 50))
-(assert (equal *canvas-raster-arguments* '(18 -4 8 50 50)))
+(assert-native-call (retrodeck:load-png-raster "/tmp/icon.png" 23 23)
+                    18 *raster-png-arguments* '("/tmp/icon.png" 23 23))
+(assert-native-call (retrodeck:draw-canvas-raster 18 -4 8 50 50)
+                    t *canvas-raster-arguments* '(18 -4 8 50 50))
 (setf *canvas-raster-status* 0)
 (assert (not (retrodeck:draw-canvas-raster 18 0 0 1 1)))
 (setf *canvas-raster-status* 1
@@ -778,100 +892,66 @@
 (assert (string= (retrodeck:fit-text-width "ABCDEFGHIJ" 29 1) "AB..."))
 (assert (string= (retrodeck:fit-text-width "AB" 1 1) ""))
 
-(setf *canvas-glyph-calls* nil)
-(assert (retrodeck:draw-text 100 100 "AČ" 2 #xeeeeee))
-(assert (equal (nreverse *canvas-glyph-calls*)
-               '((100 100 65 2 #xeeeeee)
-                 (112 100 63 2 #xeeeeee))))
-(setf *canvas-glyph-calls* nil)
-(assert (retrodeck:draw-centered-text 10 20 30 40 "AB" 2 #xeeeeee))
-(assert (equal (nreverse *canvas-glyph-calls*)
-               '((14 33 65 2 #xeeeeee)
-                 (26 33 66 2 #xeeeeee))))
+(assert-recorded-calls *canvas-glyph-calls*
+    (retrodeck:draw-text 100 100 "AČ" 2 #xeeeeee)
+    '((100 100 65 2 #xeeeeee) (112 100 63 2 #xeeeeee)))
+(assert-recorded-calls *canvas-glyph-calls*
+    (retrodeck:draw-centered-text 10 20 30 40 "AB" 2 #xeeeeee)
+    '((14 33 65 2 #xeeeeee) (26 33 66 2 #xeeeeee)))
 
-(setf *canvas-fill-calls* nil)
-(assert (retrodeck:stroke-canvas-rect 10 20 30 40 2 #xeeeeee))
-(assert (equal (nreverse *canvas-fill-calls*)
-               '((10 20 30 2 #xeeeeee)
-                 (10 58 30 2 #xeeeeee)
-                 (10 20 2 40 #xeeeeee)
-                 (38 20 2 40 #xeeeeee))))
-(setf *canvas-fill-calls* nil)
-(assert (retrodeck:fill-pixel-cut-rect 100 100 20 12 4 #xfe6c27))
-(assert (equal (nreverse *canvas-fill-calls*)
-               '((104 100 12 12 #xfe6c27)
-                 (100 104 20 4 #xfe6c27))))
-(setf *canvas-fill-calls* nil)
-(assert (retrodeck:fill-pixel-cut-rect 100 100 8 12 4 #xfe6c27))
-(assert (null *canvas-fill-calls*))
-(assert (retrodeck:draw-pixel-panel 100 100 20 20 #x121212 #xfe6c27 4))
-(assert (equal (nreverse *canvas-fill-calls*)
-               '((104 100 12 20 #xfe6c27)
-                 (100 104 20 12 #xfe6c27)
-                 (108 104 4 12 #x121212)
-                 (104 108 12 4 #x121212))))
+(assert-recorded-calls *canvas-fill-calls*
+    (retrodeck:stroke-canvas-rect 10 20 30 40 2 #xeeeeee)
+    '((10 20 30 2 #xeeeeee) (10 58 30 2 #xeeeeee)
+      (10 20 2 40 #xeeeeee) (38 20 2 40 #xeeeeee)))
+(assert-recorded-calls *canvas-fill-calls*
+    (retrodeck:fill-pixel-cut-rect 100 100 20 12 4 #xfe6c27)
+    '((104 100 12 12 #xfe6c27) (100 104 20 4 #xfe6c27)))
+(assert-recorded-calls *canvas-fill-calls*
+    (retrodeck:fill-pixel-cut-rect 100 100 8 12 4 #xfe6c27) nil)
+(assert-recorded-calls *canvas-fill-calls*
+    (retrodeck:draw-pixel-panel 100 100 20 20 #x121212 #xfe6c27 4)
+    '((104 100 12 20 #xfe6c27) (100 104 20 12 #xfe6c27)
+      (108 104 4 12 #x121212) (104 108 12 4 #x121212)))
 
-(assert (and (string= (retrodeck:ten-seconds-format 0) "00.00")
-             (string= (retrodeck:ten-seconds-format 123) "01.23")
-             (string= (retrodeck:ten-seconds-format 10000) "99.99")
-             (equal (retrodeck:ten-seconds-cue-notes :start)
-                    '((523 28) (784 38)))
-             (equal (retrodeck:ten-seconds-cue-notes :exact)
-                    '((784 35) (1047 40) (1319 55)))
-             (equal (retrodeck:ten-seconds-cue-notes :miss)
-                    '((659 35) (440 55)))
-             (every (lambda (point)
-                      (eq (apply #'retrodeck:ten-seconds-touch-event point) :back))
-                    '((16 16) (167 16) (16 79) (167 79)))
-             (every (lambda (point)
-                      (eq (apply #'retrodeck:ten-seconds-touch-event point) :touch))
-                    '((15 16) (168 16) (16 15) (16 80)))))
+(assert-unary-table #'string= #'retrodeck:ten-seconds-format
+                    '((0 "00.00") (123 "01.23") (10000 "99.99")))
+(assert-unary-table
+ #'equal #'retrodeck:ten-seconds-cue-notes
+ '((:start ((523 28) (784 38))) (:exact ((784 35) (1047 40) (1319 55)))
+   (:miss ((659 35) (440 55)))))
+(dolist (fixture '((:back ((16 16) (167 16) (16 79) (167 79)))
+                   (:touch ((15 16) (168 16) (16 15) (16 80)))))
+  (destructuring-bind (expected points) fixture
+    (dolist (point points)
+      (assert (eq (apply #'retrodeck:ten-seconds-touch-event point) expected)))))
 (let ((ready (retrodeck:ten-seconds-initial-state)))
-  (multiple-value-bind (same effects)
-      (retrodeck:ten-seconds-reduce ready :back 0)
-    (assert (and (eq same ready) (equal effects '((:exit)))))))
-(labels ((exercise-input (input elapsed expected cue)
-           (multiple-value-bind (running start-effects)
-               (retrodeck:ten-seconds-reduce
-                (retrodeck:ten-seconds-initial-state) input 100)
-             (assert (and (eq (getf running :mode) :running)
-                          (equal start-effects '((:cue :start) (:redraw)))))
-             (multiple-value-bind (stopped stop-effects)
-                 (retrodeck:ten-seconds-reduce
-                  running input (+ 100 (* elapsed 10000000)))
-               (assert (and (eq (getf stopped :mode) :stopped)
-                            (= (getf stopped :displayed) (min elapsed 9999))
-                            (equal stop-effects
-                                   (list (list :result expected :input input)
-                                         (list :cue cue) '(:redraw)))))
-               (let ((retry-at (+ 101 (* elapsed 10000000))))
-                 (multiple-value-bind (retry retry-effects)
-                     (retrodeck:ten-seconds-reduce stopped input retry-at)
-                   (assert (and (eq (getf retry :mode) :running)
-                                (= (getf retry :started-at) retry-at)
-                                (equal retry-effects
-                                       '((:cue :start) (:redraw)))))))))))
-  (exercise-input :touch 999 "09.99" :miss)
-  (exercise-input :controller-a 1000 "10.00" :exact)
-  (exercise-input :touch 1001 "10.01" :miss)
-  (exercise-input :touch 10000 "99.99" :miss))
-(multiple-value-bind (running ignored)
-    (retrodeck:ten-seconds-reduce
-     (retrodeck:ten-seconds-initial-state) :touch 100)
-  (declare (ignore ignored))
-  (multiple-value-bind (same effects)
-      (retrodeck:ten-seconds-reduce running :tick 99)
-    (assert (and (eq same running) (null effects))))
-  (multiple-value-bind (ticked effects)
-      (retrodeck:ten-seconds-reduce running :tick 100)
-    (assert (and (zerop (getf ticked :displayed))
-                 (= (getf ticked :redraw-at) 16000100)
-                 (equal effects '((:redraw))))))
-  (multiple-value-bind (ticked effects)
-      (retrodeck:ten-seconds-reduce running :tick 1230000100)
-    (assert (and (= (getf ticked :displayed) 123)
-                 (= (getf ticked :redraw-at) 1246000100)
-                 (equal effects '((:redraw)))))))
+  (assert-ten-seconds-reduction ready :back 0 '((:exit)) :identity ready))
+(dolist (fixture '((:touch 999 "09.99" :miss)
+                   (:controller-a 1000 "10.00" :exact)
+                   (:touch 1001 "10.01" :miss)
+                   (:touch 10000 "99.99" :miss)))
+  (destructuring-bind (input elapsed expected cue) fixture
+    (let* ((running
+             (assert-ten-seconds-reduction
+              (retrodeck:ten-seconds-initial-state) input 100
+              '((:cue :start) (:redraw)) :mode :running))
+           (stopped
+             (assert-ten-seconds-reduction
+              running input (+ 100 (* elapsed 10000000))
+              (list (list :result expected :input input) (list :cue cue) '(:redraw))
+              :mode :stopped :displayed (min elapsed 9999)))
+           (retry-at (+ 101 (* elapsed 10000000))))
+      (assert-ten-seconds-reduction
+       stopped input retry-at '((:cue :start) (:redraw))
+       :mode :running :started-at retry-at))))
+(let ((running (nth-value 0 (retrodeck:ten-seconds-reduce
+                             (retrodeck:ten-seconds-initial-state) :touch 100))))
+  (assert-ten-seconds-reduction running :tick 99 nil :identity running)
+  (assert-ten-seconds-reduction
+   running :tick 100 '((:redraw)) :displayed 0 :redraw-at 16000100)
+  (assert-ten-seconds-reduction
+   running :tick 1230000100 '((:redraw))
+   :displayed 123 :redraw-at 1246000100))
 (setf *canvas-fill-calls* nil *canvas-glyph-calls* nil)
 (assert (retrodeck:render-ten-seconds
          (retrodeck:ten-seconds-initial-state)))
@@ -881,9 +961,142 @@
              (equal (car (last *canvas-glyph-calls*))
                     '(46 38 66 4 #xffedc2))))
 
-(let* ((credits-path
-         (truename (merge-pathnames "../deploy/menu/credits.tsv"
-                                    *load-truename*)))
+(dolist (fixture '((nil nil nil) ("layer-shell" nil nil)
+                   (nil "wayland-1" nil) ("widget" "wayland-1" nil)
+                   ("layer-shell" "" nil) ("layer-shell" "wayland-1" t)))
+  (destructuring-bind (presentation display expected) fixture
+    (assert (eq (retrodeck::ten-seconds-wayland-requested-p
+                 presentation display) expected))))
+(let ((runtime (retrodeck:make-ten-seconds-runtime
+                :presentation "layer-shell" :wayland-display "wayland-1")))
+  (assert (and (getf runtime :wayland) (null (getf runtime :volume))
+               (getf runtime :dirty) (not (getf runtime :auto-presentation))
+               (eq (getf runtime :clock) #'retrodeck:monotonic-nanoseconds))))
+(let ((errors (make-string-output-stream)))
+  (let ((*error-output* errors))
+    (assert (and (= (retrodeck::ten-seconds-runtime-volume nil) 42)
+                 (zerop (retrodeck::ten-seconds-runtime-volume "bad")))))
+  (assert (search "game cues disabled" (get-output-stream-string errors))))
+(multiple-value-bind (state trace summary)
+    (exercise-ten-seconds-runtime nil '((200 200 1 1 0)) '(100 101))
+  (assert-plist-values state '(:mode :running :started-at 101))
+  (assert (equal trace
+                 '((:reap-sound) (:tick :now 100) (:render) (:present)
+                   (:poll :wayland nil :timeout 8) (:controls 0) (:touches 1)
+                   (:touch :now 101) (:cue :start) (:redraw))))
+  (assert-plist-values summary
+                       '(:owned t :play (((523 28) (784 38)) 42) :stops 1)))
+(multiple-value-bind (state trace summary)
+    (exercise-ten-seconds-runtime '((1 4 0))
+                                  '((200 200 1 1 0) (20 20 1 1 0)) '(200))
+  (assert-plist-values state '(:mode :ready))
+  (assert (equal (last trace 2) '((:back :now 200) (:exit))))
+  (assert-plist-values summary '(:play nil)))
+(multiple-value-bind (state trace summary)
+    (exercise-ten-seconds-runtime
+     '((0 28 0) (1 8 0) (1 4 0))
+     '((200 200 1 1 0) (201 201 1 1 0)) '(300 301) :active 1 :play 2)
+  (assert-plist-values state '(:started-at 301))
+  (assert (find :controller-a trace :key #'first))
+  (assert (not (find :touch trace :key #'first)))
+  (assert-plist-values summary '(:owned nil)))
+(multiple-value-bind (state trace ignored)
+    (exercise-ten-seconds-runtime
+     '((0 28 0) (1 8 0))
+     '((200 200 1 1 0) (201 201 1 1 0) (201 201 0 0 1))
+     '(500 501 1000000501) :active 1 :play 2)
+  (declare (ignore ignored))
+  (assert-plist-values state '(:mode :stopped :displayed 100))
+  (assert (equal (remove-if-not (lambda (item) (eq (first item) :touch)) trace)
+                 '((:touch :now 501) (:touch :now 1000000501)))))
+(multiple-value-bind (state trace summary)
+    (exercise-ten-seconds-runtime nil nil '(600) :wayland t)
+  (declare (ignore state trace))
+  (assert-plist-values summary '(:poll (0 8))))
+(let ((runtime (retrodeck:make-ten-seconds-runtime
+                :presentation nil :wayland-display nil))
+      (diagnostics (make-string-output-stream)))
+  (with-runtime-device-fixture (:gamepads-scan-result '(-1 "cannot scan gamepads"))
+    (let ((*error-output* diagnostics))
+      (retrodeck:ten-seconds-runtime-initialize runtime))
+    (let* ((text (get-output-stream-string diagnostics))
+           (failure (search "controller input unavailable: cannot scan gamepads" text))
+           (ready (search "0 THEGamepad controller(s) ready" text)))
+      (assert (and failure ready (< failure ready) (= (getf runtime :volume) 42)
+                   (not (search "game cues disabled" text)))))
+    (retrodeck:ten-seconds-runtime-shutdown runtime)
+    (assert (and (= *evdev-gamepads-scan-count* 1)
+                 (zerop *evdev-controls-scan-count*)))))
+
+(with-ten-seconds-runtime-fixture
+    (runtime (:presentation "layer-shell" :wayland-display "wayland-test")
+             (:wayland-open-status 0))
+  (assert-signals error
+    (retrodeck:ten-seconds-candidate-rehearse
+     (retrodeck:ten-seconds-initial-state) runtime :iteration-limit 1))
+  (assert-dashboard-runtime-observations
+   runtime :wayland-open 1 :wayland-kind :gameplay :fbdev-open 0
+   :wayland-close 0 :evdev-close 1 :controls-close 1 :initialized nil))
+
+(with-ten-seconds-runtime-fixture
+    (runtime (:presentation nil :wayland-display nil
+              :clock (lambda () (error "Clock ran after shutdown")))
+             () (state (retrodeck:ten-seconds-initial-state)))
+  (let ((*process-shutdown-status* 1) (*active-count* 0))
+    (retrodeck:ten-seconds-runtime-initialize runtime)
+    (multiple-value-bind (returned ignored trace)
+        (retrodeck:ten-seconds-runtime-run-iteration state runtime)
+      (declare (ignore ignored))
+      (assert (eq returned state))
+      (assert (equal trace '((:shutdown))))
+      (assert-dashboard-runtime-observations
+       runtime :active-count 0 :input-poll nil))
+    (retrodeck:ten-seconds-runtime-shutdown runtime)))
+
+(with-ten-seconds-runtime-fixture
+    (runtime (:presentation nil :wayland-display nil
+              :clock (lambda () (pop times))) ()
+             (times '(100 101 102)) (*active-status* 1) (*play-status* 1)
+             (*stop-count* 0) (*input-poll-result* '(1 0 1 0 0 0))
+             (*canvas-clear-status* 1)
+             (retrodeck::*menu-sound-input-until-ms* 777))
+  (let ((*evdev-touch-queue* '((200 200 1 1 0)))
+          (*record-interaction* :cleanup-error))
+    (let ((failure
+            (handler-case
+                (progn
+                  (retrodeck:ten-seconds-candidate-rehearse
+                   (retrodeck:ten-seconds-initial-state) runtime :iteration-limit 2
+                   :stop-predicate (lambda (state ignored iteration)
+                                     (declare (ignore state ignored))
+                                     (when (= iteration 1)
+                                       (setf *canvas-clear-status* 0))
+                                     nil))
+                  nil)
+              (error (condition) condition))))
+      (assert (search "10 Seconds render failed" (princ-to-string failure))))
+    (assert-dashboard-runtime-observations
+     runtime :stop-count 1 :fbdev-close 1 :evdev-close 1 :controls-close 1
+     :menu-sound-until 777 :initialized nil :dirty nil)
+    (assert (not (getf runtime :running)))))
+
+(dolist (fixture (list (list 0 nil :limit 0)
+                       (list 1 (constantly t) :operator-stop 0)
+                       (list 1 nil :limit 1)))
+  (destructuring-bind (limit stop expected trace-count) fixture
+    (with-ten-seconds-runtime-fixture (runtime (:wayland-display "") ())
+      (multiple-value-bind (state returned traces reason)
+          (retrodeck:ten-seconds-candidate-rehearse
+           (retrodeck:ten-seconds-initial-state) runtime
+           :iteration-limit limit :stop-predicate stop)
+        (declare (ignore state))
+        (assert (eq returned runtime))
+        (assert (= (length traces) trace-count))
+        (assert (eq reason expected))
+        (assert-dashboard-runtime-observations
+         runtime :initialized nil :fbdev-close 1)))))
+
+(let* ((credits-path (test-menu-path "credits.tsv"))
        (*regular-file-result* (test-file-string credits-path))
        (credits (retrodeck:load-project-credits credits-path))
        (crawl (retrodeck:make-project-credits-crawl credits)))
@@ -1665,37 +1878,20 @@ secret!9
                (subsetp '(:right :system-previous) keyboard))))
 (assert (null *evdev-controls*))
 
-(assert (null (retrodeck:dashboard-controller-command '(:back) nil nil)))
-(assert (eq (retrodeck:dashboard-controller-command
-             '(:back :settings) t nil)
-            :back))
-(assert (eq (retrodeck:dashboard-controller-command
-             '(:back :confirm) nil t)
-            :back))
-(assert (null (retrodeck:dashboard-controller-command
-               '(:settings :confirm) t nil)))
-(assert (eq (retrodeck:dashboard-controller-command
-             '(:settings :system-previous :confirm) nil nil)
-            :settings))
-(assert (eq (retrodeck:dashboard-controller-command
-             '(:system-previous :system-next) nil nil)
-            :system-previous))
-(assert (null (retrodeck:dashboard-controller-command
-               '(:system-next) nil t)))
-(assert (eq (retrodeck:dashboard-controller-command
-             '(:left :right :confirm) nil nil)
-            :previous))
-(assert (eq (retrodeck:dashboard-controller-command
-             '(:down :confirm) nil nil)
-            :next))
-(assert (eq (retrodeck:dashboard-controller-command
-             '(:confirm) nil nil)
-            :confirm))
+(assert-unary-table
+ #'eq #'retrodeck:dashboard-controller-command
+ '(((:back) nil) ((:settings :system-previous :confirm) :settings)
+   ((:system-previous :system-next) :system-previous)
+   ((:left :right :confirm) :previous) ((:down :confirm) :next)
+   ((:confirm) :confirm)) nil nil)
+(assert-unary-table #'eq #'retrodeck:dashboard-controller-command
+                    '(((:back :settings) :back)
+                      ((:settings :confirm) nil)) t nil)
+(assert-unary-table #'eq #'retrodeck:dashboard-controller-command
+                    '(((:back :confirm) :back) ((:system-next) nil)) nil t)
 
-(assert (retrodeck:dashboard-controller-scan-due-p nil 0))
-(assert (retrodeck:dashboard-controller-scan-due-p 0 999))
-(assert (not (retrodeck:dashboard-controller-scan-due-p 1 999)))
-(assert (retrodeck:dashboard-controller-scan-due-p 1 1001))
+(assert-binary-table #'eql #'retrodeck:dashboard-controller-scan-due-p
+                     '((nil 0 t) (0 999 t) (1 999 nil) (1 1001 t)))
 (assert (retrodeck:dashboard-controller-scan-due-p 900 901 :force t))
 (assert (retrodeck:dashboard-controller-scan-due-p 900 901 :rescan t))
 
@@ -1952,18 +2148,9 @@ secret!9
                    (and contents (list (cons "/tmp/palette.tsv" contents)))))
              (signals-p error
                (retrodeck:load-dashboard-palette "/tmp/palette.tsv")))))
-  (let* ((manifest-path
-           (namestring
-            (truename (merge-pathnames "../deploy/menu/games.tsv"
-                                       *load-truename*))))
-         (palette-path
-           (namestring
-            (truename (merge-pathnames "../deploy/menu/palette.tsv"
-                                       *load-truename*))))
-         (credits-path
-           (namestring
-            (truename (merge-pathnames "../deploy/menu/credits.tsv"
-                                       *load-truename*))))
+  (let* ((manifest-path (test-menu-path "games.tsv" t))
+         (palette-path (test-menu-path "palette.tsv" t))
+         (credits-path (test-menu-path "credits.tsv" t))
          (*regular-file-result* nil)
          (*regular-file-results*
            (list (cons manifest-path (test-file-string manifest-path))
@@ -3483,126 +3670,15 @@ secret!9
                    state runtime '(:now 1 :poll-ready-p nil)))
   (assert-signals error (retrodeck:dashboard-runtime-poll-input runtime 0)))
 
-(let* ((state (retrodeck:dashboard-loop-initial-state nil :now 1))
-       (runtime (retrodeck:make-dashboard-runtime
-                 :volume-state "/tmp/volume.state"
-                 :brightness-device "/tmp/brightness"
-                 :brightness-maximum-path "/tmp/max_brightness"
-                 :brightness-state "/tmp/brightness.state"
-                 :keymap-state "/tmp/keymap.state"
-                 :default-volume 42))
-       (*control-file-read-results*
-        (list (cons "/tmp/max_brightness" (format nil "20~%"))
-              (cons "/tmp/brightness" (format nil "12~%"))))
-       (*control-file-read-paths* nil)
-       (*control-file-write-calls* nil)
-       (*state-file-read-result* (list 1 (format nil "42~%")))
-       (*state-file-read-results*
-        (list (cons "/tmp/brightness.state" (list 1 (format nil "60~%")))
-              (cons "/tmp/keymap.state" (list 1 (format nil "de~%")))))
-       (*state-file-read-paths* nil)
-       (*state-file-write-status* 1)
-       (*state-file-write-arguments* nil)
-       (*fbdev-open-count* 0)
-       (*evdev-open-count* 0)
-       (*evdev-controls-scan-count* 0))
-  (assert-signals error
-                  (retrodeck:dashboard-runtime-initialize state runtime 1))
-  (assert (equal (reverse *control-file-read-paths*)
-                 '("/tmp/max_brightness" "/tmp/brightness")))
-  (assert (equal (reverse *state-file-read-paths*)
-                 '("/tmp/volume.state" "/tmp/brightness.state"
-                   "/tmp/keymap.state")))
-  (assert (equal (reverse *control-file-write-calls*)
-                 (list (list "/tmp/brightness" (format nil "12~%")))))
-  (assert (equal *state-file-write-arguments*
-                 (list "/tmp/brightness.state" (format nil "60~%"))))
-  (assert (zerop *fbdev-open-count*))
-  (assert (zerop *evdev-open-count*))
-  (assert (zerop *evdev-controls-scan-count*))
-  (assert (not (retrodeck:dashboard-runtime-running-p runtime)))
-  (assert (not (getf runtime :initialized-p)))
-  (assert (null (getf runtime :brightness-maximum))))
-
-(flet ((check-startup-brightness-failure
-           (maximum-text current-text state-result expected-control-reads
-            expected-state-reads expected-write-trace
-            &key (control-write-status 1) (state-write-status 1))
-         (let* ((state (retrodeck:dashboard-loop-initial-state
-                        nil :brightness 40 :now 1))
-                (runtime
-                  (retrodeck:make-dashboard-runtime
-                   :volume-state "/tmp/volume.state"
-                   :brightness-device "/tmp/brightness"
-                   :brightness-maximum-path "/tmp/max_brightness"
-                   :brightness-state "/tmp/brightness.state"
-                   :keymap-state "/tmp/keymap.state"
-                   :default-volume 42))
-                (*control-file-read-result* nil)
-                (*control-file-read-results*
-                  (list (cons "/tmp/max_brightness" maximum-text)
-                        (cons "/tmp/brightness" current-text)))
-                (*control-file-read-paths* nil)
-                (*control-file-write-status* control-write-status)
-                (*state-file-read-result* (list 1 (format nil "42~%")))
-                (*state-file-read-results*
-                  (list (cons "/tmp/brightness.state" state-result)
-                        (cons "/tmp/keymap.state"
-                              (list 1 (format nil "us~%")))))
-                (*state-file-read-paths* nil)
-                (*state-file-write-status* state-write-status)
-                (*storage-write-trace* nil)
-                (*fbdev-open-count* 0)
-                (*evdev-open-count* 0)
-                (*evdev-controls-scan-count* 0))
-           (assert-signals error
-                           (retrodeck:dashboard-runtime-initialize
-                            state runtime 1))
-           (assert (equal (reverse *control-file-read-paths*)
-                          expected-control-reads))
-           (assert (equal (reverse *state-file-read-paths*)
-                          expected-state-reads))
-           (assert (equal (reverse *storage-write-trace*)
-                          expected-write-trace))
-           (assert (= (getf (getf state :settings) :brightness) 40))
-           (assert (null (getf runtime :brightness-maximum)))
-           (assert (zerop *fbdev-open-count*))
-           (assert (zerop *evdev-open-count*))
-           (assert (zerop *evdev-controls-scan-count*))
-           (assert (not (retrodeck:dashboard-runtime-running-p runtime)))
-           (assert (not (getf runtime :initialized-p))))))
-  (check-startup-brightness-failure
-   (format nil "20~%") (format nil "12~%")
-   (list 1 (format nil "05~%"))
-   '("/tmp/max_brightness" "/tmp/brightness")
-   '("/tmp/volume.state" "/tmp/brightness.state") nil)
-  (check-startup-brightness-failure
-   (format nil "0~%") (format nil "12~%")
-   (list 1 (format nil "60~%"))
-   '("/tmp/max_brightness") '("/tmp/volume.state") nil)
-  (check-startup-brightness-failure
-   (format nil "20~%") (format nil "21~%")
-   (list 1 (format nil "60~%"))
-   '("/tmp/max_brightness" "/tmp/brightness")
-   '("/tmp/volume.state") nil)
-  (check-startup-brightness-failure
-   nil (format nil "12~%") (list 1 (format nil "60~%"))
-   '("/tmp/max_brightness") '("/tmp/volume.state") nil)
-  (check-startup-brightness-failure
-   (format nil "20~%") (format nil "12~%")
-   (list 1 (format nil "60~%"))
-   '("/tmp/max_brightness" "/tmp/brightness")
-   '("/tmp/volume.state" "/tmp/brightness.state")
-   (list (list :control "/tmp/brightness" (format nil "12~%")))
-   :control-write-status 0)
-  (check-startup-brightness-failure
-   (format nil "20~%") (format nil "12~%")
-   (list 1 (format nil "60~%"))
-   '("/tmp/max_brightness" "/tmp/brightness")
-   '("/tmp/volume.state" "/tmp/brightness.state")
-   (list (list :control "/tmp/brightness" (format nil "12~%"))
-         (list :state "/tmp/brightness.state" (format nil "60~%")))
-   :state-write-status 0))
+(dolist (fixture
+         '((:keymap "20" "12" "60" "de")
+           (:brightness-state "20" "12" "05" "us")
+           (:maximum-zero "0" "12" "60" "us")
+           (:current-over "20" "21" "60" "us")
+           (:maximum-missing nil "12" "60" "us")
+           (:control-write "20" "12" "60" "us" :control-write-status 0)
+           (:state-write "20" "12" "60" "us" :state-write-status 0)))
+  (apply #'check-dashboard-startup-storage-failure fixture))
 
 (let* ((state (retrodeck:dashboard-loop-initial-state
                nil :brightness 60 :now 1))
@@ -3615,14 +3691,14 @@ secret!9
                      (getf state :settings) :keymap))
        (brightness-plan (retrodeck:settings-activation-plan
                          (getf state :settings) :brightness-up))
-       (*state-file-read-result* (list 1 (format nil "42~%")))
+       (*state-file-read-result* (test-state-result "42"))
        (*state-file-write-status* 1)
        (*state-file-write-arguments* nil)
        (*error-output* (make-broadcast-stream)))
   (setf (getf plan :path) "/tmp/volume.state")
   (assert-runtime-write runtime (list :settings-action plan) state
                         '(:settings-result :succeeded-p t)
-                        "/tmp/volume.state" (format nil "37~%"))
+                        "/tmp/volume.state" (test-line "37"))
   (setf *state-file-write-status* 0)
   (assert-runtime-effect runtime (list :settings-action plan) state
                          '(:settings-result :succeeded-p nil))
@@ -3631,7 +3707,7 @@ secret!9
         *state-file-write-arguments* nil)
   (assert-runtime-write runtime (list :settings-action keymap-plan) state
                         '(:settings-result :succeeded-p t)
-                        "/tmp/keymap.state" (format nil "cz~%"))
+                        "/tmp/keymap.state" (test-line "cz"))
   (setf *state-file-write-status* 0)
   (assert-runtime-effect runtime (list :settings-action keymap-plan) state
                          '(:settings-result :succeeded-p nil))
@@ -3645,9 +3721,9 @@ secret!9
           (runtime-effect runtime (list :settings-action brightness-plan) state)))
     (assert (equal result '(:settings-result :succeeded-p t)))
     (assert (equal (reverse *storage-write-trace*)
-                   (list (list :control "/tmp/brightness" (format nil "14~%"))
+                   (list (list :control "/tmp/brightness" (test-line "14"))
                          (list :state "/tmp/brightness.state"
-                               (format nil "70~%")))))
+                               (test-line "70")))))
     (let ((pending (copy-list state)))
       (setf (getf pending :pending-settings-plan) brightness-plan)
       (multiple-value-bind (saved effects)
@@ -3682,7 +3758,7 @@ secret!9
         (assert (equal effects '((:render) (:present) (:cue :next)))))))
   (setf *state-file-write-status* 1
         *state-file-write-arguments* nil
-        *state-file-read-result* (list 1 (format nil "55~%")))
+        *state-file-read-result* (test-state-result "55"))
   (assert-runtime-effect runtime '(:reload-volume) state
                          '(:child-complete :volume 55))
   (assert (null *state-file-write-arguments*))
@@ -3690,21 +3766,21 @@ secret!9
         (settings (copy-list (getf state :settings))))
     (setf (getf settings :volume) 37
           (getf changed :settings) settings
-          *state-file-read-result* (list 1 (format nil "on~%"))
+          *state-file-read-result* (test-state-result "on")
           *state-file-write-arguments* nil)
     (assert-runtime-write runtime '(:reload-volume) changed
                           '(:child-complete :volume 42)
-                          "/tmp/volume.state" (format nil "42~%"))
+                          "/tmp/volume.state" (test-line "42"))
     (setf *state-file-read-result* '(0)
           *state-file-write-arguments* nil)
     (assert-runtime-write runtime '(:reload-volume) changed
                           '(:child-complete :volume 42)
-                          "/tmp/volume.state" (format nil "42~%")))
-  (setf *state-file-read-result* (list 1 (format nil "off~%")))
+                          "/tmp/volume.state" (test-line "42")))
+  (setf *state-file-read-result* (test-state-result "off"))
   (assert-runtime-write runtime '(:reload-volume) state
                         '(:child-complete :volume 0)
-                        "/tmp/volume.state" (format nil "0~%"))
-  (setf *state-file-read-result* (list 1 (format nil "055~%")))
+                        "/tmp/volume.state" (test-line "0"))
+  (setf *state-file-read-result* (test-state-result "055"))
   (assert-runtime-effect runtime '(:reload-volume) state
                          '(:child-complete)))
 
@@ -3720,12 +3796,12 @@ secret!9
          '("NET1" "10.0.1.11" "10.0.0.15" "CONNECTED"))
        (*network-status-path* nil)
        (*control-file-read-paths* nil)
-       (*state-file-read-result* (list 1 (format nil "37~%")))
+       (*state-file-read-result* (test-state-result "37"))
        (*state-file-read-results*
         (list (cons "/mnt/data/nes-deck/state/menu-brightness.state"
-                    (list 1 (format nil "60~%")))
+                    (test-state-result "60"))
               (cons "/mnt/data/nes-deck/state/terminal-keymap.state"
-                    (list 1 (format nil "cz~%")))))
+                    (test-state-result "cz"))))
        (*state-file-read-path* nil)
        (*state-file-read-paths* nil))
   (with-runtime-device-fixture ()
@@ -3839,10 +3915,8 @@ secret!9
         (declare (ignore after-shutdown))
         (assert (eq shutdown-runtime runtime))
         (assert (equal shutdown-trace '((:reap-sound))))
-        (assert (not (retrodeck:dashboard-runtime-running-p runtime)))
-        (assert (= *fbdev-close-count* 1))
-        (assert (= *evdev-close-count* 1))
-        (assert (= *evdev-controls-close-count* 1)))))))
+        (assert-dashboard-runtime-observations
+         runtime :running nil :fbdev-close 1 :evdev-close 1 :controls-close 1))))))
 
 (labels ((exercise (input times function &optional games palette)
            (let* ((state (retrodeck:dashboard-loop-initial-state games :now 90))
@@ -3859,17 +3933,17 @@ secret!9
                   (*control-file-read-results*
                     (list
                      (cons "/sys/class/backlight/display-bl/max_brightness"
-                           (format nil "20~%"))
+                           (test-line "20"))
                      (cons "/sys/class/backlight/display-bl/brightness"
-                           (format nil "12~%"))))
+                           (test-line "12"))))
                   (*state-file-read-results*
                     (list
                      (cons "/mnt/data/nes-deck/state/menu-volume.state"
-                           (list 1 (format nil "37~%")))
+                           (test-state-result "37"))
                      (cons "/mnt/data/nes-deck/state/menu-brightness.state"
-                           (list 1 (format nil "60~%")))
+                           (test-state-result "60"))
                      (cons "/mnt/data/nes-deck/state/terminal-keymap.state"
-                           (list 1 (format nil "us~%")))))
+                           (test-state-result "us"))))
                   (*projection-status* 1)
                   (*canvas-clear-status* 1)
                   (*canvas-glyph-status* 1)
@@ -3877,18 +3951,9 @@ secret!9
              (with-runtime-device-fixture ()
                (setf retrodeck::*menu-sound-input-until-ms* 0)
                (funcall function state runtime)))))
-  (let* ((manifest-path
-           (namestring
-            (truename (merge-pathnames "../deploy/menu/games.tsv"
-                                       *load-truename*))))
-         (palette-path
-           (namestring
-            (truename (merge-pathnames "../deploy/menu/palette.tsv"
-                                       *load-truename*))))
-         (credits-path
-           (namestring
-            (truename (merge-pathnames "../deploy/menu/credits.tsv"
-                                       *load-truename*))))
+  (let* ((manifest-path (test-menu-path "games.tsv" t))
+         (palette-path (test-menu-path "palette.tsv" t))
+         (credits-path (test-menu-path "credits.tsv" t))
          (*regular-file-result* nil)
          (*regular-file-results*
            (list (cons manifest-path (test-file-string manifest-path))
@@ -3925,15 +3990,10 @@ secret!9
                               "mario"))
              (assert (= (getf (getf final :settings) :volume) 37))
              (assert (= *canvas-clear-color* #x010203))
-             (assert (= *active-count* 2))
-             (assert (= *fbdev-open-count* 1))
-             (assert (= *fbdev-close-count* 1))
-             (assert (= *evdev-open-count* 1))
-             (assert (= *evdev-close-count* 1))
-             (assert (= *evdev-controls-close-count* 1))
-             (assert (not (getf runtime :initialized-p)))
-             (assert
-              (not (retrodeck:dashboard-runtime-running-p runtime))))))))
+             (assert-dashboard-runtime-observations
+              runtime :active-count 2 :fbdev-open 1 :fbdev-close 1
+              :evdev-open 1 :evdev-close 1 :controls-close 1
+              :initialized nil :running nil))))))
     (assert
      (equal (reverse *regular-file-calls*)
             (list (list manifest-path 1 65536)
@@ -3958,9 +4018,8 @@ secret!9
          (assert (eq reason :operator-stop))
          (assert (equal stops '(0)))
          (assert (null *input-poll-arguments*))
-         (assert (= *fbdev-close-count* 1))
-         (assert (= *evdev-close-count* 1))
-         (assert (= *evdev-controls-close-count* 1))))))
+         (assert-dashboard-runtime-observations
+          runtime :fbdev-close 1 :evdev-close 1 :controls-close 1)))))
   (exercise
    '(0 0 0 0 0 1) '(300 301 302)
    (lambda (state runtime)
@@ -3970,65 +4029,58 @@ secret!9
        (assert (eq returned-runtime runtime))
        (assert (equal traces '(((:reap-sound)))))
        (assert (eq reason :shutdown))
-       (assert (= *active-count* 1))
-       (assert (= *fbdev-close-count* 1))
-       (assert (= *evdev-close-count* 1))
-       (assert (= *evdev-controls-close-count* 1)))))
+       (assert-dashboard-runtime-observations
+        runtime :active-count 1 :fbdev-close 1 :evdev-close 1
+        :controls-close 1))))
   (exercise
    nil '(400 401)
    (lambda (state runtime)
      (assert-signals error
                      (retrodeck:dashboard-runtime-rehearse state runtime))
-     (assert (= *active-count* 1))
-     (assert (= *fbdev-close-count* 1))
-     (assert (= *evdev-close-count* 1))
-     (assert (= *evdev-controls-close-count* 1))
-     (assert (not (getf runtime :initialized-p)))
-     (assert (not (retrodeck:dashboard-runtime-running-p runtime)))))
+     (assert-dashboard-runtime-observations
+      runtime :active-count 1 :fbdev-close 1 :evdev-close 1
+      :controls-close 1 :initialized nil :running nil)))
   (exercise
    '(0 0 0 0 0 0) '(500)
    (lambda (state runtime)
      (with-initialized-dashboard-runtime (state runtime 500)
        (assert-signals error
                        (retrodeck:dashboard-runtime-rehearse state runtime))
-       (assert (getf runtime :initialized-p))
-       (assert (retrodeck:dashboard-runtime-running-p runtime))
-       (assert (zerop *fbdev-close-count*))
-       (assert (zerop *evdev-close-count*))
-       (assert (zerop *evdev-controls-close-count*))
+       (assert-dashboard-runtime-observations
+        runtime :initialized t :running t :fbdev-close 0 :evdev-close 0
+        :controls-close 0)
        (retrodeck:dashboard-runtime-shutdown runtime)
-       (assert (= *fbdev-close-count* 1))
-       (assert (= *evdev-close-count* 1))
-       (assert (= *evdev-controls-close-count* 1))))))
+       (assert-dashboard-runtime-observations
+        runtime :fbdev-close 1 :evdev-close 1 :controls-close 1)))))
 
-(labels ((select-presentation
-             (display &key wayland-size fbdev-size (wayland-open 1)
-                           (fbdev-open 1) adopt)
-           (let* ((runtime
-                    (retrodeck:make-dashboard-runtime
-                     :auto-presentation t :adopt-presentation adopt
-                     :wayland-display display))
-                  (*wayland-size* wayland-size)
-                  (*fbdev-size* fbdev-size)
-                  (*wayland-open-status* wayland-open)
-                  (*wayland-open-count* 0)
-                  (*wayland-open-display* nil)
-                  (*wayland-close-count* 0)
-                  (*fbdev-open-status* fbdev-open)
-                  (*fbdev-open-count* 0)
-                  (*fbdev-close-count* 0)
-                  (errors (make-string-output-stream)))
-             (let ((*error-output* errors))
-               (multiple-value-bind (opened owned)
-                   (retrodeck::dashboard-runtime-open-presentation runtime)
-                 (let ((selected (getf runtime :wayland)))
-                   (when owned
-                     (retrodeck::dashboard-runtime-close-presentation runtime))
-                   (values
-                    (list opened owned selected *wayland-open-display*
-                          *wayland-open-count* *fbdev-open-count*
-                          *wayland-close-count* *fbdev-close-count*)
-                    (get-output-stream-string errors))))))))
+(labels ((check-presentation
+             (display expected diagnostic
+              &key wayland-size fbdev-size (wayland-open 1)
+                   (fbdev-open 1) adopt)
+           (let ((runtime
+                   (retrodeck:make-dashboard-runtime
+                    :auto-presentation t :adopt-presentation adopt
+                    :wayland-display display))
+                 (errors (make-string-output-stream)))
+             (with-runtime-device-fixture
+                 (:wayland-size wayland-size :fbdev-size fbdev-size
+                  :wayland-open-status wayland-open
+                  :fbdev-open-status fbdev-open)
+               (let ((*error-output* errors))
+                 (multiple-value-bind (opened owned)
+                     (retrodeck::dashboard-runtime-open-presentation runtime)
+                   (let ((selected (getf runtime :wayland)))
+                     (when owned
+                       (retrodeck::dashboard-runtime-close-presentation runtime))
+                     (assert
+                      (equal
+                       (list opened owned selected *wayland-open-display*
+                             *wayland-open-count* *fbdev-open-count*
+                             *wayland-close-count* *fbdev-close-count*)
+                       expected))))))
+             (let ((text (get-output-stream-string errors)))
+               (assert (if diagnostic (search diagnostic text)
+                           (string= text "")))))))
   (let ((runtime (retrodeck:make-dashboard-runtime
                   :auto-presentation t :wayland-display "wayland-1")))
     (assert (getf runtime :auto-presentation))
@@ -4046,152 +4098,83 @@ secret!9
   (assert-signals error
                   (retrodeck:make-dashboard-runtime
                    :wayland nil :auto-presentation t))
-  (multiple-value-bind (result errors) (select-presentation nil)
-    (assert (equal result '(t t nil nil 0 1 0 1)))
-    (assert (string= errors "")))
-  (multiple-value-bind (result errors) (select-presentation "wayland-1")
-    (assert (equal result '(t t t "wayland-1" 1 0 1 0)))
-    (assert (string= errors "")))
-  (multiple-value-bind (result errors)
-      (select-presentation "wayland-1" :wayland-open 0)
-    (assert (equal result '(t t nil "wayland-1" 1 1 0 1)))
-    (assert (search "Wayland widget unavailable; trying fbdev" errors)))
-  (multiple-value-bind (result errors)
-      (select-presentation "wayland-1" :wayland-open 0 :fbdev-open 0)
-    (assert (equal result '(nil nil nil "wayland-1" 1 1 0 0)))
-    (assert (search "Wayland widget unavailable; trying fbdev" errors)))
-  (multiple-value-bind (result errors)
-      (select-presentation "wayland-1" :wayland-size '(1280 480) :adopt t)
-    (assert (equal result '(t t t nil 0 0 1 0)))
-    (assert (string= errors "")))
-  (multiple-value-bind (result errors)
-      (select-presentation "wayland-1" :fbdev-size '(1280 480)
-                          :wayland-open 0)
-    (assert (equal result '(t nil nil "wayland-1" 1 0 0 0)))
-    (assert (search "Wayland widget unavailable; trying fbdev" errors))))
+  (check-presentation nil '(t t nil nil 0 1 0 1) nil)
+  (check-presentation "wayland-1" '(t t t "wayland-1" 1 0 1 0) nil)
+  (check-presentation "wayland-1" '(t t nil "wayland-1" 1 1 0 1)
+                      "Wayland widget unavailable; trying fbdev" :wayland-open 0)
+  (check-presentation "wayland-1" '(nil nil nil "wayland-1" 1 1 0 0)
+                      "Wayland widget unavailable; trying fbdev"
+                      :wayland-open 0 :fbdev-open 0)
+  (check-presentation "wayland-1" '(t t t nil 0 0 1 0) nil
+                      :wayland-size '(1280 480) :adopt t)
+  (check-presentation "wayland-1" '(t nil nil "wayland-1" 1 0 0 0)
+                      "Wayland widget unavailable; trying fbdev"
+                      :fbdev-size '(1280 480) :wayland-open 0))
 
-(let* ((times '(201))
-       (state (retrodeck:dashboard-loop-initial-state nil :now 190))
-       (runtime (retrodeck:make-dashboard-runtime
-                 :wayland t :clock (lambda () (or (pop times) 999))))
-       (*input-poll-result* '(1 1 1 0 0 1))
-       (*input-poll-arguments* nil))
-  (with-runtime-device-fixture
+(let ((times '(201))
+      (*input-poll-result* '(1 1 1 0 0 1))
+      (*input-poll-arguments* nil))
+  (with-dashboard-runtime-fixture
+      (state runtime nil 190 190 ()
+       (:wayland t :clock (lambda () (or (pop times) 999))))
       (:wayland-touch-queue '((33 44 1 1 0)) :controls '((0 28 0)))
-    (with-initialized-dashboard-runtime (state runtime 190)
-      (assert (= *wayland-open-count* 1))
-      (assert (eq *wayland-open-display* :environment))
-      (let ((snapshot (retrodeck:dashboard-runtime-poll-input runtime 40)))
-        (assert (equal snapshot
-                       '(:now 201 :tick-now 201 :poll-ready-p t
-                         :touch-reports ((33 44 t t nil)) :touch-times (201)
-                         :touch-lost-p nil :gamepad-actions nil
-                         :keyboard-actions (:confirm)
-                         :rescan-controls-p nil :shutdown-p t)))
-        (assert (equal *input-poll-arguments* '(1 40)))
-        (assert (zerop *evdev-open-count*))
-        (retrodeck:dashboard-runtime-dispatch-input initialized runtime snapshot)
-        (assert (not (retrodeck:dashboard-runtime-running-p runtime)))
-        (assert (= *wayland-close-count* 1))
-        (assert (= *evdev-controls-close-count* 1))))))
+    (assert-dashboard-runtime-observations
+     runtime :wayland-open 1 :wayland-display :environment)
+    (let ((snapshot (retrodeck:dashboard-runtime-poll-input runtime 40)))
+      (assert (equal snapshot
+                     '(:now 201 :tick-now 201 :poll-ready-p t
+                       :touch-reports ((33 44 t t nil)) :touch-times (201)
+                       :touch-lost-p nil :gamepad-actions nil
+                       :keyboard-actions (:confirm)
+                       :rescan-controls-p nil :shutdown-p t)))
+      (assert (equal *input-poll-arguments* '(1 40)))
+      (assert (zerop *evdev-open-count*))
+      (retrodeck:dashboard-runtime-dispatch-input initialized runtime snapshot)
+      (assert-dashboard-runtime-observations
+       runtime :running nil :wayland-close 1 :controls-close 1))))
 
-(let* ((state (retrodeck:dashboard-loop-initial-state nil :now 10))
-       (runtime (retrodeck:make-dashboard-runtime
-                 :auto-presentation t :wayland-display "wayland-1"))
-       (diagnostics (make-string-output-stream)))
-  (with-runtime-device-fixture
-      (:wayland-open-status 0 :evdev-open-status 0)
-    (let ((*error-output* diagnostics))
-      (assert-signals error
-                      (retrodeck:dashboard-runtime-initialize state runtime 10)))
-    (assert (search "Wayland widget unavailable; trying fbdev"
-                    (get-output-stream-string diagnostics)))
-    (assert (= *wayland-open-count* 1))
-    (assert (string= *wayland-open-display* "wayland-1"))
-    (assert (zerop *wayland-close-count*))
-    (assert (not (getf runtime :wayland)))
-    (assert (= *fbdev-open-count* 1))
-    (assert (= *fbdev-close-count* 1))
-    (assert (= *evdev-open-count* 1))
-    (assert (zerop *evdev-close-count*))
-    (assert (zerop *evdev-controls-scan-count*))
-    (assert (zerop *evdev-controls-close-count*))
-    (assert (zerop *fbdev-canvas-count*))
-    (assert (null (getf runtime :layout)))
-    (assert (not (getf runtime :initialized-p)))
-    (assert (not (retrodeck:dashboard-runtime-running-p runtime)))))
+(assert-dashboard-runtime-initialization-failure
+ 10 (:auto-presentation t :wayland-display "wayland-1")
+ (:wayland-open-status 0 :evdev-open-status 0)
+ "Wayland widget unavailable; trying fbdev"
+ :wayland-open 1 :wayland-display "wayland-1" :wayland-close 0 :wayland nil
+ :fbdev-open 1 :fbdev-close 1 :evdev-open 1 :evdev-close 0
+ :controls-scan 0 :controls-close 0 :fbdev-canvas 0 :layout nil
+ :initialized nil :running nil)
 
-(let* ((state (retrodeck:dashboard-loop-initial-state nil :now 20))
-       (runtime (retrodeck:make-dashboard-runtime)))
-  (with-runtime-device-fixture (:controls-scan-result '(3 0))
-    (assert-signals error
-                  (retrodeck:dashboard-runtime-initialize state runtime 20))
-  (assert (= *fbdev-open-count* 1))
-  (assert (= *fbdev-close-count* 1))
-  (assert (= *evdev-open-count* 1))
-  (assert (= *evdev-close-count* 1))
-  (assert (= *evdev-controls-scan-count* 1))
-  (assert (= *evdev-controls-close-count* 1))
-  (assert (zerop *fbdev-canvas-count*))
-  (assert (null (getf runtime :layout)))))
+(assert-dashboard-runtime-initialization-failure
+ 20 () (:controls-scan-result '(3 0)) nil
+ :fbdev-open 1 :fbdev-close 1 :evdev-open 1 :evdev-close 1
+ :controls-scan 1 :controls-close 1 :fbdev-canvas 0 :layout nil)
 
-(let* ((state (retrodeck:dashboard-loop-initial-state nil :now 30))
-       (runtime (retrodeck:make-dashboard-runtime :wayland t)))
-  (with-runtime-device-fixture (:wayland-canvas-status 0)
-    (assert-signals error
-                    (retrodeck:dashboard-runtime-initialize state runtime 30))
-    (assert (= *wayland-canvas-count* 1))
-    (assert (= *wayland-close-count* 1))
-    (assert (zerop *evdev-open-count*))
-    (assert (zerop *evdev-close-count*))
-    (assert (= *evdev-controls-scan-count* 1))
-    (assert (= *evdev-controls-close-count* 1))
-    (assert (null (getf runtime :layout)))))
+(assert-dashboard-runtime-initialization-failure
+ 30 (:wayland t) (:wayland-canvas-status 0) nil
+ :wayland-canvas 1 :wayland-close 1 :evdev-open 0 :evdev-close 0
+ :controls-scan 1 :controls-close 1 :layout nil)
 
-(let* ((state (retrodeck:dashboard-loop-initial-state
-               nil :now 40))
-       (runtime (retrodeck:make-dashboard-runtime)))
-  (with-runtime-device-fixture
-      (:fbdev-size '(1280 480) :fbdev-canvas-status 0)
-    (assert-signals error
-                  (retrodeck:dashboard-runtime-initialize state runtime 40))
-  (assert (zerop *fbdev-open-count*))
-  (assert (zerop *fbdev-close-count*))
-  (assert (= *fbdev-canvas-count* 1))
-  (assert (= *evdev-open-count* 1))
-  (assert (= *evdev-close-count* 1))
-  (assert (= *evdev-controls-scan-count* 1))
-  (assert (= *evdev-controls-close-count* 1))
-  (assert (not (getf runtime :presentation-owned-p)))))
+(assert-dashboard-runtime-initialization-failure
+ 40 () (:fbdev-size '(1280 480) :fbdev-canvas-status 0) nil
+ :fbdev-open 0 :fbdev-close 0 :fbdev-canvas 1
+ :evdev-open 1 :evdev-close 1 :controls-scan 1 :controls-close 1
+ :presentation-owned nil)
 
-(let* ((state (retrodeck:dashboard-loop-initial-state nil :now 50))
-       (runtime (retrodeck:make-dashboard-runtime :wayland t)))
-  (with-runtime-device-fixture
-      (:wayland-size '(1280 480) :wayland-canvas-status 0)
-    (assert-signals error
-                    (retrodeck:dashboard-runtime-initialize state runtime 50))
-    (assert (= *wayland-canvas-count* 1))
-    (assert (zerop *wayland-close-count*))
-    (assert (= *evdev-controls-scan-count* 1))
-    (assert (= *evdev-controls-close-count* 1))
-    (assert (not (getf runtime :presentation-owned-p)))))
+(assert-dashboard-runtime-initialization-failure
+ 50 (:wayland t)
+ (:wayland-size '(1280 480) :wayland-canvas-status 0) nil
+ :wayland-canvas 1 :wayland-close 0
+ :controls-scan 1 :controls-close 1 :presentation-owned nil)
 
-(let* ((state (retrodeck:dashboard-loop-initial-state
-               nil :now 55))
-       (external-calls 0)
-       (runtime
-         (retrodeck:make-dashboard-runtime
-          :external-effect-handler
-          (lambda (effect current)
-            (declare (ignore current))
-            (case (first effect)
-              (:network-action '(:network-result :network nil))
-              (otherwise
-                (incf external-calls)
-                '(:external-launch))))))
-       (*network-status-path* nil))
-  (with-runtime-device-fixture (:fbdev-size '(1280 480))
-    (with-initialized-dashboard-runtime (state runtime 55)
+(let ((external-calls 0)
+      (*network-status-path* nil))
+  (with-dashboard-runtime-fixture
+      (state runtime nil 55 55 ()
+       (:external-effect-handler
+        (lambda (effect current)
+          (declare (ignore current))
+          (case (first effect)
+            (:network-action '(:network-result :network nil))
+            (otherwise (incf external-calls) '(:external-launch))))))
+      (:fbdev-size '(1280 480))
     (assert (null *network-status-path*))
     (assert (not (getf runtime :presentation-owned-p)))
     (assert (equal
@@ -4200,68 +4183,51 @@ secret!9
     (assert (= external-calls 1))
     (setf (getf runtime :external-effect-handler) nil)
     (assert-signals error
-                    (runtime-effect runtime '(:launch (:executable "/tmp/noop")) initialized))
+      (runtime-effect runtime '(:launch (:executable "/tmp/noop")) initialized))
     (retrodeck:dashboard-runtime-shutdown runtime)
-    (assert (zerop *fbdev-open-count*))
-    (assert (zerop *fbdev-close-count*))
-    (assert (= *evdev-close-count* 1))
-    (assert (= *evdev-controls-close-count* 1)))))
+    (assert-dashboard-runtime-observations
+     runtime :fbdev-open 0 :fbdev-close 0 :evdev-close 1 :controls-close 1)))
 
-(let* ((state (retrodeck:dashboard-loop-initial-state nil :now 56))
-       (runtime (retrodeck:make-dashboard-runtime :adopt-presentation t)))
-  (with-runtime-device-fixture (:fbdev-size '(1280 480))
-    (with-initialized-dashboard-runtime (state runtime 56)
-    (assert (getf runtime :presentation-owned-p))
-    (assert (retrodeck:dashboard-runtime-running-p runtime))
-    (assert-signals error
-                    (retrodeck:dashboard-runtime-initialize initialized runtime 57))
-    (assert (getf runtime :presentation-owned-p))
-    (retrodeck:dashboard-runtime-shutdown runtime)
-    (assert (zerop *fbdev-open-count*))
-    (assert (= *fbdev-close-count* 1))
-    (assert (= *evdev-close-count* 1))
-    (assert (= *evdev-controls-close-count* 1)))))
+(with-dashboard-runtime-fixture
+    (state runtime nil 56 56 () (:adopt-presentation t))
+    (:fbdev-size '(1280 480))
+  (assert-dashboard-runtime-observations
+   runtime :presentation-owned t :running t)
+  (assert-signals error
+    (retrodeck:dashboard-runtime-initialize initialized runtime 57))
+  (assert (getf runtime :presentation-owned-p))
+  (retrodeck:dashboard-runtime-shutdown runtime)
+  (assert-dashboard-runtime-observations
+   runtime :fbdev-open 0 :fbdev-close 1 :evdev-close 1 :controls-close 1))
 
-(let* ((state (retrodeck:dashboard-loop-initial-state
-               nil :now 58))
-       (runtime (retrodeck:make-dashboard-runtime :wayland t))
-       (*active-status* 1)
-       (*active-count* 0)
-       (*play-status* 2)
-       (*stop-count* 0)
-       (*finish-count* 0)
-       (retrodeck::*menu-sound-input-until-ms* 0))
-  (with-runtime-device-fixture (:wayland-size '(1280 480))
-    (with-initialized-dashboard-runtime (state runtime 58)
-      (multiple-value-bind (begun trace)
-          (retrodeck:dashboard-runtime-begin-iteration
-           initialized runtime '(:now 59))
-        (assert (equal trace '((:reap-sound))))
-        (assert (= *active-count* 1))
-        (assert (getf runtime :sound-active-p))
-        (assert (not (getf runtime :audio-owned-p)))
-        (assert (null
-                 (runtime-effect runtime '(:cue :next) begun)))
-        (assert (getf runtime :sound-active-p))
-        (assert (not (getf runtime :audio-owned-p)))
-        (runtime-effect runtime '(:stop-sound) begun)
-        (runtime-effect runtime '(:finish-sound) begun)
-        (assert (zerop *stop-count*))
-        (assert (zerop *finish-count*))
-        (assert (getf runtime :sound-active-p))
-        (retrodeck:dashboard-runtime-shutdown runtime)
-        (assert (zerop *stop-count*))
-        (assert (zerop *finish-count*))
-        (assert (zerop *wayland-close-count*))
-        (assert (= *evdev-controls-close-count* 1))))))
+(let ((*active-status* 1) (*active-count* 0) (*play-status* 2)
+      (*stop-count* 0) (*finish-count* 0)
+      (retrodeck::*menu-sound-input-until-ms* 0))
+  (with-dashboard-runtime-fixture
+      (state runtime nil 58 58 () (:wayland t))
+      (:wayland-size '(1280 480))
+    (multiple-value-bind (begun trace)
+        (retrodeck:dashboard-runtime-begin-iteration
+         initialized runtime '(:now 59))
+      (assert (equal trace '((:reap-sound))))
+      (assert-dashboard-runtime-observations
+       runtime :active-count 1 :sound-active t :audio-owned nil)
+      (assert (null (runtime-effect runtime '(:cue :next) begun)))
+      (assert-dashboard-runtime-observations
+       runtime :sound-active t :audio-owned nil)
+      (runtime-effect runtime '(:stop-sound) begun)
+      (runtime-effect runtime '(:finish-sound) begun)
+      (assert-dashboard-runtime-observations
+       runtime :stop-count 0 :finish-count 0 :sound-active t)
+      (retrodeck:dashboard-runtime-shutdown runtime)
+      (assert-dashboard-runtime-observations
+       runtime :stop-count 0 :finish-count 0
+       :wayland-close 0 :controls-close 1))))
 
-(let* ((state (retrodeck:dashboard-loop-initial-state
-               nil :now 0 :touch-connected-p nil))
-       (runtime (retrodeck:make-dashboard-runtime))
-       (*active-status* 0)
-       (retrodeck::*menu-sound-input-until-ms* 0))
-  (with-runtime-device-fixture ()
-    (with-initialized-dashboard-runtime (state runtime 5000)
+(let ((*active-status* 0)
+      (retrodeck::*menu-sound-input-until-ms* 0))
+  (with-dashboard-runtime-fixture
+      (state runtime nil 0 5000 (:touch-connected-p nil) ()) ()
     (assert (getf initialized :touch-connected-p))
     (assert (= *evdev-open-count* 1))
     (multiple-value-bind (begun trace)
@@ -4270,7 +4236,7 @@ secret!9
       (assert (getf begun :touch-connected-p))
       (assert (string= (getf (getf begun :dashboard) :status) ""))
       (assert (= *evdev-open-count* 1))
-      (assert (equal trace '((:reap-sound))))))))
+      (assert (equal trace '((:reap-sound)))))))
 
 (let* ((games (runtime-test-games))
        (startup-network '(:ssid "OLD" :wlan-ipv4 "10.0.0.1"
@@ -4323,31 +4289,23 @@ secret!9
                      '(:network-action :render :present :touch-close
                        :render :present)))))))
 
-(let* ((state (retrodeck:dashboard-loop-initial-state nil :now 60))
-       (runtime (retrodeck:make-dashboard-runtime :wayland t)))
-  (with-runtime-device-fixture (:wayland-size '(1280 480))
-    (with-initialized-dashboard-runtime (state runtime 60)
-      (assert (not (getf runtime :presentation-owned-p)))
-      (assert (getf runtime :controls-owned-p))
-      (retrodeck:dashboard-runtime-shutdown runtime)
-      (assert (zerop *wayland-close-count*))
-      (assert (= *wayland-canvas-count* 1))
-      (assert (= *evdev-controls-scan-count* 1))
-      (assert (= *evdev-controls-close-count* 1))
-      (assert (not (retrodeck:dashboard-runtime-running-p runtime)))
-      (retrodeck:dashboard-runtime-shutdown runtime)
-      (assert (zerop *wayland-close-count*))
-      (assert (= *evdev-controls-close-count* 1)))))
+(with-dashboard-runtime-fixture
+    (state runtime nil 60 60 () (:wayland t))
+    (:wayland-size '(1280 480))
+  (assert-dashboard-runtime-observations
+   runtime :presentation-owned nil :controls-owned t)
+  (retrodeck:dashboard-runtime-shutdown runtime)
+  (assert-dashboard-runtime-observations
+   runtime :wayland-close 0 :wayland-canvas 1
+   :controls-scan 1 :controls-close 1 :running nil)
+  (retrodeck:dashboard-runtime-shutdown runtime)
+  (assert-dashboard-runtime-observations
+   runtime :wayland-close 0 :controls-close 1))
 
-(let* ((games (runtime-test-games t))
-       (state (retrodeck:dashboard-loop-initial-state games :now 70))
-       (runtime (retrodeck:make-dashboard-runtime))
-       (*active-status* 0)
-       (*play-status* 1)
-       (*stop-count* 0)
-       (retrodeck::*menu-sound-input-until-ms* 0))
-  (with-runtime-device-fixture ()
-    (with-initialized-dashboard-runtime (state runtime 70)
+(let ((*active-status* 0) (*play-status* 1) (*stop-count* 0)
+      (retrodeck::*menu-sound-input-until-ms* 0))
+  (with-dashboard-runtime-fixture
+      (state runtime (runtime-test-games t) 70 70 () ()) ()
     (multiple-value-bind (moved ignored-trace)
         (retrodeck:dashboard-runtime-dispatch-input
          initialized runtime
@@ -4360,83 +4318,57 @@ secret!9
           (retrodeck:dashboard-runtime-begin-iteration
            moved runtime '(:now 72))
         (assert (equal reap-trace '((:reap-sound))))
-        (assert (not (getf runtime :sound-active-p)))
-        (assert (getf runtime :audio-owned-p))
+        (assert-dashboard-runtime-observations
+         runtime :sound-active nil :audio-owned t)
         (multiple-value-bind (stopped trace)
             (retrodeck:dashboard-runtime-dispatch-input
              reaped runtime '(:now 73 :poll-ready-p nil :shutdown-p t))
           (declare (ignore stopped))
           (assert (null trace))
-          (assert (= *stop-count* 1))
           (assert (zerop retrodeck::*menu-sound-input-until-ms*))
-          (assert (= *evdev-controls-close-count* 1))
-          (assert (= *evdev-close-count* 1))
-          (assert (= *fbdev-close-count* 1))
-          (assert (null (getf runtime :layout)))
-          (assert (not (retrodeck:dashboard-runtime-running-p runtime)))
+          (assert-dashboard-runtime-observations
+           runtime :stop-count 1 :controls-close 1 :evdev-close 1
+           :fbdev-close 1 :layout nil :running nil)
           (retrodeck:dashboard-runtime-shutdown runtime)
-          (assert (= *stop-count* 1))
-          (assert (= *evdev-controls-close-count* 1))
-          (assert (= *evdev-close-count* 1))
-          (assert (= *fbdev-close-count* 1))))))))
+          (assert-dashboard-runtime-observations
+           runtime :stop-count 1 :controls-close 1
+           :evdev-close 1 :fbdev-close 1))))))
 
-(let* ((games (runtime-test-games))
-       (runtime
-         (retrodeck:make-dashboard-runtime
-          :external-effect-handler
-          (lambda (effect current)
-            (declare (ignore current))
-            (case (first effect)
-              (:network-action '(:network-result :network nil))
-              (:launch
-               '(:child-returned :shutdown t
-                 :result (:started t :exited-for-touch nil
-                          :exit-code nil :signal nil :error nil)))
-              (otherwise (error "Unexpected external effect ~S" effect))))))
-       (state (retrodeck:dashboard-loop-initial-state games :now 80))
-       (*active-status* 0)
-       (*play-status* 1)
-       (*stop-count* 0)
-       (*finish-count* 0)
-       (retrodeck::*menu-sound-input-until-ms* 0))
-  (with-runtime-device-fixture ()
-    (with-initialized-dashboard-runtime (state runtime 80)
+(let ((*active-status* 0) (*play-status* 1)
+      (*stop-count* 0) (*finish-count* 0)
+      (retrodeck::*menu-sound-input-until-ms* 0))
+  (with-dashboard-runtime-fixture
+      (state runtime (runtime-test-games) 80 80 ()
+       (:external-effect-handler
+        (lambda (effect current)
+          (declare (ignore current))
+          (case (first effect)
+            (:network-action '(:network-result :network nil))
+            (:launch
+             '(:child-returned :shutdown t
+               :result (:started t :exited-for-touch nil
+                        :exit-code nil :signal nil :error nil)))
+            (otherwise (error "Unexpected external effect ~S" effect)))))) ()
     (multiple-value-bind (stopped trace)
         (retrodeck:dashboard-runtime-dispatch-input
          initialized runtime
          '(:gamepad-actions nil :keyboard-actions (:confirm)
            :touch-reports nil :now 81))
       (assert (null (getf stopped :active-launch)))
-      (assert (not (retrodeck:dashboard-runtime-running-p runtime)))
-      (assert (= *finish-count* 1))
-      (assert (zerop *stop-count*))
-      (assert (= *evdev-controls-scan-count* 1))
-      (assert (= *evdev-controls-close-count* 1))
-      (assert (= *evdev-close-count* 1))
-      (assert (= *fbdev-close-count* 1))
+      (assert-dashboard-runtime-observations
+       runtime :running nil :finish-count 1 :stop-count 0
+       :controls-scan 1 :controls-close 1 :evdev-close 1 :fbdev-close 1)
       (assert (equal (mapcar #'first trace)
                      '(:discard-touch :cue :render :present :finish-sound
-                       :close-controls :launch :stop-loop)))))))
+                       :close-controls :launch :stop-loop))))))
 
-(let* ((games (runtime-test-games t))
-       (state (retrodeck:dashboard-loop-initial-state games :now 100))
-       (runtime (retrodeck:make-dashboard-runtime
-                 :volume-state "/tmp/volume.state")))
-  (setf *active-status* 1
-        *active-count* 0
-        *play-status* 1
-        *evdev-controls-scan-count* 0
-        *evdev-open-count* 0
-        *fbdev-open-count* 0
-        *fbdev-canvas-count* 0
-        retrodeck::*menu-sound-input-until-ms* 0)
-  (multiple-value-bind (initialized returned-runtime)
-      (retrodeck:dashboard-runtime-initialize state runtime 100)
-    (assert (eq returned-runtime runtime))
-    (assert (= *fbdev-open-count* 1))
-    (assert (= *evdev-open-count* 1))
-    (assert (= *evdev-controls-scan-count* 1))
-    (assert (= *fbdev-canvas-count* 1))
+(let ((*active-status* 1) (*active-count* 0) (*play-status* 1)
+      (retrodeck::*menu-sound-input-until-ms* 0))
+  (with-dashboard-runtime-fixture
+      (state runtime (runtime-test-games t) 100 100 ()
+       (:volume-state "/tmp/volume.state")) ()
+    (assert-dashboard-runtime-observations
+     runtime :fbdev-open 1 :evdev-open 1 :controls-scan 1 :fbdev-canvas 1)
     (assert (= (getf initialized :last-control-scan-ms) 100))
     (multiple-value-bind (begun begin-trace)
         (retrodeck:dashboard-runtime-begin-iteration
@@ -4459,8 +4391,8 @@ secret!9
              '(:gamepad-actions nil :keyboard-actions (:right)
                :touch-reports nil :rescan-controls-p t :now 152))
           (assert (= (getf (getf moved :dashboard) :game-position) 1))
-          (assert (= *active-count* 1))
-          (assert (= *fbdev-canvas-count* 2))
+          (assert-dashboard-runtime-observations
+           runtime :active-count 1 :fbdev-canvas 2)
           (assert (equal move-trace
                          '((:discard-touch) (:render) (:present)
                            (:cue :next))))
@@ -4469,48 +4401,36 @@ secret!9
               (retrodeck:dashboard-runtime-begin-iteration
                moved runtime '(:now 153))
             (assert (= (getf rescanned :last-control-scan-ms) 153))
-            (assert (= *active-count* 2))
-            (assert (= *evdev-controls-scan-count* 2))
+            (assert-dashboard-runtime-observations
+             runtime :active-count 2 :controls-scan 2)
             (assert (equal rescan-trace
                            '((:reap-sound)
-                             (:scan-controls :force t)))))))))
-  (setf *active-status* 0
-        retrodeck::*menu-sound-input-until-ms* 0))
+                             (:scan-controls :force t))))))))
+    (setf *active-status* 0
+          retrodeck::*menu-sound-input-until-ms* 0)))
 
-(let* ((games (runtime-test-games))
-       (external-trace nil)
-       (clock-now 2002)
-       (runtime
-         (retrodeck:make-dashboard-runtime
-          :volume-state "/tmp/volume.state"
-          :clock (lambda () clock-now)
-          :external-effect-handler
-          (lambda (effect current)
-            (declare (ignore current))
-            (case (first effect)
-              (:network-action '(:network-result :network nil))
-              (:launch
-               (push :launch external-trace)
-               (setf clock-now 5000)
-               '(:child-returned
-                 :result (:started t :exited-for-touch nil
-                          :exit-code 0 :signal nil :error nil)))
-              (:reload-volume
-               (push :reload-volume external-trace)
-               '(:child-complete :volume 47))
-              (otherwise (error "Unexpected external effect ~S" effect))))))
-       (state (retrodeck:dashboard-loop-initial-state games :now 2000)))
-  (setf *active-status* 0
-        *active-count* 0
-        *play-status* 1
-        *finish-count* 0
-        *evdev-controls-close-count* 0
-        *evdev-controls-scan-count* 0
-        *evdev-open-count* 0
-        *fbdev-open-count* 0
-        *fbdev-canvas-count* 0
-        retrodeck::*menu-sound-input-until-ms* 0)
-  (with-initialized-dashboard-runtime (state runtime 2000)
+(let ((external-trace nil) (clock-now 2002)
+      (*active-status* 0) (*active-count* 0) (*play-status* 1)
+      (*finish-count* 0) (retrodeck::*menu-sound-input-until-ms* 0))
+  (with-dashboard-runtime-fixture
+      (state runtime (runtime-test-games) 2000 2000 ()
+       (:volume-state "/tmp/volume.state"
+        :clock (lambda () clock-now)
+        :external-effect-handler
+        (lambda (effect current)
+          (declare (ignore current))
+          (case (first effect)
+            (:network-action '(:network-result :network nil))
+            (:launch
+             (push :launch external-trace)
+             (setf clock-now 5000)
+             '(:child-returned
+               :result (:started t :exited-for-touch nil
+                        :exit-code 0 :signal nil :error nil)))
+            (:reload-volume
+             (push :reload-volume external-trace)
+             '(:child-complete :volume 47))
+            (otherwise (error "Unexpected external effect ~S" effect)))))) ()
     (multiple-value-bind (begun begin-trace)
         (retrodeck:dashboard-runtime-begin-iteration
          initialized runtime '(:now 2001))
@@ -4525,13 +4445,10 @@ secret!9
         (assert (= (getf (getf finished :settings) :volume) 47))
         (assert (string= (getf (getf finished :dashboard) :status)
                          "ALPHA EXITED"))
-        (assert (equal (nreverse external-trace)
-                       '(:launch :reload-volume)))
-        (assert (= *finish-count* 1))
-        (assert (= *evdev-controls-close-count* 1))
-        (assert (= *evdev-controls-scan-count* 2))
-        (assert (= *fbdev-open-count* 2))
-        (assert (= *fbdev-canvas-count* 3))
+        (assert (equal (nreverse external-trace) '(:launch :reload-volume)))
+        (assert-dashboard-runtime-observations
+         runtime :finish-count 1 :controls-close 1 :controls-scan 2
+         :fbdev-open 2 :fbdev-canvas 3)
         (assert (not (retrodeck:dashboard-runtime-controller-quarantined-p
                       runtime 2002)))
         (assert (equal (mapcar #'first trace)
@@ -4544,8 +4461,8 @@ secret!9
              finished runtime '(:now 5001))
           (assert (= (getf post-launch :last-control-scan-ms) 5000))
           (assert (equal post-trace '((:reap-sound))))
-          (assert (= *evdev-controls-scan-count* 2))))))
-  (setf retrodeck::*menu-sound-input-until-ms* 0))
+          (assert (= *evdev-controls-scan-count* 2)))))
+    (setf retrodeck::*menu-sound-input-until-ms* 0)))
 
 (let* ((games (runtime-test-games))
        (external-trace nil)
@@ -4589,16 +4506,10 @@ secret!9
                          :cue :render :present))))))
   (setf *play-status* 1))
 
-(let* ((games (runtime-test-games))
-       (runtime (retrodeck:make-dashboard-runtime))
-       (state (retrodeck:dashboard-loop-initial-state games :now 4000)))
-  (setf *active-status* 0
-        *active-count* 0
-        *evdev-open-count* 0
-        *evdev-close-count* 0
-        *fbdev-canvas-count* 0
-        retrodeck::*menu-sound-input-until-ms* 0)
-  (with-initialized-dashboard-runtime (state runtime 4000)
+(let ((*active-status* 0) (*active-count* 0)
+      (retrodeck::*menu-sound-input-until-ms* 0))
+  (with-dashboard-runtime-fixture
+      (state runtime (runtime-test-games) 4000 4000 () ()) ()
     (multiple-value-bind (lost lost-trace)
         (retrodeck:dashboard-runtime-dispatch-input
          initialized runtime

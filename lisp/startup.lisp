@@ -12,6 +12,7 @@
            #:evdev-controls-close
            #:evdev-controls-dispatch
            #:evdev-controls-scan
+           #:evdev-gamepads-scan
            #:evdev-next-control
            #:evdev-next-touch
            #:evdev-touch-close
@@ -27,6 +28,7 @@
            #:monotonic-nanoseconds-words
            #:network-status
            #:play-tone-sequence
+           #:process-shutdown-p
            #:play-tones
            #:raster-clear
            #:raster-load-cover
@@ -47,6 +49,7 @@
            #:wayland-next-touch
            #:wayland-open-widget
            #:wayland-open-widget-at
+           #:wayland-open-gameplay-at
            #:wayland-present-canvas
            #:wayland-present-solid
            #:wayland-shutdown-p
@@ -67,6 +70,7 @@
                 #:evdev-controls-close
                 #:evdev-controls-dispatch
                 #:evdev-controls-scan
+                #:evdev-gamepads-scan
                 #:evdev-next-control
                 #:evdev-next-touch
                 #:evdev-touch-close
@@ -82,6 +86,7 @@
                 #:monotonic-nanoseconds-words
                 #:network-status
                 #:play-tone-sequence
+                #:process-shutdown-p
                 #:play-tones
                 #:read-control-file
                 #:read-regular-file
@@ -99,6 +104,7 @@
                 #:wayland-next-touch
                 #:wayland-open-widget
                 #:wayland-open-widget-at
+                #:wayland-open-gameplay-at
                 #:wayland-present-canvas
                 #:wayland-present-solid
                 #:wayland-shutdown-p
@@ -234,6 +240,7 @@
            #:load-text-mask
            #:main
            #:make-dashboard-runtime
+           #:make-ten-seconds-runtime
            #:make-project-credits-crawl
            #:menu-sound-blocks-input-p
            #:menu-sound-duration-ms
@@ -296,10 +303,14 @@
            #:wifi-target-at
            #:wifi-touch-transition
            #:wifi-valid-text-p
+           #:ten-seconds-candidate-rehearse
            #:ten-seconds-cue-notes
            #:ten-seconds-format
            #:ten-seconds-initial-state
            #:ten-seconds-reduce
+           #:ten-seconds-runtime-initialize
+           #:ten-seconds-runtime-run-iteration
+           #:ten-seconds-runtime-shutdown
            #:ten-seconds-touch-event
            #:stroke-canvas-rect
            #:wayland-shutdown-requested-p
@@ -308,7 +319,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 20)
+(defconstant +native-abi-version+ 21)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -561,6 +572,15 @@
         (error "Invalid native evdev control counts ~S" counts))
       (list :gamepads (first counts) :keyboards (second counts)))))
 
+(defun scan-evdev-gamepads ()
+  (let ((result (evdev-gamepads-scan)))
+    (unless (and (listp result) (= (length result) 2)
+                 (typep (first result) '(integer -1 2))
+                 (typep (second result) '(or null string))
+                 (eq (minusp (first result)) (not (null (second result)))))
+      (error "Invalid native evdev gamepad scan result ~S" result))
+    (values (max 0 (first result)) (second result))))
+
 (defun close-evdev-controls ()
   (evdev-controls-close)
   t)
@@ -639,6 +659,10 @@
   (check-type display string)
   (= (wayland-open-widget-at (coerce display 'base-string)) 1))
 
+(defun open-wayland-gameplay-at (display)
+  (check-type display string)
+  (= (wayland-open-gameplay-at (coerce display 'base-string)) 1))
+
 (defun close-wayland ()
   (wayland-close)
   t)
@@ -674,13 +698,13 @@
 
 (let ((startup *load-truename*))
   (load (merge-pathnames "ui.lisp" startup) :verbose nil :print nil)
-  (load (merge-pathnames "timer.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "policy.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "process.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "settings.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "wifi.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "credits.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "dashboard.lisp" startup) :verbose nil :print nil)
+  (load (merge-pathnames "timer.lisp" startup) :verbose nil :print nil)
   (let ((local (merge-pathnames "local.lisp" startup)))
     (when (probe-file local)
       (load local :verbose nil :print nil))))

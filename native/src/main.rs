@@ -44,7 +44,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 20;
+const ABI_VERSION: ClFixnum = 21;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -235,6 +235,10 @@ impl Ecl {
         for (name, function) in [
             ("AUDIO-ACTIVE-P", native_audio_active as EclFixedFunction),
             (
+                "PROCESS-SHUTDOWN-P",
+                native_process_shutdown as EclFixedFunction,
+            ),
+            (
                 "CANVAS-RGB565-HASH-WORDS",
                 native_canvas_rgb565_hash_words as EclFixedFunction,
             ),
@@ -252,6 +256,10 @@ impl Ecl {
             (
                 "EVDEV-CONTROLS-SCAN",
                 native_evdev_controls_scan as EclFixedFunction,
+            ),
+            (
+                "EVDEV-GAMEPADS-SCAN",
+                native_evdev_gamepads_scan as EclFixedFunction,
             ),
             (
                 "EVDEV-CONTROLS-CLOSE",
@@ -332,6 +340,10 @@ impl Ecl {
             (
                 "WAYLAND-OPEN-WIDGET-AT",
                 native_wayland_open_widget_at as EclOneArgumentFunction,
+            ),
+            (
+                "WAYLAND-OPEN-GAMEPLAY-AT",
+                native_wayland_open_gameplay_at as EclOneArgumentFunction,
             ),
             (
                 "NETWORK-STATUS",
@@ -517,6 +529,10 @@ fn native_play_outcome(result: Result<audio::PlayOutcome, String>) -> ClObject {
 
 unsafe extern "C" fn native_audio_active() -> ClObject {
     unsafe { ecl_make_integer(if audio::active() { 1 } else { 0 }) }
+}
+
+unsafe extern "C" fn native_process_shutdown() -> ClObject {
+    unsafe { ecl_make_integer(boolean_fixnum(process::shutdown_requested())) }
 }
 
 unsafe extern "C" fn native_stop_audio() -> ClObject {
@@ -833,6 +849,18 @@ unsafe extern "C" fn native_evdev_controls_scan() -> ClObject {
     }
 }
 
+unsafe extern "C" fn native_evdev_gamepads_scan() -> ClObject {
+    match controls::scan_gamepads() {
+        Ok(gamepads) => {
+            make_object_list(&[unsafe { ecl_make_integer(gamepads as ClFixnum) }, ECL_NIL])
+        }
+        Err(error) => make_object_list(&[
+            unsafe { ecl_make_integer(-1) },
+            make_base_string(error.as_bytes(), "gamepad scan error"),
+        ]),
+    }
+}
+
 unsafe extern "C" fn native_evdev_controls_close() -> ClObject {
     controls::close();
     unsafe { ecl_make_integer(0) }
@@ -920,6 +948,14 @@ unsafe extern "C" fn native_wayland_open_widget_at(display: ClObject) -> ClObjec
     let result = (|| {
         let display = decode_path(display, "Wayland display")?;
         wayland::open_widget_at(&display)
+    })();
+    native_status(result)
+}
+
+unsafe extern "C" fn native_wayland_open_gameplay_at(display: ClObject) -> ClObject {
+    let result = (|| {
+        let display = decode_path(display, "Wayland display")?;
+        wayland::open_gameplay_at(&display)
     })();
     native_status(result)
 }

@@ -95,8 +95,8 @@ argument it loads `/mnt/data/nes-deck/lisp/startup.lisp`; one alternate startup
 path may be supplied for development and smoke tests.
 
 `lisp/startup.lisp` validates the native ABI, then loads `ui.lisp`,
-`timer.lisp`, `policy.lisp`, `process.lisp`, `settings.lisp`, `wifi.lisp`,
-`credits.lisp`, and `dashboard.lisp`. These editable files own bitmap UI and
+`policy.lisp`, `process.lisp`, `settings.lisp`, `wifi.lisp`, `credits.lisp`,
+`dashboard.lisp`, and `timer.lisp`. These editable files own bitmap UI and
 10 Seconds composition and policy, systems, labels, colors, applications,
 exact game/reboot/terminal executable routes,
 ordered arguments and environment, launch/return statuses and sequencing,
@@ -111,17 +111,22 @@ overrides without a Rust
 rebuild. Deployment updates the nine standard Lisp files but leaves an
 existing `local.lisp` untouched.
 
-Native ABI 20 retains the widget-side Wayland and direct-fbdev primitives and
-adds one exact-display Wayland open plus only narrow canvas, raster,
-projected-text, evdev, regular-file, network, state-file, control-file,
-helper-process, audio, managed-child, terminal-process, aggregate-input, and
-monotonic-clock mechanisms for Lisp to orchestrate. Audio now accepts a bounded
+Native ABI 21 retains the widget-side Wayland and direct-fbdev primitives and
+adds exact-display widget and gameplay Wayland opens plus only narrow canvas,
+raster, projected-text, evdev, regular-file, network, state-file, control-file,
+helper-process, audio, managed-child, terminal-process, aggregate-input,
+process-shutdown, and monotonic-clock mechanisms for Lisp to orchestrate. Audio
+now accepts a bounded
 one-to-three-note Lisp sequence without changing the existing two-note menu
 primitive, and the clock returns `CLOCK_MONOTONIC` nanoseconds as four portable
 16-bit words for Lisp reconstruction. The exact-display primitive connects an
 absolute socket path directly or a relative name below absolute
 `XDG_RUNTIME_DIR` through `wayland-client`; the existing environment-based open
-remains unchanged for explicit mode. Lisp snapshots the policy-named
+remains unchanged for explicit mode. The gameplay open mirrors the original
+wlr-layer-shell pair: one anchored exclusive black background and one centered
+1248x448 non-exclusive game layer, both input-transparent. Canvas colors take
+the original RGB565 quantization path before XRGB presentation. Lisp snapshots
+the policy-named
 `WAYLAND_DISPLAY`, owns Wayland-first selection and fbdev fallback, and tracks
 adoption and cleanup ownership. The bounded state-file mechanism distinguishes
 missing files from exact bytes and performs private atomic replacement; Lisp
@@ -153,8 +158,10 @@ path, refresh timing, result shape, and rendering. One native
 input poll waits on the selected Wayland or fbdev touchscreen first, then the
 stable gamepad and keyboard descriptors, with one timeout. Ready controls are
 read before touch; the fixed result reports queue counts, touch loss, control
-rescan, and Wayland shutdown while Lisp retains mapping, arbitration, timing,
-and audio quarantine. The control boundary keeps at most two exact THEGamepads
+rescan, Wayland shutdown, and process-signal shutdown while Lisp retains
+mapping, arbitration, timing, and audio quarantine. A gamepad-only scan lets the
+10 Seconds policy retain the original THEGamepad boundary without opening
+keyboards. The control boundary otherwise keeps at most two exact THEGamepads
 and four complete keyboards, decodes resynchronization and rising edges, and
 returns raw reports for Lisp policy. The specialized terminal primitive uses the
 same supervisor, accepts the exact keymap and mode boundary, restores console

@@ -120,3 +120,197 @@
                 (:running "TAP OR A TO STOP")
                 (:stopped "TAP OR A FOR ANOTHER TRY"))
           2 cream))))
+
+(defun ten-seconds-runtime-volume (&optional (text nil supplied-p))
+  (handler-case
+      (if supplied-p (parse-dashboard-inherited-volume text)
+          (dashboard-inherited-volume))
+    (error ()
+      (format *error-output*
+              "ten-seconds-deck: volume must be an integer from 0 through 100; game cues disabled~%")
+      (finish-output *error-output*)
+      0)))
+
+(defun ten-seconds-wayland-requested-p (presentation display)
+  (check-type presentation (or null string))
+  (check-type display (or null string))
+  (and (stringp presentation) (string= presentation "layer-shell")
+       (stringp display) (plusp (length display))))
+
+(defun make-ten-seconds-runtime
+    (&key
+       (presentation (dashboard-environment-value "RETRO_DECK_PRESENTATION"))
+       (wayland-display
+         (dashboard-environment-value *dashboard-wayland-display-environment*))
+       (clock #'monotonic-nanoseconds))
+  (check-type clock function)
+  (let* ((wayland (ten-seconds-wayland-requested-p presentation wayland-display))
+         (runtime (make-dashboard-runtime :wayland wayland
+                                          :wayland-display wayland-display
+                                          :default-volume 42 :clock clock)))
+    (setf (getf runtime :volume) nil
+          (getf runtime :dirty) t)
+    runtime))
+
+(defmacro with-ten-seconds-cleanup ((cleanup) &body body)
+  `(let ((failure nil) (results nil))
+     (unwind-protect
+         (handler-case (setf results (multiple-value-list (progn ,@body)))
+           (error (condition) (setf failure condition)))
+       (handler-case ,cleanup
+         (error (condition) (unless failure (setf failure condition)))))
+     (if failure (error failure) (values-list results))))
+
+(defun ten-seconds-runtime-shutdown (runtime)
+  (unwind-protect
+      (dashboard-runtime-shutdown runtime #'stop-audio)
+    (setf (getf runtime :dirty) nil))
+  runtime)
+
+(defun ten-seconds-runtime-present (runtime)
+  (when (and (getf runtime :wayland)
+             (not (getf runtime :presentation-owned-p)))
+    (unless (open-wayland-gameplay-at (getf runtime :wayland-display))
+      (return-from ten-seconds-runtime-present nil))
+    (setf (getf runtime :presentation-owned-p) t))
+  (dashboard-runtime-present runtime))
+
+(defun ten-seconds-runtime-initialize (runtime)
+  (check-type runtime list)
+  (when (getf runtime :initialized-p)
+    (error "10 Seconds runtime is already initialized"))
+  (let ((completed nil))
+    (with-ten-seconds-cleanup
+        ((unless completed (ten-seconds-runtime-shutdown runtime)))
+      (unless (getf runtime :wayland)
+        (unless (open-fbdev)
+          (error "10 Seconds presentation did not open"))
+        (setf (getf runtime :presentation-owned-p) t))
+      (unless (open-evdev-touch)
+        (error "10 Seconds touchscreen did not open"))
+      (setf (getf runtime :touch-owned-p) t
+            (getf runtime :controls-owned-p) t)
+      (multiple-value-bind (gamepads error) (scan-evdev-gamepads)
+        (when error
+          (format *error-output*
+                  "ten-seconds-deck: controller input unavailable: ~A~%"
+                  error))
+        (format *error-output*
+                "ten-seconds-deck: ~D THEGamepad controller(s) ready; physical A starts and stops the timer~%"
+                gamepads)
+        (finish-output *error-output*))
+      (setf (getf runtime :volume) (ten-seconds-runtime-volume)
+            (getf runtime :dirty) t
+            (getf runtime :initialized-p) t
+            (getf runtime :running) t
+            completed t)
+      runtime)))
+
+(defun ten-seconds-runtime-run-iteration (state runtime)
+  (unless (and (getf runtime :initialized-p) (getf runtime :running))
+    (error "10 Seconds runtime is not running"))
+  (when (= (process-shutdown-p) 1)
+    (setf (getf runtime :running) nil)
+    (return-from ten-seconds-runtime-run-iteration
+      (values state runtime '((:shutdown)))))
+  (let ((current state) (tick-now 0) (trace nil))
+    (labels ((record (item) (push item trace))
+             (effect (item)
+               (case (first item)
+                 (:exit (setf (getf runtime :running) nil))
+                 (:result
+                  (format *error-output* "ten-seconds-deck: result=~A input=~(~A~)~%"
+                          (second item) (getf (cddr item) :input))
+                  (finish-output *error-output*))
+                 (:cue
+                  (when (plusp (getf runtime :volume))
+                    (when (= (play-tone-sequence
+                              (ten-seconds-cue-notes (second item))
+                              (getf runtime :volume)) 1)
+                      (setf (getf runtime :audio-owned-p) t))))
+                 (:redraw (setf (getf runtime :dirty) t))
+                 (otherwise (error "Unknown 10 Seconds effect ~S" item)))
+               (record item))
+             (dispatch (event now)
+               (setf (getf runtime :now) now)
+               (record (list event :now now))
+               (multiple-value-bind (next effects)
+                   (ten-seconds-reduce current event now)
+                 (setf current next)
+                 (mapc #'effect effects))))
+      (unless (= (audio-active-p) 1)
+        (setf (getf runtime :audio-owned-p) nil))
+      (record '(:reap-sound))
+      (setf tick-now (dashboard-runtime-read-clock runtime))
+      (dispatch :tick tick-now)
+      (when (getf runtime :dirty)
+        (unless (render-ten-seconds current) (error "10 Seconds render failed"))
+        (record '(:render))
+        (unless (ten-seconds-runtime-present runtime)
+          (error "10 Seconds presentation failed"))
+        (record '(:present))
+        (setf (getf runtime :dirty) nil))
+      (let* ((poll (or (poll-native-input nil 8)
+                       (error "10 Seconds native input poll failed")))
+             (control-count (getf poll :control-count))
+             (touch-count (getf poll :touch-count))
+             (controller-a nil))
+        (record '(:poll :wayland nil :timeout 8))
+        (dotimes (index control-count)
+          (let ((report (or (next-evdev-control)
+                            (error "10 Seconds control queue ended early"))))
+            (when (and (eq (getf report :kind) :gamepad)
+                       (logtest #x004 (getf report :edges)))
+              (setf controller-a t))))
+        (let ((touches
+                (loop repeat touch-count
+                      collect (or (next-evdev-touch)
+                                  (error "10 Seconds touch queue ended early")))))
+          (record (list :controls control-count))
+          (record (list :touches touch-count))
+          (cond
+            ((getf poll :touch-lost-p)
+             (error "10 Seconds touchscreen disconnected"))
+            ((getf poll :shutdown-p)
+             (setf (getf runtime :running) nil)
+             (record '(:shutdown)))
+            ((some (lambda (report)
+                     (and (fourth report)
+                          (eq (ten-seconds-touch-event
+                               (first report) (second report)) :back)))
+                   touches)
+             (dispatch :back tick-now))
+            (controller-a
+             (dispatch :controller-a (dashboard-runtime-read-clock runtime)))
+            (t
+             (dolist (report touches)
+               (when (fourth report)
+                 (dispatch :touch (dashboard-runtime-read-clock runtime))))))))
+      (values current runtime (nreverse trace)))))
+
+(defun ten-seconds-candidate-rehearse
+    (state runtime &key (iteration-limit 1) stop-predicate)
+  "Run an opt-in bounded 10 Seconds candidate and return iteration traces."
+  (check-type iteration-limit (integer 0 *))
+  (when stop-predicate (check-type stop-predicate function))
+  (when (getf runtime :initialized-p)
+    (error "10 Seconds runtime is already initialized"))
+  (let ((current state) (iteration 0) (traces nil) (reason nil) (owned nil))
+    (with-ten-seconds-cleanup ((when owned (ten-seconds-runtime-shutdown runtime)))
+      (ten-seconds-runtime-initialize runtime)
+      (setf owned t)
+      (loop
+        (cond
+          ((not (getf runtime :running)) (setf reason :shutdown) (return))
+          ((>= iteration iteration-limit) (setf reason :limit) (return))
+          ((and stop-predicate
+                (funcall stop-predicate current runtime iteration))
+           (setf reason :operator-stop)
+           (return)))
+        (multiple-value-bind (next ignored-runtime trace)
+            (ten-seconds-runtime-run-iteration current runtime)
+          (declare (ignore ignored-runtime))
+          (setf current next)
+          (push trace traces)
+          (incf iteration)))
+      (values current runtime (nreverse traces) reason))))

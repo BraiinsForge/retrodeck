@@ -1431,26 +1431,22 @@
       (close-wayland)
       (close-fbdev)))
 
-(defun dashboard-runtime-shutdown (runtime)
+(defun dashboard-runtime-shutdown (runtime &optional (audio-cleanup #'stop-menu-sound))
   (check-type runtime list)
-  (when (getf runtime :audio-owned-p)
-    (setf (getf runtime :audio-owned-p) nil)
-    (stop-menu-sound))
-  (when (getf runtime :controls-owned-p)
-    (setf (getf runtime :controls-owned-p) nil)
-    (close-evdev-controls))
-  (when (getf runtime :touch-owned-p)
-    (setf (getf runtime :touch-owned-p) nil)
-    (close-evdev-touch))
-  (when (getf runtime :presentation-owned-p)
-    (setf (getf runtime :presentation-owned-p) nil)
-    (dashboard-runtime-close-presentation runtime))
-  (setf (getf runtime :layout) nil
-        (getf runtime :initialized-p) nil
-        (getf runtime :running) nil
-        (getf runtime :brightness-maximum) nil
-        (getf runtime :sound-active-p) nil
-        (getf runtime :rescan-controls-p) nil)
+  (let ((failure nil))
+    (labels ((release (ownership function)
+               (when (getf runtime ownership)
+                 (setf (getf runtime ownership) nil)
+                 (handler-case (funcall function)
+                   (error (condition) (unless failure (setf failure condition)))))))
+      (release :audio-owned-p audio-cleanup)
+      (release :controls-owned-p #'close-evdev-controls)
+      (release :touch-owned-p #'close-evdev-touch)
+      (release :presentation-owned-p (lambda () (dashboard-runtime-close-presentation runtime))))
+    (setf (getf runtime :layout) nil (getf runtime :initialized-p) nil
+          (getf runtime :running) nil (getf runtime :brightness-maximum) nil
+          (getf runtime :sound-active-p) nil (getf runtime :rescan-controls-p) nil)
+    (when failure (error failure)))
   runtime)
 
 (defun dashboard-runtime-present (runtime)
