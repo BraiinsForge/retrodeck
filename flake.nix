@@ -69,6 +69,187 @@
         nativeBuildInputs = [ pkgs.cmake ];
         cmakeFlags = [ "-DBUILD_SHARED_LIBS=OFF" "-DENABLE_UBSAN=OFF" ];
       };
+      # Static libretro core archives, one per console, reusing the exact
+      # upstream build steps the C++ frontends used.
+      fceummCore = pkgsCross.stdenv.mkDerivation {
+        pname = "fceumm-core";
+        version = "0.1.0-20260714-deck";
+        src = fceumm-src;
+        nativeBuildInputs = [ pkgs.gnumake ];
+        buildInputs = [ pkgsCross.glibc.static staticCross.zlib ];
+        NIX_CFLAGS_COMPILE = "-static -O3";
+        NIX_LDFLAGS = "-static";
+        postPatch = ''
+          # A standalone static frontend needs the core's vendored libretro
+          # utility implementations instead of symbols from RetroArch.
+          substituteInPlace Makefile.common \
+            --replace-fail \
+              'ifneq ($(STATIC_LINKING), 1)' \
+              'ifeq ($(STATIC_LINKING), 1)'
+        '';
+        buildPhase = ''
+          runHook preBuild
+          make -j$NIX_BUILD_CORES \
+            platform=rpi2 \
+            STATIC_LINKING=1 \
+            TARGET=fceumm_libretro.a \
+            EXTERNAL_ZLIB=1 \
+            CC=$CC \
+            AR=${pkgsCross.stdenv.cc.targetPrefix}ar
+          runHook postBuild
+        '';
+        installPhase = ''
+          runHook preInstall
+          install -Dm644 fceumm_libretro.a $out/lib/libfceumm.a
+          install -Dm644 Copying \
+            $out/share/licenses/nes-deck/FCEUmm-COPYING
+          runHook postInstall
+        '';
+      };
+      gambatteCore = pkgsCross.stdenv.mkDerivation {
+        pname = "gambatte-core";
+        version = "0.5.0-20260703-deck";
+        src = gambatte-src;
+        nativeBuildInputs = [ pkgs.gnumake ];
+        buildInputs = [ pkgsCross.glibc.static ];
+        NIX_CFLAGS_COMPILE = "-static -O3";
+        NIX_LDFLAGS = "-static";
+        postPatch = ''
+          # Preserve Gambatte's include/feature flags while replacing its
+          # generic -O2 release setting with the Deck SoC tuning used by
+          # the project's own Cortex-A7 targets.
+          substituteInPlace Makefile.libretro \
+            --replace-fail \
+              'CFLAGS   += -O2 -DNDEBUG' \
+              'CFLAGS   += -Ofast -flto -ffat-lto-objects -fomit-frame-pointer -fno-math-errno -marm -march=armv7-a -mtune=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -DNDEBUG' \
+            --replace-fail \
+              'CXXFLAGS += -O2 -DNDEBUG' \
+              'CXXFLAGS += -Ofast -flto -ffat-lto-objects -fomit-frame-pointer -fno-math-errno -marm -march=armv7-a -mtune=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -DNDEBUG'
+          # Include the core's vendored libretro utility implementations.
+          substituteInPlace Makefile.common \
+            --replace-fail \
+              'ifneq ($(STATIC_LINKING), 1)' \
+              'ifeq ($(STATIC_LINKING), 1)'
+        '';
+        buildPhase = ''
+          runHook preBuild
+          make \
+            STATIC_LINKING=1 \
+            platform=unix \
+            TARGET=gambatte_libretro.a \
+            CC=$CC \
+            CXX=$CXX \
+            AR=${pkgsCross.stdenv.cc.targetPrefix}ar \
+            fpic= \
+            HAVE_NETWORK=0
+          runHook postBuild
+        '';
+        installPhase = ''
+          runHook preInstall
+          install -Dm644 gambatte_libretro.a $out/lib/libgambatte.a
+          install -Dm644 COPYING \
+            $out/share/licenses/gb-deck/Gambatte-COPYING
+          runHook postInstall
+        '';
+      };
+      fuseCore = pkgsCross.stdenv.mkDerivation {
+        pname = "fuse-core";
+        version = "1.6.0-20260420-deck";
+        src = fuse-src;
+        nativeBuildInputs = [ pkgs.gnumake ];
+        buildInputs = [ pkgsCross.glibc.static ];
+        NIX_CFLAGS_COMPILE = "-static -O3";
+        NIX_LDFLAGS = "-static";
+        postPatch = ''
+          # The Nix source has no Git metadata. Generate the version source
+          # once from the pinned revision instead of invoking git.
+          substituteInPlace Makefile.libretro \
+            --replace-fail \
+              '$(CORE_DIR)/src/version.c: FORCE' \
+              '$(CORE_DIR)/src/version.c:'
+        '';
+        buildPhase = ''
+          runHook preBuild
+          sed 's/HASH/bce196fb774835fe65b3e5b821887a4ccf657167/' \
+            etc/version.c.templ > src/version.c
+          make -f Makefile.libretro -j$NIX_BUILD_CORES \
+            platform=rpi2 \
+            STATIC_LINKING=1 \
+            TARGET=fuse_libretro.a \
+            CC=$CC \
+            CXX=$CXX \
+            AR=${pkgsCross.stdenv.cc.targetPrefix}ar
+          runHook postBuild
+        '';
+        installPhase = ''
+          runHook preInstall
+          install -Dm644 fuse_libretro.a $out/lib/libfuse.a
+          install -Dm644 LICENSE $out/share/licenses/zx-deck/Fuse-LICENSE
+          install -Dm644 libspectrum/COPYING \
+            $out/share/licenses/zx-deck/libspectrum-COPYING
+          install -Dm644 bzip2/LICENSE \
+            $out/share/licenses/zx-deck/bzip2-LICENSE
+          runHook postInstall
+        '';
+      };
+      # One Rust libretro host binary per console, with the core linked in.
+      retroHost = { name, core, coreDerivation, coreLibrary, description, license
+        , linkTimeOptimization ? false }:
+        pkgs.stdenvNoCC.mkDerivation {
+          pname = name;
+          version = "0.1.0";
+          src = nativeSources;
+          cargoDeps = nativeCargoDeps;
+          cargoRoot = "native";
+          nativeBuildInputs = [
+            rustToolchain
+            pkgs.rustPlatform.cargoSetupHook
+            pkgsCross.stdenv.cc
+            pkgs.nukeReferences
+          ];
+          buildInputs = [
+            pkgsCross.glibc.static
+            staticCross.libvorbis
+            staticCross.zlib
+            gmeStaticCross
+            coreDerivation
+          ];
+          allowedReferences = [ ];
+          RETRO_DECK_CORE = core;
+          buildPhase = ''
+            runHook preBuild
+            cd native
+            export CARGO_HOME=$TMPDIR/cargo
+            export CARGO_BUILD_TARGET=armv7-unknown-linux-gnueabihf
+            export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER="${pkgsCross.stdenv.cc}/bin/${pkgsCross.stdenv.cc.targetPrefix}cc"
+            export RUSTFLAGS="\
+              -C target-feature=+crt-static \
+              -C link-arg=-static \
+              -L native=${coreDerivation}/lib \
+              -L native=${pkgsCross.glibc.static}/lib \
+              -l static=${coreLibrary} \
+              -l z \
+              -l m \
+              ${pkgs.lib.optionalString linkTimeOptimization "-C link-arg=-flto"}"
+            cargo build --release --locked --offline --bin retro-host
+            runHook postBuild
+          '';
+          installPhase = ''
+            runHook preInstall
+            install -Dm755 \
+              target/armv7-unknown-linux-gnueabihf/release/retro-host \
+              $out/bin/${name}
+            mkdir -p $out/share/licenses
+            cp -a ${coreDerivation}/share/licenses/${name} \
+              $out/share/licenses/${name}
+            nuke-refs $out/bin/${name}
+            runHook postInstall
+          '';
+          meta = {
+            inherit description license;
+            platforms = [ system ];
+          };
+        };
       # Keep each local build input narrow. Referencing ./src as an include
       # directory would make every source edit invalidate every native runtime.
       sourceTree = files: pkgs.lib.fileset.toSource {
@@ -175,230 +356,31 @@
 
         runtime-licenses = runtimeLicenses;
 
-        nes-deck = pkgsCross.stdenv.mkDerivation {
-          pname = "nes-deck";
-          version = "0.1.0-20260714-deck";
-
-          src = fceumm-src;
-          nativeBuildInputs =
-            [ pkgs.gnumake pkgs.nukeReferences ] ++ waylandNativeInputs;
-          buildInputs = [
-            pkgsCross.glibc.static
-            staticCross.zlib
-          ] ++ waylandStaticInputs;
-          allowedReferences = [ ];
-
-          NIX_CFLAGS_COMPILE = "-static -O3";
-          NIX_LDFLAGS = "-static";
-
-          postPatch = ''
-            # A standalone static frontend needs the core's vendored libretro
-            # utility implementations instead of symbols from RetroArch.
-            substituteInPlace Makefile.common \
-              --replace-fail \
-                'ifneq ($(STATIC_LINKING), 1)' \
-                'ifeq ($(STATIC_LINKING), 1)'
-          '';
-
-          buildPhase = ''
-            runHook preBuild
-            ${waylandProtocolBuild}
-            make -j$NIX_BUILD_CORES \
-              platform=rpi2 \
-              STATIC_LINKING=1 \
-              TARGET=fceumm_libretro.a \
-              EXTERNAL_ZLIB=1 \
-              CC=$CC \
-              AR=${pkgsCross.stdenv.cc.targetPrefix}ar
-            $CXX -std=c++11 -O3 -fomit-frame-pointer \
-              -marm -march=armv7-a -mtune=cortex-a7 \
-              -mfpu=neon-vfpv4 -mfloat-abi=hard \
-              -Wall -Wextra -Wpedantic -Werror \
-              -DRETRO_DECK_NES=1 -DRETRO_DECK_WAYLAND=1 \
-              -I. -Isrc/drivers/libretro/libretro-common/include -I${nesSources} \
-              ${nesSources}/libretro_deck.cpp \
-              ${nesSources}/deck_runtime.cpp \
-              ${nesSources}/deck_wayland.cpp \
-              ${nesSources}/joypad_input.cpp \
-              deck-widget-v1-protocol.o \
-              wlr-layer-shell-unstable-v1-protocol.o \
-              fceumm_libretro.a \
-              -static -Wl,-s -pthread -lm -lz -lwayland-client -lffi \
-              -o nes-deck
-            runHook postBuild
-          '';
-
-          installPhase = ''
-            runHook preInstall
-            mkdir -p $out/bin $out/share/licenses/nes-deck
-            install -m755 nes-deck $out/bin/nes-deck
-            install -m644 Copying $out/share/licenses/nes-deck/FCEUmm-COPYING
-            nuke-refs $out/bin/nes-deck
-            runHook postInstall
-          '';
-
-          meta = {
-            description = "FCEUmm NES core with Deck-native framebuffer frontend";
-            homepage = "https://github.com/libretro/libretro-fceumm";
-            license = pkgs.lib.licenses.gpl2Only;
-            platforms = [ "armv7l-linux" ];
-          };
+        nes-deck = retroHost {
+          name = "nes-deck";
+          core = "nes";
+          coreDerivation = fceummCore;
+          coreLibrary = "fceumm";
+          description = "FCEUmm NES core with the Rust Deck frontend";
+          license = pkgs.lib.licenses.gpl2Only;
         };
 
-
-        gb-deck = pkgsCross.stdenv.mkDerivation {
-          pname = "gb-deck";
-          version = "0.5.0-20260703-deck";
-
-          src = gambatte-src;
-          nativeBuildInputs =
-            [ pkgs.gnumake pkgs.nukeReferences ] ++ waylandNativeInputs;
-          buildInputs = [ pkgsCross.glibc.static ] ++ waylandStaticInputs;
-          allowedReferences = [ ];
-
-          NIX_CFLAGS_COMPILE = "-static -O3";
-          NIX_LDFLAGS = "-static";
-
-          postPatch = ''
-            # Preserve Gambatte's include/feature flags while replacing its
-            # generic -O2 release setting with the Deck SoC tuning used by
-            # the project's own Cortex-A7 targets.
-            substituteInPlace Makefile.libretro \
-              --replace-fail \
-                'CFLAGS   += -O2 -DNDEBUG' \
-                'CFLAGS   += -Ofast -flto -fuse-linker-plugin -fomit-frame-pointer -fno-math-errno -marm -march=armv7-a -mtune=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -DNDEBUG' \
-              --replace-fail \
-                'CXXFLAGS += -O2 -DNDEBUG' \
-                'CXXFLAGS += -Ofast -flto -fuse-linker-plugin -fomit-frame-pointer -fno-math-errno -marm -march=armv7-a -mtune=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -DNDEBUG'
-            # Libretro's normal static build expects these utility symbols
-            # from RetroArch.  This standalone frontend has no RetroArch, so
-            # include the core's vendored implementations in its archive.
-            substituteInPlace Makefile.common \
-              --replace-fail \
-                'ifneq ($(STATIC_LINKING), 1)' \
-                'ifeq ($(STATIC_LINKING), 1)'
-          '';
-
-          buildPhase = ''
-            runHook preBuild
-            ${waylandProtocolBuild}
-            make \
-              STATIC_LINKING=1 \
-              platform=unix \
-              TARGET=gambatte_libretro.a \
-              CC=$CC \
-              CXX=$CXX \
-              AR=$CC-ar \
-              fpic= \
-              HAVE_NETWORK=0
-            $CXX -std=c++11 -Ofast -flto -fuse-linker-plugin \
-              -fomit-frame-pointer -marm -march=armv7-a -mtune=cortex-a7 \
-              -mfpu=neon-vfpv4 -mfloat-abi=hard \
-              -Wall -Wextra -Wpedantic -Werror \
-              -I. -Ilibgambatte/libretro-common/include -I${gbSources} \
-              -DRETRO_DECK_GB=1 -DRETRO_DECK_WAYLAND=1 \
-              ${gbSources}/libretro_deck.cpp \
-              ${gbSources}/deck_runtime.cpp \
-              ${gbSources}/deck_wayland.cpp \
-              ${gbSources}/joypad_input.cpp \
-              deck-widget-v1-protocol.o \
-              wlr-layer-shell-unstable-v1-protocol.o \
-              gambatte_libretro.a \
-              -static -pthread -lm -lwayland-client -lffi -o gb-deck
-            runHook postBuild
-          '';
-
-          installPhase = ''
-            runHook preInstall
-            mkdir -p $out/bin $out/share/licenses/gb-deck
-            install -m755 gb-deck $out/bin/gb-deck
-            install -m644 COPYING $out/share/licenses/gb-deck/Gambatte-COPYING
-            nuke-refs $out/bin/gb-deck
-            runHook postInstall
-          '';
-
-          meta = {
-            description = "Gambatte GB/GBC core with Deck-native framebuffer frontend";
-            homepage = "https://github.com/libretro/gambatte-libretro";
-            license = pkgs.lib.licenses.gpl2Only;
-            platforms = [ "armv7l-linux" ];
-          };
+        gb-deck = retroHost {
+          name = "gb-deck";
+          core = "gb";
+          coreDerivation = gambatteCore;
+          coreLibrary = "gambatte";
+          description = "Gambatte GB/GBC core with the Rust Deck frontend";
+          license = pkgs.lib.licenses.gpl2Only;
         };
 
-        zx-deck = pkgsCross.stdenv.mkDerivation {
-          pname = "zx-deck";
-          version = "1.6.0-20260420-deck";
-
-          src = fuse-src;
-          nativeBuildInputs =
-            [ pkgs.gnumake pkgs.nukeReferences ] ++ waylandNativeInputs;
-          buildInputs = [ pkgsCross.glibc.static ] ++ waylandStaticInputs;
-          allowedReferences = [ ];
-
-          NIX_CFLAGS_COMPILE = "-static -O3";
-          NIX_LDFLAGS = "-static";
-
-          postPatch = ''
-            # The Nix source has no Git metadata. Generate the version source
-            # once from the pinned revision instead of invoking git.
-            substituteInPlace Makefile.libretro \
-              --replace-fail \
-                '$(CORE_DIR)/src/version.c: FORCE' \
-                '$(CORE_DIR)/src/version.c:'
-          '';
-
-          buildPhase = ''
-            runHook preBuild
-            ${waylandProtocolBuild}
-            sed 's/HASH/bce196fb774835fe65b3e5b821887a4ccf657167/' \
-              etc/version.c.templ > src/version.c
-            make -f Makefile.libretro -j$NIX_BUILD_CORES \
-              platform=rpi2 \
-              STATIC_LINKING=1 \
-              TARGET=fuse_libretro.a \
-              CC=$CC \
-              CXX=$CXX \
-              AR=$CC-ar
-            cp ${zxSources}/libretro_deck.cpp deck_libretro_deck.cpp
-            cp ${zxSources}/deck_runtime.cpp deck_runtime.cpp
-            cp ${zxSources}/deck_wayland.cpp deck_wayland.cpp
-            cp ${zxSources}/joypad_input.cpp deck_joypad_input.cpp
-            $CXX -std=c++11 -O3 -fomit-frame-pointer \
-              -marm -march=armv7-a -mtune=cortex-a7 \
-              -mfpu=neon-vfpv4 -mfloat-abi=hard \
-              -Wall -Wextra -Wpedantic -Werror \
-              -DRETRO_DECK_ZX=1 -DRETRO_DECK_WAYLAND=1 \
-              -I. -Isrc -I${zxSources} \
-              deck_libretro_deck.cpp \
-              deck_runtime.cpp \
-              deck_wayland.cpp \
-              deck_joypad_input.cpp \
-              deck-widget-v1-protocol.o \
-              wlr-layer-shell-unstable-v1-protocol.o \
-              fuse_libretro.a \
-              -static -pthread -lm -lwayland-client -lffi -o zx-deck
-            runHook postBuild
-          '';
-
-          installPhase = ''
-            runHook preInstall
-            mkdir -p $out/bin $out/share/licenses/zx-deck
-            install -m755 zx-deck $out/bin/zx-deck
-            install -m644 LICENSE $out/share/licenses/zx-deck/Fuse-LICENSE
-            install -m644 libspectrum/COPYING \
-              $out/share/licenses/zx-deck/libspectrum-COPYING
-            install -m644 bzip2/LICENSE \
-              $out/share/licenses/zx-deck/bzip2-LICENSE
-            nuke-refs $out/bin/zx-deck
-            runHook postInstall
-          '';
-
-          meta = {
-            description = "Fuse ZX Spectrum core with Deck-native framebuffer frontend";
-            homepage = "https://github.com/libretro/fuse-libretro";
-            license = pkgs.lib.licenses.gpl3Only;
-            platforms = [ "armv7l-linux" ];
-          };
+        zx-deck = retroHost {
+          name = "zx-deck";
+          core = "zx";
+          coreDerivation = fuseCore;
+          coreLibrary = "fuse";
+          description = "Fuse ZX Spectrum core with the Rust Deck frontend";
+          license = pkgs.lib.licenses.gpl3Only;
         };
 
         lua-deck = pkgsCross.stdenv.mkDerivation {
@@ -737,6 +719,26 @@
             ${pkgs.qemu-user}/bin/qemu-arm \
             ${self.packages.${system}.retrodeck-native}/bin/retrodeck-native \
             smoke.lisp
+          touch $out
+        '';
+
+        libretro-host-smoke = pkgs.runCommand "libretro-host-smoke" { } ''
+          run() {
+            rom=$(basename "$2")
+            cp "$2" "$rom"
+            chmod 600 "$rom"
+            RETRO_DECK_TEST_FRAMES=120 RETRO_DECK_VOLUME_PERCENT=0 \
+              ${pkgs.qemu-user}/bin/qemu-arm "$1" "$rom" > run.log
+            cat run.log
+            grep -q "test frames=120 video=120 " run.log
+            grep -q "hash=$3" run.log
+          }
+          run ${self.packages.${system}.nes-deck}/bin/nes-deck \
+            ${./roms/nes/micro-mages.nes} 93262b846f382c60
+          run ${self.packages.${system}.gb-deck}/bin/gb-deck \
+            ${./roms/gb/kirbys-dream-land.gb} 9e145219789c4817
+          run ${self.packages.${system}.zx-deck}/bin/zx-deck \
+            ${./roms/zx/knight-lore.tap} 9ca35bdc8ecfa26d
           touch $out
         '';
 
