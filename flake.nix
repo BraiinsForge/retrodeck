@@ -903,6 +903,7 @@
           cp ${./lisp/ui.lisp} ui.lisp
           cp ${./lisp/timer.lisp} timer.lisp
           cp ${./lisp/policy.lisp} policy.lisp
+          cp ${./lisp/chiptune.lisp} chiptune.lisp
           cp ${./lisp/process.lisp} process.lisp
           cp ${./lisp/settings.lisp} settings.lisp
           cp ${./lisp/wifi.lisp} wifi.lisp

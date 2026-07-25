@@ -36,8 +36,8 @@ grep -Fq "[[ -f \$activate_script && ! -L \$activate_script ]]" "$deployer" ||
   fail 'deployer does not validate the activation script'
 grep -Fq 'cp lisp/startup.lisp lisp/ui.lisp lisp/timer.lisp lisp/policy.lisp' \
   "$deployer" || fail 'deployer does not stage the editable Lisp timer policy'
-grep -Fq 'lisp/process.lisp lisp/settings.lisp lisp/wifi.lisp lisp/credits.lisp' \
-  "$deployer" || fail 'deployer does not stage the editable Lisp Wi-Fi editor'
+grep -Fq 'lisp/chiptune.lisp lisp/process.lisp lisp/settings.lisp lisp/wifi.lisp' \
+  "$deployer" || fail 'deployer does not stage the editable Lisp chiptune renderer'
 grep -Fq 'lisp/dashboard.lisp "$payload/nes-deck/lisp/"' "$deployer" ||
   fail 'deployer does not stage the Lisp dashboard'
 grep -Fq '[ -s "$stage/nes-deck/lisp/ui.lisp" ]' "$activation" ||
@@ -46,6 +46,8 @@ grep -Fq '[ -s "$stage/nes-deck/lisp/timer.lisp" ]' "$activation" ||
   fail 'activation does not validate the staged editable Lisp timer'
 grep -Fq '[ -s "$stage/nes-deck/lisp/policy.lisp" ]' "$activation" ||
   fail 'activation does not validate the staged editable Lisp policy'
+grep -Fq '[ -s "$stage/nes-deck/lisp/chiptune.lisp" ]' "$activation" ||
+  fail 'activation does not validate the staged Lisp chiptune renderer'
 grep -Fq '[ -s "$stage/nes-deck/lisp/process.lisp" ]' "$activation" ||
   fail 'activation does not validate the staged editable Lisp process policy'
 grep -Fq '[ -s "$stage/nes-deck/lisp/settings.lisp" ]' "$activation" ||
@@ -62,6 +64,8 @@ grep -Fq 'cp -p "$stage/nes-deck/lisp/timer.lisp" "$base/lisp/timer.lisp"' \
   "$activation" || fail 'activation does not install the editable Lisp timer'
 grep -Fq 'cp -p "$stage/nes-deck/lisp/policy.lisp" "$base/lisp/policy.lisp"' \
   "$activation" || fail 'activation does not install the editable Lisp policy'
+grep -Fq 'cp -p "$stage/nes-deck/lisp/chiptune.lisp" "$base/lisp/chiptune.lisp"' \
+  "$activation" || fail 'activation does not install the Lisp chiptune renderer'
 grep -Fq 'cp -p "$stage/nes-deck/lisp/process.lisp" "$base/lisp/process.lisp"' \
   "$activation" || fail 'activation does not install the editable Lisp process policy'
 grep -Fq 'cp -p "$stage/nes-deck/lisp/settings.lisp" "$base/lisp/settings.lisp"' \

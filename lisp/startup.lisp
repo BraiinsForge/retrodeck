@@ -109,7 +109,9 @@
                 #:wayland-present-solid
                 #:wayland-shutdown-p
                 #:wayland-size)
-  (:export #:*chiptune-extensions*
+  (:export #:*chiptune-colors*
+           #:*chiptune-controls*
+           #:*chiptune-extensions*
            #:*chiptune-maximum-depth*
            #:*chiptune-maximum-file-size*
            #:*chiptune-maximum-files*
@@ -117,6 +119,9 @@
            #:chiptune-display-text
            #:chiptune-file-accepted-p
            #:chiptune-format-time
+           #:chiptune-touch-action
+           #:make-chiptune-render-state
+           #:render-chiptune
            #:*dashboard-brightness-minimum*
            #:*dashboard-brightness-step*
            #:*dashboard-built-in-applications*
@@ -707,6 +712,7 @@
 (let ((startup *load-truename*))
   (load (merge-pathnames "ui.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "policy.lisp" startup) :verbose nil :print nil)
+  (load (merge-pathnames "chiptune.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "process.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "settings.lisp" startup) :verbose nil :print nil)
   (load (merge-pathnames "wifi.lisp" startup) :verbose nil :print nil)

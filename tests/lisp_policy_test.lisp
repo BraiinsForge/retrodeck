@@ -881,6 +881,62 @@
 (assert-signals type-error (retrodeck:chiptune-base-name 4))
 (assert-signals type-error (retrodeck:chiptune-format-time 1.5))
 
+(assert (= (retrodeck::chiptune-color :orange) #xff6d20))
+(assert (= (retrodeck::chiptune-color :muted) #x949594))
+(assert-unary-table #'eq (lambda (point)
+                           (apply #'retrodeck:chiptune-touch-action point))
+                    '(((1124 22) :close) ((1247 89) :close)
+                      ((446 370) :previous-file) ((650 370) :pause)
+                      ((854 370) :next-file) ((242 370) :playback-mode)
+                      ((1248 22) nil) ((1124 90) nil)))
+(let ((ready (retrodeck:make-chiptune-render-state
+              :ready t :title "crazy" :system "ogg vorbis"
+              :position 25000 :length 50000 :file-index 1 :file-count 3
+              :track-index 0 :track-count 1 :volume 42)))
+  (setf *canvas-fill-calls* nil *canvas-glyph-calls* nil)
+  (assert (retrodeck:render-chiptune ready))
+  (assert (and (zerop *canvas-clear-color*)
+               (member '(16 16 1248 448 0) *canvas-fill-calls* :test #'equal)
+               (member '(208 184 864 88 0) *canvas-fill-calls* :test #'equal)
+               (member '(208 226 864 2 9737620) *canvas-fill-calls* :test #'equal)
+               (member '(208 284 432 6 8629891) *canvas-fill-calls* :test #'equal)
+               (member '(582 116 67 4 16777215) *canvas-glyph-calls*
+                       :test #'equal)
+               (member '(32 44 86 2 8629891) *canvas-glyph-calls*
+                       :test #'equal))))
+(let ((visual (make-array 1470 :element-type '(signed-byte 16)
+                          :initial-element 0)))
+  (setf (aref visual 0) 32767 (aref visual 1) 32767
+        (aref visual 1466) -32768 (aref visual 1467) -32768
+        *canvas-fill-calls* nil)
+  (assert (retrodeck:render-chiptune
+           (retrodeck:make-chiptune-render-state
+            :ready t :title "x" :system "ogg" :file-count 1 :track-count 1
+            :visual visual)))
+  (assert (and (member '(208 186 2 40 16739616) *canvas-fill-calls*
+                       :test #'equal)
+               (member '(1070 228 2 40 16739616) *canvas-fill-calls*
+                       :test #'equal))))
+(dolist (fixture '((:loop-one t (330 398 49 2 16777215))
+                   (:shuffle nil (310 394 2 2 16777215))))
+  (destructuring-bind (mode paused expected) fixture
+    (setf *canvas-fill-calls* nil *canvas-glyph-calls* nil)
+    (assert (retrodeck:render-chiptune
+             (retrodeck:make-chiptune-render-state
+              :ready nil :playback-mode mode :paused paused :volume 0)))
+    (assert (member expected (if (eq mode :loop-one)
+                                 *canvas-glyph-calls* *canvas-fill-calls*)
+                    :test #'equal))))
+(dolist (function
+         (list (lambda () (retrodeck:make-chiptune-render-state
+                           :ready t :file-count 0 :track-count 1))
+               (lambda () (retrodeck:make-chiptune-render-state
+                           :ready nil :playback-mode :random))
+               (lambda () (retrodeck:make-chiptune-render-state
+                           :ready nil :visual #(0)))
+               (lambda () (retrodeck:chiptune-touch-action 1.5 2))))
+  (assert-signals error (funcall function)))
+
 (assert (string= (retrodeck:display-ascii "AČz") "A?z"))
 (labels ((bytes (&rest values)
            (map 'string #'code-char values)))

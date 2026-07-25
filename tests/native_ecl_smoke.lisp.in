@@ -199,6 +199,13 @@
              "10 Seconds render failed for ~S/~D" mode displayed)
       (check (= (canvas-rgb565-hash) expected)
              "10 Seconds frame mismatch for ~S/~D" mode displayed)))
+  (check (render-chiptune
+          (make-chiptune-render-state
+           :ready t :title "crazy" :system "ogg vorbis"
+           :position 0 :length 50000 :file-count 1 :track-count 1 :volume 42))
+         "Chiptune renderer failed")
+  (check (= (canvas-rgb565-hash) #xb3f8e405ba8146cd)
+         "Chiptune frame mismatch")
   (let ((credits (read-bounded-regular-file "@credits@" 1 32768)))
     (check (and credits (search "FCEUmm" credits)) "Bounded regular-file callback did not read credits"))
   (check (not (read-bounded-regular-file "/no/such/retrodeck-credits.tsv" 1 32768)) "Missing regular file unexpectedly loaded")
