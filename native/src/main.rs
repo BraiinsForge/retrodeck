@@ -1492,6 +1492,23 @@ fn verify_uploader_password(path: &OsStr) -> Result<u8, String> {
     )))
 }
 
+fn sibling_startup(program: Option<&OsStr>) -> PathBuf {
+    // Prefer the lisp tree installed next to the resolved executable so a
+    // staged payload validates against its own sources before activation.
+    let resolved = program
+        .map(Path::new)
+        .and_then(|program| std::fs::canonicalize(program).ok());
+    if let Some(startup) = resolved
+        .as_deref()
+        .and_then(Path::parent)
+        .map(|parent| parent.join("lisp/startup.lisp"))
+        .filter(|startup| startup.is_file())
+    {
+        return startup;
+    }
+    PathBuf::from(DEFAULT_STARTUP)
+}
+
 fn startup_path() -> Result<PathBuf, String> {
     let mut arguments = env::args_os();
     let program = arguments.next();
@@ -1503,10 +1520,10 @@ fn startup_path() -> Result<PathBuf, String> {
         .and_then(Path::file_name)
         .is_some_and(|name| name != "retrodeck-native");
     if dedicated {
-        return Ok(PathBuf::from(DEFAULT_STARTUP));
+        return Ok(sibling_startup(program.as_deref()));
     }
     match (arguments.next(), arguments.next()) {
-        (None, None) => Ok(PathBuf::from(DEFAULT_STARTUP)),
+        (None, None) => Ok(sibling_startup(program.as_deref())),
         (Some(path), None) => Ok(path.into()),
         _ => Err("usage: retrodeck-native [STARTUP.LISP]".to_owned()),
     }
