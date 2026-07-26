@@ -14,7 +14,7 @@ config=${1:-$repo_root/deck.conf}
   echo "Deck configuration library is missing or unsafe: $config_library" >&2
   exit 1
 }
-# shellcheck source=ops/lib/deck-config.sh
+# shellcheck source=ops/lib/deck-config.sh disable=SC1091
 source "$config_library"
 
 if [[ $# -gt 1 ]]; then

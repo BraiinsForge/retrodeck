@@ -65,7 +65,7 @@ done
   echo "Deck configuration library is missing or unsafe: $config_library" >&2
   exit 1
 }
-# shellcheck source=ops/lib/deck-config.sh
+# shellcheck source=ops/lib/deck-config.sh disable=SC1091
 source "$config_library"
 deck_config_load "$config"
 target=$DECK_SSH_TARGET

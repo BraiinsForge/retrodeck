@@ -37,8 +37,13 @@ jobs:
 
       - name: Check shell scripts
         run: |
-          nix shell nixpkgs#shellcheck -c shellcheck \
+          nix shell nixpkgs#shellcheck -c shellcheck -x \
+            ops/lib/deck-config.sh \
+            ops/check-deck.sh \
+            ops/configure-deck.sh \
             ops/deploy.sh \
+            ops/deploy/activate.sh \
+            ops/provision-deck.sh \
             deploy/menu/deck-menu-launcher \
             deploy/menu/nes-deck-swap.init \
             deploy/uploader/nes-deck-uploader.init \
