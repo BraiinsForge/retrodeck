@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[features]
+# Links the Lisp tree compiled to native code and initializes it at boot
+# instead of loading the sibling sources.
+lisp-image = []
+
 [[bin]]
 name = "retrodeck-native"
 path = "src/main.rs"
