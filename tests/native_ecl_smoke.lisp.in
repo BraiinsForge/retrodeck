@@ -375,18 +375,18 @@
     (let ((network '(:ssid "net1" :wlan-ipv4 "10.249.110.248"
                      :wireguard-ipv4 "10.0.0.10" :selector "CONNECTED")))
       (dolist (fixture
-               '((42 60 "us" :volume-down "" #x46d1527abb9f2bcb)
-                 (0 60 "us" :volume-up "" #xc2c55ee7eb47608b)
-                 (42 100 "us" :brightness-up "" #x6e348df7ca27725f)
-                 (42 60 "cz" :keymap "" #x99ed5871b55b5f6b)
-                 (42 60 "us" :wifi "" #x65f7d573c69bccbb)
-                 (42 60 "us" :terminal "" #x9cabcc3df5188ce3)
+               '((42 60 "us" :volume-down "" #xb628615334d6949b)
+                 (0 60 "us" :volume-up "" #x097e478ee33fcb5b)
+                 (42 100 "us" :brightness-up "" #xfba867a6874157cf)
+                 (42 60 "cz" :keymap "" #x24112e9d4d278c3b)
+                 (42 60 "us" :wifi "" #xa3bbb4e812dbc58b)
+                 (42 60 "us" :terminal "" #x7e9d25d1f7014bf3)
                  (42 60 "us" :volume-down
                   "VOLUME SAVED; CONFIRMATION TONE FAILED"
-                  #x05a5652bb03e0b8b)
+                  #xfffa4962a3bae25b)
                  (42 60 "us" :volume-down
                   "THIS SETTINGS STATUS FIXTURE IS INTENTIONALLY LONG ENOUGH TO USE THE SMALL FOOTER SCALE ACROSS THE COMPLETE DISPLAY"
-                  #x773a6a165672bd8b)))
+                  #x7f67452d3a69f55b)))
         (destructuring-bind
             (volume brightness keymap selected status expected) fixture
           (check (equal (render-dashboard-settings
