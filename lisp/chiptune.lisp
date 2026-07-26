@@ -232,14 +232,15 @@
   (let ((result (retrodeck.native:chiptune-step)))
     (when result
       (unless (and (listp result) (= (length result) 4)
-                   (stringp (first result))
+                   (stringp (first result)) (= (length (first result)) 2940)
                    (member (second result) '(0 1))
                    (typep (third result) '(integer 0 735))
                    (typep (fourth result) '(integer 0 *)))
         (error "Malformed native chiptune snapshot ~S" result))
-      (values (chiptune-decode-pcm (first result))
-              (= (second result) 1) (third result) (fourth result)
-              (first result)))))
+      ;; The raw PCM block doubles as the waveform visual; decoding 1470
+      ;; samples per block in bytecode cost ~33 ms on the Deck.
+      (values (first result)
+              (= (second result) 1) (third result) (fourth result)))))
 
 (defun open-chiptune-audio (volume)
   (check-type volume (integer 0 100))
@@ -499,7 +500,6 @@
           (and volume-state (plusp (length volume-state)) volume-state)
           (getf runtime :next-block-at) 0
           (getf runtime :chiptune-blocks) 0
-          (getf runtime :chiptune-position-text) nil
           (getf runtime :volume) nil
           (getf runtime :dirty) t)
     runtime))
@@ -657,9 +657,9 @@
        (chiptune-flush-block state runtime pending)
        nil)
       ((>= now (getf runtime :next-block-at))
-       (multiple-value-bind (visual ended frames position pcm)
+       (multiple-value-bind (pcm ended frames position)
            (step-chiptune-file)
-         (declare (ignore visual frames))
+         (declare (ignore frames))
          (cond
            ((null pcm)
             (chiptune-playback-failed state "native playback step failed")
@@ -668,10 +668,6 @@
            (t
             (setf (getf state :visual) pcm
                   (getf state :position) position)
-            (let ((shown (chiptune-format-time position)))
-              (unless (equal shown (getf runtime :chiptune-position-text))
-                (setf (getf runtime :chiptune-position-text) shown
-                      (getf runtime :dirty) t)))
             (chiptune-flush-block state runtime pcm)
             (when ended (chiptune-state-advance state))
             (incf (getf runtime :chiptune-blocks))
@@ -695,7 +691,13 @@
                              0)))
            (and (chiptune-fill-source-rect 96 134 432 3 background)
                 (or (zerop progress)
-                    (chiptune-fill-source-rect 96 134 progress 3 green)))))))
+                    (chiptune-fill-source-rect 96 134 progress 3 green))))
+         ;; The elapsed-time text ticks once a second; repainting it here
+         ;; keeps the full playback render out of the audio loop.
+         (chiptune-fill-source-rect 96 143 (+ (bitmap-text-width "88:88" 1) 2)
+                                    7 background)
+         (chiptune-draw-source-text 96 143 (chiptune-format-time position)
+                                    1 (chiptune-color :text)))))
 
 (defun chiptune-render-plist (state runtime)
   (let ((metadata (getf state :metadata)))
@@ -810,19 +812,25 @@
              (error "Chiptune presentation failed"))
            (record '(:present))
            (setf (getf runtime :dirty) nil))
-          ((and decoded (getf state :metadata))
+          ((and decoded (getf state :metadata)
+                (zerop (mod (getf runtime :chiptune-blocks) 3)))
            (unless (chiptune-render-playback state (getf state :metadata))
              (error "Chiptune playback render failed"))
            (record '(:render-playback))
            (unless (chiptune-runtime-present runtime)
              (error "Chiptune presentation failed"))
            (record '(:present))))
-        (let* ((poll (or (poll-native-input nil 8)
+        (let* ((timeout
+                 (max 0 (min 8 (floor (- (getf runtime :next-block-at)
+                                         (dashboard-runtime-read-clock
+                                          runtime))
+                                      1000000))))
+               (poll (or (poll-native-input nil timeout)
                          (error "Chiptune native input poll failed")))
                (control-count (getf poll :control-count))
                (touch-count (getf poll :touch-count))
                (commands nil))
-          (record (list :poll :controls control-count :touches touch-count))
+          (record (list :poll :timeout timeout :controls control-count :touches touch-count))
           (dotimes (index control-count)
             (let ((report (or (next-evdev-control)
                               (error "Chiptune control queue ended early"))))
