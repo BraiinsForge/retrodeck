@@ -25,7 +25,7 @@ let
   binutils = cc.bintools.bintools;
   targetPrefix = cc.targetPrefix;
 in
-pkgs.runCommand "retrodeck-lisp-image-0.1.0" {
+pkgs.runCommand "retrodeck-lisp-image-1.0.0" {
   nativeBuildInputs = [ pkgs.qemu-user ];
 
   passthru = { inherit eclCompiler; };
