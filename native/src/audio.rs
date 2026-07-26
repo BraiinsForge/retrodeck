@@ -27,7 +27,10 @@ const SNDCTL_DSP_GETOSPACE: c_ulong = 0x8010500c;
 const SNDCTL_DSP_SETTRIGGER: c_ulong = 0x40045010;
 const PCM_ENABLE_OUTPUT: c_int = 0x2;
 const CHIPTUNE_PCM_BYTES: usize = 735 * 2 * mem::size_of::<i16>();
-const CHIPTUNE_QUEUE_BLOCKS: usize = 22;
+// Six blocks (~100 ms) plus the ~93 ms prefilled kernel buffer absorb the
+// worst decode-loop stalls while keeping pause/volume/track controls snappy;
+// the Lisp pump keeps this queue full and is paced by its backpressure.
+const CHIPTUNE_QUEUE_BLOCKS: usize = 6;
 
 #[repr(C)]
 #[derive(Default)]
