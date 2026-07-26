@@ -33,6 +33,7 @@
       pkgsCross = pkgs.pkgsCross.armv7l-hf-multiplatform;
       staticCross = pkgs.pkgsCross.armv7l-hf-multiplatform.pkgsStatic;
       eclArm = import ./nix/ecl-arm-static.nix { };
+      retrodeckLispImage = import ./nix/lisp-image.nix { lispDir = ./lisp; };
       eclArmNetwork = import ./nix/ecl-arm-static.nix {
         networkSupport = true;
       };
@@ -257,6 +258,7 @@
     {
       packages.${system} = {
         ecl-arm-network = eclArmNetwork;
+        retrodeck-lisp-image = retrodeckLispImage;
         uploader-lisp-libraries = uploaderLispLibraries;
 
         retrodeck-native = pkgs.stdenvNoCC.mkDerivation {
@@ -288,14 +290,16 @@
             export RUSTFLAGS="\
               -C target-feature=+crt-static,+v7,+hwdiv,+hwdiv-arm \
               -C link-arg=-static \
+              -L native=${retrodeckLispImage}/lib \
               -L native=${eclArm.dev}/lib \
               -L native=${pkgsCross.glibc.static}/lib \
+              -l static=retrodeck-lisp \
               -l static=ecl \
               -l static=eclgc \
               -l static=gmp \
               -l dl \
               -l m"
-            cargo build --release --locked --offline
+            cargo build --release --locked --offline --features lisp-image
             runHook postBuild
           '';
 
@@ -679,6 +683,12 @@
             ${pkgs.qemu-user}/bin/qemu-arm \
             ${self.packages.${system}.retrodeck-native}/bin/retrodeck-native \
             smoke.lisp
+          # Without arguments the binary must come up from the compiled-in
+          # Lisp image with no sources on disk at all.
+          ${pkgs.qemu-user}/bin/qemu-arm \
+            ${self.packages.${system}.retrodeck-native}/bin/retrodeck-native \
+            > image.log
+          grep -q "retrodeck: Common Lisp startup loaded" image.log
           touch $out
         '';
 
