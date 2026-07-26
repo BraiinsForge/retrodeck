@@ -846,7 +846,26 @@ fn copy_rgba_to_xrgb(rgba: &[u8], pixels: &mut [u32]) {
 }
 
 fn copy_gameplay_rgba_to_xrgb(rgba: &[u8], pixels: &mut [u32], width: usize) {
+    if width == 0 {
+        return;
+    }
     let height = pixels.len() / width;
+    if width == GAME_SOURCE_WIDTH * 2 && height == GAME_SOURCE_HEIGHT * 2 {
+        // The safe-area crop maps one source pixel onto a 2x2 block; convert
+        // each source pixel once. Per-pixel division here cost ~176 ms per
+        // frame on the Deck before hardware division was enabled.
+        for y in 0..height {
+            let source_row = (GAME_INSET + (y & !1)) * canvas::WIDTH as usize;
+            let row = &mut pixels[y * width..(y + 1) * width];
+            for x in (0..width).step_by(2) {
+                let offset = (source_row + GAME_INSET + x) * 4;
+                let value = rgba_to_xrgb(&rgba[offset..]);
+                row[x] = value;
+                row[x + 1] = value;
+            }
+        }
+        return;
+    }
     for (index, pixel) in pixels.iter_mut().enumerate() {
         let source_x = GAME_INSET + 2 * ((index % width) * GAME_SOURCE_WIDTH / width);
         let source_y = GAME_INSET + 2 * ((index / width) * GAME_SOURCE_HEIGHT / height);

@@ -172,6 +172,32 @@ pub fn fill_rect(x: i32, y: i32, width: u32, height: u32, color: u32) {
     });
 }
 
+/// Chiptune waveform: 432 bars mixed from interleaved stereo S16LE PCM,
+/// drawn at the player's fixed panel geometry exactly like the Lisp loop.
+pub fn draw_waveform(pcm: &[u8], background: u32, muted: u32, orange: u32) -> Result<(), String> {
+    if pcm.len() != 2940 {
+        return Err("chiptune waveform needs one 2940-byte PCM block".to_owned());
+    }
+    fill_rect(208, 184, 864, 88, background);
+    fill_rect(208, 226, 864, 2, muted);
+    for x in 0..432_usize {
+        let frame = x * 735 / 432;
+        let left = i32::from(i16::from_le_bytes([pcm[frame * 4], pcm[frame * 4 + 1]]));
+        let right = i32::from(i16::from_le_bytes([pcm[frame * 4 + 2], pcm[frame * 4 + 3]]));
+        let mixed = (left + right) / 2;
+        let height = (mixed.abs() / 1050).min(20);
+        let source_y = if mixed < 0 { 106 } else { 105 - height };
+        fill_rect(
+            (16 + 2 * (96 + x)) as i32,
+            (16 + 2 * source_y) as i32,
+            2,
+            (2 * height.max(1)) as u32,
+            orange,
+        );
+    }
+    Ok(())
+}
+
 pub fn draw_glyph(x: i32, y: i32, character: u8, scale: u32, color: u32) {
     CANVAS.with(|canvas| {
         canvas

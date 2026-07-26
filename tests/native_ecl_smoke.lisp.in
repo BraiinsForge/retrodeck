@@ -25,7 +25,7 @@
         :touch-supervision t :mirror-console t))
 
 (defun main ()
-  (check (= (retrodeck.native:abi-version) 26) "Native ABI mismatch")
+  (check (= (retrodeck.native:abi-version) 27) "Native ABI mismatch")
   (check (zerop (retrodeck.native:process-shutdown-p))
          "Native shutdown state was set")
   (let ((first (monotonic-nanoseconds)))

@@ -180,6 +180,7 @@
 
 (defun chiptune-valid-visual-p (visual)
   (or (null visual)
+      (and (stringp visual) (= (length visual) 2940))
       (and (typep visual 'sequence) (= (length visual) 1470)
            (every (lambda (sample) (typep sample '(signed-byte 16))) visual))))
 
@@ -290,6 +291,10 @@
         :status status :visual visual))
 
 (defun chiptune-draw-waveform (visual background muted orange)
+  (when (stringp visual)
+    (return-from chiptune-draw-waveform
+      (= (retrodeck.native:canvas-draw-waveform visual background muted orange)
+         1)))
   (and (chiptune-fill-source-rect 96 84 432 44 background)
        (chiptune-fill-source-rect 96 105 432 1 muted)
        (or (null visual)
@@ -494,6 +499,7 @@
           (and volume-state (plusp (length volume-state)) volume-state)
           (getf runtime :next-block-at) 0
           (getf runtime :chiptune-blocks) 0
+          (getf runtime :chiptune-position-text) nil
           (getf runtime :volume) nil
           (getf runtime :dirty) t)
     runtime))
@@ -653,15 +659,19 @@
       ((>= now (getf runtime :next-block-at))
        (multiple-value-bind (visual ended frames position pcm)
            (step-chiptune-file)
-         (declare (ignore frames))
+         (declare (ignore visual frames))
          (cond
-           ((null visual)
+           ((null pcm)
             (chiptune-playback-failed state "native playback step failed")
             (setf (getf runtime :dirty) t)
             nil)
            (t
-            (setf (getf state :visual) visual
+            (setf (getf state :visual) pcm
                   (getf state :position) position)
+            (let ((shown (chiptune-format-time position)))
+              (unless (equal shown (getf runtime :chiptune-position-text))
+                (setf (getf runtime :chiptune-position-text) shown
+                      (getf runtime :dirty) t)))
             (chiptune-flush-block state runtime pcm)
             (when ended (chiptune-state-advance state))
             (incf (getf runtime :chiptune-blocks))
@@ -670,6 +680,22 @@
               (setf (getf runtime :next-block-at)
                     (if (> now target) now target)))
             t)))))))
+
+(defun chiptune-render-playback (state metadata)
+  "Redraw only the waveform and progress bar between full renders."
+  (let ((background (chiptune-color :background))
+        (muted (chiptune-color :muted))
+        (orange (chiptune-color :orange))
+        (green (chiptune-color :green))
+        (position (getf state :position))
+        (length (getf metadata :length)))
+    (and (chiptune-draw-waveform (getf state :visual) background muted orange)
+         (let ((progress (if (plusp length)
+                             (max 0 (min 432 (truncate (* position 432) length)))
+                             0)))
+           (and (chiptune-fill-source-rect 96 134 432 3 background)
+                (or (zerop progress)
+                    (chiptune-fill-source-rect 96 134 progress 3 green)))))))
 
 (defun chiptune-render-plist (state runtime)
   (let ((metadata (getf state :metadata)))
@@ -775,14 +801,22 @@
       (let* ((now (dashboard-runtime-read-clock runtime))
              (decoded (chiptune-runtime-generate state runtime now)))
         (record (list :generate :now now :decoded (and decoded t)))
-        (when (or (getf runtime :dirty) decoded)
-          (unless (render-chiptune (chiptune-render-plist state runtime))
-            (error "Chiptune render failed"))
-          (record '(:render))
-          (unless (chiptune-runtime-present runtime)
-            (error "Chiptune presentation failed"))
-          (record '(:present))
-          (setf (getf runtime :dirty) nil))
+        (cond
+          ((getf runtime :dirty)
+           (unless (render-chiptune (chiptune-render-plist state runtime))
+             (error "Chiptune render failed"))
+           (record '(:render))
+           (unless (chiptune-runtime-present runtime)
+             (error "Chiptune presentation failed"))
+           (record '(:present))
+           (setf (getf runtime :dirty) nil))
+          ((and decoded (getf state :metadata))
+           (unless (chiptune-render-playback state (getf state :metadata))
+             (error "Chiptune playback render failed"))
+           (record '(:render-playback))
+           (unless (chiptune-runtime-present runtime)
+             (error "Chiptune presentation failed"))
+           (record '(:present))))
         (let* ((poll (or (poll-native-input nil 8)
                          (error "Chiptune native input poll failed")))
                (control-count (getf poll :control-count))

@@ -47,7 +47,7 @@
        *chiptune-open-path* *chiptune-start-track-index*
        *chiptune-audio-open-volume* *chiptune-audio-write-pcm*
        *list-directory-path* *list-directory-result*
-       *program-arguments-result*)
+       *program-arguments-result* *canvas-waveform-arguments*)
       (0 *chiptune-rewind-count*)
   ("" *control-file-read-result*)
   ('(1 2 3 4) *canvas-hash-words* *monotonic-words*)
@@ -113,7 +113,7 @@
     (push :sound *interaction-trace*))
   *play-status*)
 (define-native-test-functions
-  (abi-version () 26)
+  (abi-version () 27)
   (program-arguments () *program-arguments-result*)
   (list-directory (path)
     (setf *list-directory-path* path)
@@ -158,6 +158,9 @@
   (canvas-draw-glyph (&rest arguments)
     (record-native-call arguments *canvas-glyph-arguments*
                         *canvas-glyph-status* *canvas-glyph-calls*))
+  (canvas-draw-waveform (&rest arguments)
+    (setf *canvas-waveform-arguments* arguments)
+    *canvas-fill-status*)
   (canvas-fill-rect (&rest arguments)
     (record-native-call arguments *canvas-fill-arguments*
                         *canvas-fill-status* *canvas-fill-calls*))
@@ -1242,9 +1245,9 @@
 (let ((running (nth-value 0 (retrodeck:ten-seconds-reduce
                              (retrodeck:ten-seconds-initial-state) :touch 100))))
   (dolist (fixture `((99 nil :identity ,running)
-                     (100 ((:redraw)) :displayed 0 :redraw-at 16000100)
+                     (100 ((:redraw)) :displayed 0 :redraw-at 33000100)
                      (1230000100 ((:redraw)) :displayed 123
-                      :redraw-at 1246000100)))
+                      :redraw-at 1263000100)))
     (apply #'assert-ten-seconds-reduction running :tick fixture)))
 (setf *canvas-fill-calls* nil *canvas-glyph-calls* nil)
 (assert (retrodeck:render-ten-seconds
@@ -1449,8 +1452,7 @@
                                  :playback-mode :loop-all))
     (assert (equal (getf state :files) '("/tunes/crazy.ogg")))
     (assert (string= (getf (getf state :metadata) :title) "crazy"))
-    (assert (typep (getf state :visual)
-                   '(simple-array (signed-byte 16) (1470))))
+    (assert (string= (getf state :visual) pcm))
     (assert (equal (first traces)
                    '((:generate :now 3 :decoded t) (:render) (:present)
                      (:poll :controls 0 :touches 0))))

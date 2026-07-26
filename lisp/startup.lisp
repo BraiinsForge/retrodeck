@@ -7,6 +7,7 @@
            #:canvas-draw-glyph
            #:canvas-draw-projected-text
            #:canvas-draw-raster
+           #:canvas-draw-waveform
            #:canvas-fill-rect
            #:canvas-rgb565-hash-words
            #:chiptune-audio-close
@@ -75,6 +76,7 @@
                 #:canvas-draw-glyph
                 #:canvas-draw-projected-text
                 #:canvas-draw-raster
+                #:canvas-draw-waveform
                 #:canvas-fill-rect
                 #:canvas-rgb565-hash-words
                 #:evdev-controls-close
@@ -380,7 +382,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 26)
+(defconstant +native-abi-version+ 27)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))

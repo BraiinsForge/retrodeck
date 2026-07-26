@@ -44,7 +44,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 26;
+const ABI_VERSION: ClFixnum = 27;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -134,6 +134,16 @@ impl Ecl {
             mem::transmute::<EclFiveArgumentFunction, EclFixedFunction>(native_play_tones)
         };
         unsafe { ecl_def_c_function(play, callback, 5) };
+
+        let waveform_name = c_string("CANVAS-DRAW-WAVEFORM")?;
+        let waveform =
+            unsafe { ecl_make_symbol(waveform_name.as_ptr(), package_name.as_ptr()) };
+        let callback = unsafe {
+            mem::transmute::<EclFourArgumentFunction, EclFixedFunction>(
+                native_canvas_draw_waveform,
+            )
+        };
+        unsafe { ecl_def_c_function(waveform, callback, 4) };
 
         let run_terminal_name = c_string("RUN-TERMINAL")?;
         let run_terminal =
@@ -670,6 +680,24 @@ unsafe extern "C" fn native_canvas_clear(color: ClObject) -> ClObject {
     let result = (|| {
         canvas::clear(decode_color(color, "canvas clear color")?);
         Ok(())
+    })();
+    native_status(result)
+}
+
+unsafe extern "C" fn native_canvas_draw_waveform(
+    pcm: ClObject,
+    background: ClObject,
+    muted: ClObject,
+    orange: ClObject,
+) -> ClObject {
+    let result = (|| {
+        let pcm = decode_base_string(pcm, "waveform PCM")?;
+        canvas::draw_waveform(
+            &pcm,
+            decode_color(background, "waveform background")?,
+            decode_color(muted, "waveform midline")?,
+            decode_color(orange, "waveform bars")?,
+        )
     })();
     native_status(result)
 }

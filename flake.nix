@@ -221,7 +221,7 @@
             export CARGO_BUILD_TARGET=armv7-unknown-linux-gnueabihf
             export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER="${pkgsCross.stdenv.cc}/bin/${pkgsCross.stdenv.cc.targetPrefix}cc"
             export RUSTFLAGS="\
-              -C target-feature=+crt-static \
+              -C target-feature=+crt-static,+v7,+hwdiv,+hwdiv-arm \
               -C link-arg=-static \
               -L native=${coreDerivation}/lib \
               -L native=${pkgsCross.glibc.static}/lib \
@@ -286,7 +286,7 @@
             export CARGO_BUILD_TARGET=armv7-unknown-linux-gnueabihf
             export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER="${pkgsCross.stdenv.cc}/bin/${pkgsCross.stdenv.cc.targetPrefix}cc"
             export RUSTFLAGS="\
-              -C target-feature=+crt-static \
+              -C target-feature=+crt-static,+v7,+hwdiv,+hwdiv-arm \
               -C link-arg=-static \
               -L native=${eclArm.dev}/lib \
               -L native=${pkgsCross.glibc.static}/lib \

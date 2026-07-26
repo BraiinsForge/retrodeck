@@ -1,7 +1,7 @@
 (in-package #:retrodeck)
 
 (defconstant +ten-seconds-centisecond-nanoseconds+ 10000000)
-(defconstant +ten-seconds-redraw-nanoseconds+ 16000000)
+(defconstant +ten-seconds-redraw-nanoseconds+ 33000000)
 (defconstant +ten-seconds-limit+ 9999)
 
 (defparameter *ten-seconds-cues*
