@@ -1456,7 +1456,7 @@
     (assert (string= (getf state :visual) pcm))
     (assert (equal (first traces)
                    '((:generate :now 3 :decoded t) (:render) (:present)
-                     (:poll :timeout 8 :controls 0 :touches 0))))
+                     (:poll :timeout 0 :controls 0 :touches 0))))
     (assert-plist-values summary '(:running t :blocks 1 :audio-volume 42))
     (assert (string= (getf summary :written) pcm)))
   ;; An empty library renders the guidance screen and close exits.
