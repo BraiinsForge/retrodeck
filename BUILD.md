@@ -81,9 +81,15 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 
 `native/` contains `retrodeck-native`, the static ARM Rust/ECL host. It boots
 ECL, registers the small `RETRODECK.NATIVE` interface, loads Common Lisp, and
-uses the integer returned by `RETRODECK:MAIN` as its process status. With no
-argument it loads `/mnt/data/nes-deck/lisp/startup.lisp`; one alternate startup
-path may be supplied for development and smoke tests.
+uses the integer returned by `RETRODECK:MAIN` as its process status. The nix
+build compiles the whole Lisp tree to native code (`nix/lisp-image.nix`, the
+compiler-enabled ECL running under qemu-arm) and links it in, so the deployed
+binary initializes the compiled image instead of loading sources. One alternate
+startup path may still be supplied for development and smoke tests, and
+setting `RETRO_DECK_LISP_SOURCE` forces the sibling
+`lisp/startup.lisp` source tree (falling back to
+`/mnt/data/nes-deck/lisp/startup.lisp`) — both load bytecode-compiled sources
+exactly as before.
 
 `lisp/startup.lisp` validates the native ABI, then loads `ui.lisp`,
 `policy.lisp`, `chiptune.lisp`, `process.lisp`, `settings.lisp`, `wifi.lisp`,
@@ -100,7 +106,8 @@ touch policy, keyboard and THEGamepad mapping, modal command priority,
 controller burst recovery, input scan timing, and the Wi-Fi selector status path.
 Startup finally loads an optional `local.lisp` beside them for device-local
 overrides without a Rust
-rebuild. Deployment updates the ten standard Lisp files but leaves an
+rebuild; the compiled image honors the same overlay after it initializes.
+Deployment updates the ten standard Lisp files but leaves an
 existing `local.lisp` untouched.
 
 Native ABI 22 retains the widget-side Wayland and direct-fbdev primitives and
