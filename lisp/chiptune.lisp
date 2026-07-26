@@ -1,6 +1,7 @@
 (in-package #:retrodeck)
 
 (defconstant +chiptune-block-nanoseconds+ 16666666)
+(defconstant +chiptune-render-nanoseconds+ 50000000)
 
 (defparameter *chiptune-colors*
   '((:background . #x000000) (:orange . #xfe6c27) (:active . #x4d372d)
@@ -499,6 +500,7 @@
           (getf runtime :chiptune-volume-state)
           (and volume-state (plusp (length volume-state)) volume-state)
           (getf runtime :next-block-at) 0
+          (getf runtime :next-render-at) 0
           (getf runtime :chiptune-blocks) 0
           (getf runtime :volume) nil
           (getf runtime :dirty) t)
@@ -649,14 +651,17 @@
      nil)))
 
 (defun chiptune-runtime-generate (state runtime now)
-  "Decode and queue one 44.1 kHz block per 60 Hz tick; drive end-of-track policy."
-  (let ((pending (getf state :pending-pcm)))
+  "Pump decoded blocks while the audio queue accepts them; the full queue
+paces playback the way the C++ frontend's blocking writes did.  Without
+audio the wall clock paces decoding instead."
+  (let ((pending (getf state :pending-pcm))
+        (audio (and (getf runtime :audio-owned-p)
+                    (plusp (or (getf runtime :volume) 0)))))
     (cond
       ((or (null (getf state :metadata)) (getf state :paused)) nil)
       (pending
-       (chiptune-flush-block state runtime pending)
-       nil)
-      ((>= now (getf runtime :next-block-at))
+       (chiptune-flush-block state runtime pending))
+      ((or audio (>= now (getf runtime :next-block-at)))
        (multiple-value-bind (pcm ended frames position)
            (step-chiptune-file)
          (declare (ignore frames))
@@ -785,6 +790,7 @@
             (finish-output *error-output*))
           (setf (getf runtime :next-block-at)
                 (dashboard-runtime-read-clock runtime)
+                (getf runtime :next-render-at) (getf runtime :next-block-at)
                 (getf runtime :chiptune-blocks) 0
                 (getf runtime :dirty) t
                 (getf runtime :initialized-p) t
@@ -812,20 +818,24 @@
            (unless (chiptune-runtime-present runtime)
              (error "Chiptune presentation failed"))
            (record '(:present))
-           (setf (getf runtime :dirty) nil))
+           (setf (getf runtime :dirty) nil
+                 (getf runtime :next-render-at)
+                 (+ now +chiptune-render-nanoseconds+)))
           ((and decoded (getf state :metadata)
-                (zerop (mod (getf runtime :chiptune-blocks) 3)))
+                (>= now (getf runtime :next-render-at)))
            (unless (chiptune-render-playback state (getf state :metadata))
              (error "Chiptune playback render failed"))
            (record '(:render-playback))
            (unless (chiptune-runtime-present runtime)
              (error "Chiptune presentation failed"))
-           (record '(:present))))
-        (let* ((timeout
-                 (max 0 (min 8 (floor (- (getf runtime :next-block-at)
-                                         (dashboard-runtime-read-clock
-                                          runtime))
-                                      1000000))))
+           (record '(:present))
+           (setf (getf runtime :next-render-at)
+                 (+ now +chiptune-render-nanoseconds+))))
+        ;; Sleep only while the audio queue is full (a block drains every
+        ;; 16.7 ms) or playback is idle; keep pumping otherwise.
+        (let* ((timeout (if (and decoded (null (getf state :pending-pcm)))
+                            0
+                            8))
                (poll (or (poll-native-input nil timeout)
                          (error "Chiptune native input poll failed")))
                (control-count (getf poll :control-count))
