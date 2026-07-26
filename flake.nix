@@ -402,8 +402,18 @@
 
           buildPhase = ''
             runHook preBuild
+            # The standard variant carries json/slice/bytearray for the
+            # deploy-time scene installer; the minimal one strips Python
+            # down past what any real script can use.
             make -C ports/unix -j$NIX_BUILD_CORES \
-              VARIANT=minimal \
+              VARIANT=standard \
+              FROZEN_MANIFEST= \
+              MICROPY_PY_FFI=0 \
+              MICROPY_USE_READLINE=0 \
+              MICROPY_PY_TERMIOS=0 \
+              MICROPY_PY_SOCKET=0 \
+              MICROPY_PY_SSL=0 \
+              MICROPY_PY_THREAD=0 \
               CROSS_COMPILE=${pkgsCross.stdenv.cc.targetPrefix} \
               CC=$CC \
               STRIP=${pkgsCross.stdenv.cc.targetPrefix}strip \
@@ -415,7 +425,7 @@
           installPhase = ''
             runHook preInstall
             mkdir -p $out/bin $out/share/licenses/python-deck
-            install -m755 ports/unix/build-minimal/micropython \
+            install -m755 ports/unix/build-standard/micropython \
               $out/bin/python
             install -m644 LICENSE \
               $out/share/licenses/python-deck/LICENSE
