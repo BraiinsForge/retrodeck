@@ -68,6 +68,12 @@ const RUN_MAIN: &str = r#"
     1))
 "#;
 
+#[cfg(feature = "lisp-image")]
+unsafe extern "C" {
+    fn ecl_init_module(block: ClObject, entry: unsafe extern "C" fn(ClObject)) -> ClObject;
+    fn init_retrodeck_lisp(block: ClObject);
+}
+
 unsafe extern "C" {
     fn cl_boot(argc: c_int, argv: *mut *mut c_char) -> c_int;
     fn cl_shutdown();
@@ -424,6 +430,11 @@ impl Ecl {
             return Err("Common Lisp startup failed".to_owned());
         }
         Ok(())
+    }
+
+    #[cfg(feature = "lisp-image")]
+    fn initialize_image(&self) {
+        unsafe { ecl_init_module(ptr::null_mut(), init_retrodeck_lisp) };
     }
 
     fn run(&self) -> Result<u8, String> {
@@ -1537,7 +1548,7 @@ fn sibling_startup(program: Option<&OsStr>) -> PathBuf {
     PathBuf::from(DEFAULT_STARTUP)
 }
 
-fn startup_path() -> Result<PathBuf, String> {
+fn explicit_startup() -> Result<Option<PathBuf>, String> {
     let mut arguments = env::args_os();
     let program = arguments.next();
     // App symlinks (deck-menu, chiptune-deck, ...) keep their arguments for
@@ -1548,13 +1559,44 @@ fn startup_path() -> Result<PathBuf, String> {
         .and_then(Path::file_name)
         .is_some_and(|name| name != "retrodeck-native");
     if dedicated {
-        return Ok(sibling_startup(program.as_deref()));
+        return Ok(None);
     }
     match (arguments.next(), arguments.next()) {
-        (None, None) => Ok(sibling_startup(program.as_deref())),
-        (Some(path), None) => Ok(path.into()),
+        (None, None) => Ok(None),
+        (Some(path), None) => Ok(Some(path.into())),
         _ => Err("usage: retrodeck-native [STARTUP.LISP]".to_owned()),
     }
+}
+
+fn startup_path() -> Result<PathBuf, String> {
+    Ok(match explicit_startup()? {
+        Some(path) => path,
+        None => sibling_startup(env::args_os().next().as_deref()),
+    })
+}
+
+/// Loads the Lisp tree: an explicit startup file or RETRO_DECK_LISP_SOURCE
+/// forces the source path; otherwise the compiled-in image initializes and a
+/// sibling local.lisp, when present, overlays it for hot patches.
+#[cfg(feature = "lisp-image")]
+fn load_lisp(ecl: &Ecl) -> Result<(), String> {
+    if let Some(path) = explicit_startup()? {
+        return ecl.load(&path);
+    }
+    if env::var_os("RETRO_DECK_LISP_SOURCE").is_some() {
+        return ecl.load(&startup_path()?);
+    }
+    ecl.initialize_image();
+    let local = sibling_startup(env::args_os().next().as_deref()).with_file_name("local.lisp");
+    if local.is_file() {
+        return ecl.load(&local);
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "lisp-image"))]
+fn load_lisp(ecl: &Ecl) -> Result<(), String> {
+    ecl.load(&startup_path()?)
 }
 
 fn run() -> Result<u8, String> {
@@ -1578,11 +1620,10 @@ fn run() -> Result<u8, String> {
         }
         return verify_uploader_password(&path);
     }
-    let startup = startup_path()?;
     let ecl = Ecl::boot()?;
     process::install_signal_handlers()?;
     ecl.register_primitives()?;
-    ecl.load(&startup)?;
+    load_lisp(&ecl)?;
     ecl.run()
 }
 
