@@ -55,7 +55,7 @@
   ('("" "" "" "STATUS UNAVAILABLE") *network-status-result*)
   ('(0 0) *evdev-controls-scan-result* *evdev-controls-dispatch-result*)
   ('(0 nil) *evdev-gamepads-scan-result*)
-  ('(0 0 0 0 0 0) *input-poll-result*)
+  ('(0 0 0 0 0 0 0) *input-poll-result*)
   ('(0 0 -1 nil) *helper-result*)
   ('(1 0 0 -1 nil 0) *terminal-result* *child-result*))
 (defpackage #:retrodeck.native (:use))
@@ -113,7 +113,7 @@
     (push :sound *interaction-trace*))
   *play-status*)
 (define-native-test-functions
-  (abi-version () 27)
+  (abi-version () 28)
   (program-arguments () *program-arguments-result*)
   (list-directory (path)
     (setf *list-directory-path* path)
@@ -533,7 +533,7 @@
                    :clock (lambda () (or (pop times) 999))))
          (*active-status* active) (*active-count* 0)
          (*play-status* play) (*play-arguments* nil) (*stop-count* 0)
-         (*input-poll-result* (list 1 (length controls) (length touches) 0 1 0))
+         (*input-poll-result* (list 1 (length controls) (length touches) 0 1 0 0))
          (*input-poll-arguments* nil) (*canvas-clear-status* 1)
          (*canvas-glyph-status* 1) (*canvas-fill-status* 1))
     (with-runtime-device-fixture (:controls controls)
@@ -1353,7 +1353,7 @@
     (runtime (:presentation nil :wayland-display nil
               :clock (lambda () (pop times))) ()
              (times '(100 101 102)) (*active-status* 1) (*play-status* 1)
-             (*stop-count* 0) (*input-poll-result* '(1 0 1 0 0 0))
+             (*stop-count* 0) (*input-poll-result* '(1 0 1 0 0 0 0))
              (*canvas-clear-status* 1)
              (retrodeck::*menu-sound-input-until-ms* 777))
   (let ((*evdev-touch-queue* '((200 200 1 1 0)))
@@ -1415,7 +1415,7 @@
          (*chiptune-rewind-count* 0)
          (*chiptune-close-status* 1)
          (*chiptune-audio-close-status* 1)
-         (*input-poll-result* (list 1 (length controls) (length touches) 0 1 0))
+         (*input-poll-result* (list 1 (length controls) (length touches) 0 1 0 0))
          (*canvas-clear-status* 1)
          (*canvas-glyph-status* 1)
          (*canvas-fill-status* 1)
@@ -2188,28 +2188,31 @@ secret!9
 (assert (null (retrodeck:dispatch-evdev-controls)))
 (assert-signals type-error (retrodeck:dispatch-evdev-controls #x100000000))
 
-(setf *input-poll-result* '(1 2 3 1 1 0))
+(setf *input-poll-result* '(1 2 3 1 1 0 0))
 (assert (equal (retrodeck:poll-native-input nil 25)
                '(:poll-ready-p t :control-count 2 :touch-count 3
-                 :touch-lost-p t :rescan-controls-p t :shutdown-p nil)))
+                 :touch-lost-p t :rescan-controls-p t :shutdown-p nil
+                 :refresh-p nil)))
 (assert (equal *input-poll-arguments* '(0 25)))
-(setf *input-poll-result* '(0 0 0 0 0 1))
+(setf *input-poll-result* '(0 0 0 0 0 1 1))
 (assert (equal (retrodeck:poll-native-input t 0)
                '(:poll-ready-p nil :control-count 0 :touch-count 0
-                 :touch-lost-p nil :rescan-controls-p nil :shutdown-p t)))
+                 :touch-lost-p nil :rescan-controls-p nil :shutdown-p t
+                 :refresh-p t)))
 (assert (equal *input-poll-arguments* '(1 0)))
-(dolist (invalid '((0 1 0 0 0 0)
-                   (0 0 0 1 0 0)
-                   (2 0 0 0 0 0)
-                   (1 65 0 0 0 0)
-                   (1 0 -1 0 0 0)
-                   (1 0 0 0 0)))
+(dolist (invalid '((0 1 0 0 0 0 0)
+                   (0 0 0 1 0 0 0)
+                   (2 0 0 0 0 0 0)
+                   (1 65 0 0 0 0 0)
+                   (1 0 -1 0 0 0 0)
+                   (1 0 0 0 0 2)
+                   (1 0 0 0 0 0)))
   (setf *input-poll-result* invalid)
   (assert-signals error (retrodeck:poll-native-input nil 0)))
 (setf *input-poll-result* nil)
 (assert (null (retrodeck:poll-native-input nil 0)))
 (assert-signals type-error (retrodeck:poll-native-input nil #x100000000))
-(setf *input-poll-result* '(0 0 0 0 0 0))
+(setf *input-poll-result* '(0 0 0 0 0 0 0))
 
 (assert (equal retrodeck:*dashboard-keyboard-controls*
                '((1 :back)
@@ -4183,7 +4186,7 @@ secret!9
                  :clock (lambda () (or (pop times) 999))))
        (*evdev-controls-dispatch-timeout* :untouched)
        (*evdev-dispatch-timeout* :untouched)
-       (*input-poll-result* '(1 3 2 1 1 0))
+       (*input-poll-result* '(1 3 2 1 1 0 0))
        (*input-poll-arguments* nil)
        (*network-status-result*
          '("NET1" "10.0.1.11" "10.0.0.15" "CONNECTED"))
@@ -4239,7 +4242,7 @@ secret!9
       (assert (eq *evdev-controls-dispatch-timeout* :untouched))
       (assert (eq *evdev-dispatch-timeout* :untouched))
       (assert (= (getf runtime :now) 101)))
-    (setf *input-poll-result* '(0 0 0 0 1 0)
+    (setf *input-poll-result* '(0 0 0 0 1 0 0)
           *evdev-controls* nil
           *evdev-touch-queue* nil)
     (let ((snapshot (retrodeck:dashboard-runtime-poll-input runtime 40)))
@@ -4269,7 +4272,7 @@ secret!9
          (retrodeck:make-dashboard-runtime
           :clock (lambda () (or (pop times) 999))))
        (*active-status* 0)
-       (*input-poll-result* '(0 0 0 0 0 0))
+       (*input-poll-result* '(0 0 0 0 0 0 0))
        (*input-poll-arguments* nil)
        (*network-status-result* '("" "" "" "CONNECTED"))
        (*projection-status* 1)
@@ -4297,7 +4300,7 @@ secret!9
           (assert (equal animation-trace
                          '((:reap-sound) (:render) (:present))))
           (assert (equal *input-poll-arguments* '(0 40)))))
-      (setf *input-poll-result* '(0 0 0 0 0 1))
+      (setf *input-poll-result* '(0 0 0 0 0 1 1))
       (multiple-value-bind
             (after-shutdown shutdown-runtime shutdown-trace)
           (retrodeck:dashboard-runtime-run-iteration after-normal runtime)
@@ -4351,7 +4354,7 @@ secret!9
          (retrodeck:*dashboard-reduced-motion-environment*
            "RETRODECK_TEST_REDUCED_MOTION_MUST_BE_MISSING"))
     (exercise
-     '(0 0 0 0 0 0) '(100 101 102 103 104)
+     '(0 0 0 0 0 0 0) '(100 101 102 103 104)
      (lambda (ignored-state runtime)
        (declare (ignore ignored-state))
        (multiple-value-bind
@@ -4387,7 +4390,7 @@ secret!9
                   (list palette-path 1 4096)
                   (list credits-path 1 32768)))))
   (exercise
-   '(0 0 0 0 0 0) '(200)
+   '(0 0 0 0 0 0 0) '(200)
    (lambda (state runtime)
      (let ((stops nil))
        (multiple-value-bind (final returned-runtime traces reason)
@@ -4407,7 +4410,7 @@ secret!9
          (assert (null *input-poll-arguments*))
          (assert-runtime-observations :fbdev-close 1 :evdev-close 1 :controls-close 1)))))
   (exercise
-   '(0 0 0 0 0 1) '(300 301 302)
+   '(0 0 0 0 0 1 0) '(300 301 302)
    (lambda (state runtime)
      (multiple-value-bind (final returned-runtime traces reason)
          (retrodeck:dashboard-runtime-rehearse state runtime)
@@ -4425,7 +4428,7 @@ secret!9
      (assert-runtime-observations :active-count 1 :fbdev-close 1 :evdev-close 1
       :controls-close 1 :initialized nil :running nil)))
   (exercise
-   '(0 0 0 0 0 0) '(500)
+   '(0 0 0 0 0 0 0) '(500)
    (lambda (state runtime)
      (with-initialized-dashboard-runtime (state runtime 500)
        (assert-signals error
@@ -4494,7 +4497,7 @@ secret!9
                       :fbdev-size '(1280 480) :wayland-open 0))
 
 (let ((times '(201))
-      (*input-poll-result* '(1 1 1 0 0 1))
+      (*input-poll-result* '(1 1 1 0 0 1 0))
       (*input-poll-arguments* nil))
   (with-dashboard-runtime-fixture
       (state runtime nil 190 190 ()

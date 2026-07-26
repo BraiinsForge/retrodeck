@@ -338,6 +338,7 @@ pub(crate) fn dispatch_inputs(timeout_ms: u32) -> Result<polling::InputDispatch,
                 touch_lost,
                 rescan: controls.rescan_requested(),
                 shutdown: false,
+                refresh: false,
             })
         })
     })

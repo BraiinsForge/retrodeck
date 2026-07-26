@@ -11,6 +11,9 @@ pub struct InputDispatch {
     pub touch_lost: bool,
     pub rescan: bool,
     pub shutdown: bool,
+    /// The compositor asked for a fresh widget frame (scene became
+    /// visible again after its render target was reclaimed).
+    pub refresh: bool,
 }
 
 pub fn monotonic_nanoseconds() -> u64 {

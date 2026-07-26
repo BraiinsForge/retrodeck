@@ -382,7 +382,7 @@
 
 (in-package #:retrodeck)
 
-(defconstant +native-abi-version+ 27)
+(defconstant +native-abi-version+ 28)
 
 (defparameter *menu-sound-cues*
   '((:volume (660 60) (880 60))
@@ -622,17 +622,20 @@
   (let ((result (input-poll (if wayland 1 0) timeout-ms)))
     (when result
       (unless (and (listp result)
-                   (= (length result) 6)
+                   (= (length result) 7)
                    (every #'integerp result))
         (error "Invalid native input poll result ~S" result))
       (destructuring-bind
-          (ready control-count touch-count touch-lost rescan shutdown) result
+          (ready control-count touch-count touch-lost rescan shutdown
+           refresh)
+          result
         (unless (and (member ready '(0 1))
                      (typep control-count '(integer 0 64))
                      (typep touch-count '(integer 0 *))
                      (member touch-lost '(0 1))
                      (member rescan '(0 1))
                      (member shutdown '(0 1))
+                     (member refresh '(0 1))
                      (or (plusp ready)
                          (and (zerop control-count)
                               (zerop touch-count)
@@ -643,7 +646,8 @@
               :touch-count touch-count
               :touch-lost-p (plusp touch-lost)
               :rescan-controls-p (plusp rescan)
-              :shutdown-p (plusp shutdown))))))
+              :shutdown-p (plusp shutdown)
+              :refresh-p (plusp refresh))))))
 
 (defun scan-evdev-controls ()
   (let ((counts (evdev-controls-scan)))

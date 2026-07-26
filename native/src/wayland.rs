@@ -131,6 +131,7 @@ struct State {
     width: u32,
     height: u32,
     visible: bool,
+    refresh_requested: bool,
     shutdown: bool,
     touch_x: i32,
     touch_y: i32,
@@ -451,18 +452,23 @@ impl Widget {
     }
 
     fn input_dispatch(
-        &self,
+        &mut self,
         controls: &controls::Controls,
         ready: bool,
         touch_lost: bool,
     ) -> polling::InputDispatch {
+        let refresh = std::mem::take(&mut self.state.refresh_requested);
         polling::InputDispatch {
-            ready: ready || controls.report_count() > 0 || !self.state.touches.is_empty(),
+            ready: ready
+                || refresh
+                || controls.report_count() > 0
+                || !self.state.touches.is_empty(),
             control_count: controls.report_count(),
             touch_count: self.state.touches.len(),
             touch_lost,
             rescan: controls.rescan_requested(),
             shutdown: self.state.shutdown,
+            refresh,
         }
     }
 
@@ -1070,6 +1076,14 @@ impl Dispatch<deck_widget_surface_v1::DeckWidgetSurfaceV1, ()> for State {
             deck_widget_surface_v1::Event::ConfigureDone => state.configured = true,
             deck_widget_surface_v1::Event::Lifecycle { state: lifecycle } => {
                 state.visible = lifecycle != 0;
+                // Leaving dormancy reclaims the widget's render target;
+                // without a fresh commit the scene shows black.
+                if lifecycle != 0 {
+                    state.refresh_requested = true;
+                }
+            }
+            deck_widget_surface_v1::Event::TransitionIncoming => {
+                state.refresh_requested = true;
             }
             deck_widget_surface_v1::Event::Shutdown => state.shutdown = true,
             _ => {}

@@ -25,7 +25,7 @@
         :touch-supervision t :mirror-console t))
 
 (defun main ()
-  (check (= (retrodeck.native:abi-version) 27) "Native ABI mismatch")
+  (check (= (retrodeck.native:abi-version) 28) "Native ABI mismatch")
   (check (zerop (retrodeck.native:process-shutdown-p))
          "Native shutdown state was set")
   (let ((first (monotonic-nanoseconds)))
@@ -575,7 +575,7 @@
                  (= (retrodeck.native:evdev-touch-dispatch 0) -1))
       (error "Closed evdev touch state crossed the native boundary incorrectly"))
     (retrodeck.native:evdev-touch-close)
-    (check (equal (retrodeck.native:input-poll 0 0) '(0 0 0 0 0 0)) "Empty aggregate input poll crossed the native boundary incorrectly")
+    (check (equal (retrodeck.native:input-poll 0 0) '(0 0 0 0 0 0 0)) "Empty aggregate input poll crossed the native boundary incorrectly")
     (unless (equal (poll-native-input nil 0)
                    '(:poll-ready-p nil :control-count 0 :touch-count 0
                      :touch-lost-p nil :rescan-controls-p nil :shutdown-p nil))

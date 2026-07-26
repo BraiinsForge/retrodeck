@@ -1513,6 +1513,11 @@
                  unless report
                    do (error "Dashboard native touch queue ended early")
                  collect report)))
+    ;; The compositor reclaims the widget's render target when the scene
+    ;; goes dormant; re-present the last frame when the scene returns or
+    ;; it stays black until the next user-driven redraw.
+    (when (getf poll :refresh-p)
+      (dashboard-runtime-present runtime))
     (multiple-value-bind (gamepad-actions keyboard-actions control-count)
         (collect-dashboard-control-actions)
       (unless (= control-count (getf poll :control-count))

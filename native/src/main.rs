@@ -44,7 +44,7 @@ type EclTwelveArgumentFunction = unsafe extern "C" fn(
 const ECL_NIL: ClObject = 1usize as ClObject;
 const FIXNUM_TAG: usize = 3;
 const DEFAULT_STARTUP: &str = "/mnt/data/nes-deck/lisp/startup.lisp";
-const ABI_VERSION: ClFixnum = 27;
+const ABI_VERSION: ClFixnum = 28;
 const MAXIMUM_REGULAR_FILE_BYTES: u32 = 4 * 1024 * 1024;
 
 const LOAD_STARTUP: &str = r#"
@@ -1014,6 +1014,7 @@ unsafe extern "C" fn native_input_poll(
             boolean_fixnum(dispatch.touch_lost),
             boolean_fixnum(dispatch.rescan),
             boolean_fixnum(dispatch.shutdown),
+            boolean_fixnum(dispatch.refresh),
         ]),
         Err(error) => {
             eprintln!("retrodeck: {error}");
