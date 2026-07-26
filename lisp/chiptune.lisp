@@ -693,9 +693,10 @@
                 (or (zerop progress)
                     (chiptune-fill-source-rect 96 134 progress 3 green))))
          ;; The elapsed-time text ticks once a second; repainting it here
-         ;; keeps the full playback render out of the audio loop.
+         ;; keeps the full playback render out of the audio loop.  The text
+         ;; sits on the panel fill, so erase with the panel color.
          (chiptune-fill-source-rect 96 143 (+ (bitmap-text-width "88:88" 1) 2)
-                                    7 background)
+                                    7 (chiptune-color :active))
          (chiptune-draw-source-text 96 143 (chiptune-format-time position)
                                     1 (chiptune-color :text)))))
 
