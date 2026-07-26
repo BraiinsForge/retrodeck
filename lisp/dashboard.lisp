@@ -1958,6 +1958,13 @@
                (push (pop arguments) options)))
     (nreverse options)))
 
+(defun dashboard-directory-path (path)
+  (check-type path string)
+  (if (or (zerop (length path))
+          (char= (char path (1- (length path))) #\/))
+      path
+      (concatenate 'string path "/")))
+
 (defun run-dashboard-main (&optional arguments)
   (cond
     ((equal arguments '("--help"))
@@ -2014,9 +2021,13 @@
            (finish-output *error-output*))
          (let ((*dashboard-palette* palette)
                (*dashboard-cover-directory*
-                 (or (getf options :cover-directory)
-                     *dashboard-cover-directory*))
+                 (dashboard-directory-path
+                  (or (getf options :cover-directory)
+                      *dashboard-cover-directory*)))
                (owned nil))
+           (format *error-output* "deck-menu: loaded ~D local covers~%"
+                   (count-if #'dashboard-cover-raster (getf state :games)))
+           (finish-output *error-output*)
            (unwind-protect
                (progn
                  (setf state (dashboard-runtime-initialize

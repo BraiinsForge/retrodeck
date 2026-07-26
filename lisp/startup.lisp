@@ -158,6 +158,8 @@
            #:start-chiptune-track
            #:step-chiptune-file
            #:write-chiptune-audio
+           #:*dashboard-version-label*
+           #:dashboard-directory-path
            #:*dashboard-brightness-minimum*
            #:*dashboard-brightness-step*
            #:*dashboard-built-in-applications*
