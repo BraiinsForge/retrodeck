@@ -1,5 +1,6 @@
 {
   networkSupport ? false,
+  compilerSupport ? false,
   nixpkgsSrc ? builtins.fetchTarball {
     # nixpkgs revision 767b0d3ec98a143ad9ed7dfc0d5553510ac27133
     url = "https://releases.nixos.org/nixpkgs/nixpkgs-26.11pre1031701.767b0d3ec98a/nixexprs.tar.xz";
@@ -33,7 +34,7 @@ let
       "--enable-boehm=included"
       "--enable-gmp=system"
       "--enable-manual=no"
-      "--with-cmp=no"
+      (if compilerSupport then "--with-cmp=yes" else "--with-cmp=no")
       "--with-bytecmp=builtin"
       "--with-asdf=builtin"
       (if networkSupport then "--with-tcp=yes" else "--with-tcp=no")
@@ -84,6 +85,9 @@ pkgs.runCommand "ecl-arm-${runtimeKind}-runtime-${version}" {
     inherit networkSupport nixpkgsRev;
     eclDir = "lib/ecl/";
     targetSystem = "armv7l-linux";
+    # The unstripped cross build; with compilerSupport it carries the cmp
+    # module and C headers the Lisp image build needs.
+    eclBuild = eclStatic;
   };
 
   meta = {
