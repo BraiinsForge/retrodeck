@@ -115,7 +115,14 @@ else
 fi
 
 require_process DASHBOARD deck-menu
-require_process UPLOADER rom-uploader
+# The Lisp uploader runs as the network ECL binary; probe its HTTP port
+# instead of a process name.
+if wget -q -O /dev/null -T 5 http://127.0.0.1:8080/ 2>/dev/null; then
+  report UPLOADER 'running (HTTP 8080)'
+else
+  report UPLOADER 'NOT RUNNING (HTTP 8080)'
+  failures=$((failures + 1))
+fi
 
 if [ -x /etc/init.d/deck-wifi ] &&
    /etc/init.d/deck-wifi status >/dev/null 2>&1; then
