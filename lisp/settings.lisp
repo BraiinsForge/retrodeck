@@ -28,7 +28,7 @@
     :keymap-czech-status "TERMINAL KEYS: CZECH"
     :keymap-error-status "KEYMAP STATE ERROR"))
 
-(defparameter *dashboard-version-label* "RETRO DECK 0.1.0 RUST+ECL")
+(defparameter *dashboard-version-label* "RETRO DECK 1.0.0 RUST+ECL")
 
 (defparameter *dashboard-settings-geometry*
   '(:canvas-width 1280 :canvas-height 480
