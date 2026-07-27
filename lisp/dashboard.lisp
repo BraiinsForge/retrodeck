@@ -479,6 +479,7 @@
           :network (copy-tree network)
           :credits-crawl credits-crawl
           :credits-started-at 0
+          :credits-rendered-at 0
           :reduced-motion (not (null reduced-motion))
           :controller-guard (dashboard-controller-guard-initial-state)
           :last-control-scan-ms nil
@@ -784,9 +785,14 @@
       (setf (getf next :network-refreshed-at) now
             (getf next :pending-network) t
             effects (append effects '((:network-action)))))
+    ;; The crawl repaints on a wall-clock deadline; rendering every loop
+    ;; wake-up free-runs into the compositor and reads as stutter.
     (when (and (eq (getf next :view) :credits)
-               (not (getf next :reduced-motion)))
-      (setf effects (append effects (dashboard-loop-screen-effects))))
+               (not (getf next :reduced-motion))
+               (>= (- now (getf next :credits-rendered-at))
+                   (dashboard-timing :animated-poll-ms)))
+      (setf (getf next :credits-rendered-at) now
+            effects (append effects (dashboard-loop-screen-effects))))
     (values next effects)))
 
 (defun dashboard-loop-poll-timeout (state)
