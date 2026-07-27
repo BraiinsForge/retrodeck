@@ -112,10 +112,18 @@ impl TextMask {
             if alpha <= 0 {
                 continue;
             }
-            for x in first_x..=last_x {
-                let source_column = ((f64::from(x) + 0.5 - center) / scale
-                    + f64::from(self.width) * 0.5)
-                    .floor() as i32;
+            // The source column is linear in x; one division per row and a
+            // 16.16 fixed-point walk replace a per-pixel f64 division that
+            // dominated the crawl's frame time on the Cortex-A7.
+            let inverse_scale = 1.0 / scale;
+            let step = (inverse_scale * 65536.0) as i64;
+            let mut source_fx = (((f64::from(first_x) + 0.5 - center) * inverse_scale
+                + f64::from(self.width) * 0.5)
+                * 65536.0) as i64;
+            for _x in first_x..=last_x {
+                let source_column = (source_fx >> 16) as i32;
+                let x = _x;
+                source_fx += step;
                 if source_column < 0
                     || source_column >= self.width as i32
                     || self.pixels
