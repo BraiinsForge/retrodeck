@@ -81,6 +81,7 @@ echo "Building static ARM payloads..."
 nes=$(build_flake .#nes-deck)
 gb=$(build_flake .#gb-deck)
 zx=$(build_flake .#zx-deck)
+gba=$(build_flake .#gba-deck)
 native=$(build_flake .#retrodeck-native)
 fbterm=$(build_flake .#fbterm-deck)
 rlwrap=$(build_flake .#rlwrap-deck)
@@ -111,6 +112,7 @@ mkdir -p \
 cp "$nes/bin/nes-deck" "$payload/nes-deck/nes-deck"
 cp "$gb/bin/gb-deck" "$payload/nes-deck/gb-deck"
 cp "$zx/bin/zx-deck" "$payload/nes-deck/zx-deck"
+cp "$gba/bin/gba-deck" "$payload/nes-deck/gba-deck"
 ln -sfn retrodeck-native "$payload/nes-deck/ten-seconds-deck"
 ln -sfn ../retrodeck-native "$payload/nes-deck/menu/deck-menu"
 cp "$native/bin/retrodeck-native" "$payload/nes-deck/retrodeck-native"
@@ -187,7 +189,7 @@ if [[ -d chiptunes ]]; then
     -name '*.vgm' -o -name '*.vgz' \) -exec cp {} "$payload/chiptunes/" \;
 fi
 
-for system in nes gb gbc zx; do
+for system in nes gb gbc zx gba; do
   mkdir -p "$payload/roms/$system"
   if [[ -d roms/$system ]]; then
     cp -a "roms/$system/." "$payload/roms/$system/"
@@ -195,7 +197,7 @@ for system in nes gb gbc zx; do
 done
 
 find "$payload/nes-deck" -type f \( \
-  -name 'nes-deck' -o -name 'gb-deck' -o -name 'zx-deck' -o \
+  -name 'nes-deck' -o -name 'gb-deck' -o -name 'zx-deck' -o -name 'gba-deck' -o \
   -name 'ten-seconds-deck' -o \
   -name 'chiptune-deck' -o -name 'retrodeck-native' -o \
   -name 'deck-menu' -o \

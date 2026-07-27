@@ -19,6 +19,10 @@
       url = "github:libretro/fuse-libretro/bce196fb774835fe65b3e5b821887a4ccf657167";
       flake = false;
     };
+    gpsp-src = {
+      url = "github:libretro/gpsp/5b6e751f4abf368509146cd143c949c1946ac1ae";
+      flake = false;
+    };
     lua-src = {
       url = "https://www.lua.org/ftp/lua-5.5.0.tar.gz";
       flake = false;
@@ -26,7 +30,7 @@
   };
 
   outputs =
-    { self, nixpkgs, fenix, fceumm-src, gambatte-src, fuse-src, lua-src }:
+    { self, nixpkgs, fenix, fceumm-src, gambatte-src, fuse-src, gpsp-src, lua-src }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
@@ -191,6 +195,33 @@
           runHook postInstall
         '';
       };
+      gpspCore = pkgsCross.stdenv.mkDerivation {
+        pname = "gpsp-core";
+        version = "0.91-20260721-deck";
+        src = gpsp-src;
+        nativeBuildInputs = [ pkgs.gnumake ];
+        buildInputs = [ pkgsCross.glibc.static ];
+        NIX_CFLAGS_COMPILE = "-static -O3";
+        NIX_LDFLAGS = "-static";
+        buildPhase = ''
+          runHook preBuild
+          make -j$NIX_BUILD_CORES \
+            platform=rpi2 \
+            STATIC_LINKING=1 \
+            TARGET=gpsp_libretro.a \
+            CC=$CC \
+            CXX=$CXX \
+            AR=${pkgsCross.stdenv.cc.targetPrefix}ar
+          runHook postBuild
+        '';
+        installPhase = ''
+          runHook preInstall
+          install -Dm644 gpsp_libretro.a $out/lib/libgpsp.a
+          install -Dm644 COPYING \
+            $out/share/licenses/gba-deck/gpSP-COPYING
+          runHook postInstall
+        '';
+      };
       # One Rust libretro host binary per console, with the core linked in.
       retroHost = { name, core, coreDerivation, coreLibrary, description, license
         , linkTimeOptimization ? false }:
@@ -345,6 +376,15 @@
           coreLibrary = "fuse";
           description = "Fuse ZX Spectrum core with the Rust Deck frontend";
           license = pkgs.lib.licenses.gpl3Only;
+        };
+
+        gba-deck = retroHost {
+          name = "gba-deck";
+          core = "gba";
+          coreDerivation = gpspCore;
+          coreLibrary = "gpsp";
+          description = "gpSP GBA core with the Rust Deck frontend";
+          license = pkgs.lib.licenses.gpl2Only;
         };
 
         lua-deck = pkgsCross.stdenv.mkDerivation {
@@ -719,6 +759,12 @@
             ${./roms/gb/kirbys-dream-land.gb} 9e145219789c4817
           run ${self.packages.${system}.zx-deck}/bin/zx-deck \
             ${./roms/zx/knight-lore.tap} 9ca35bdc8ecfa26d
+          # GPL homebrew fetched by hash; runs on gpSP's built-in HLE BIOS.
+          run ${self.packages.${system}.gba-deck}/bin/gba-deck \
+            ${pkgs.fetchurl {
+              url = "https://github.com/pinobatch/240p-test-mini/releases/download/v0.23/240pee_mb.gba";
+              hash = "sha256-R4RPcUBzigb487wJeA2jqwlVOaJQuHD2FP7tVh2dbzQ=";
+            }} 408bb5792cfa3e00
           touch $out
         '';
 
