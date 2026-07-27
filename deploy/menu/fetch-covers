@@ -16,6 +16,7 @@ system_slug() {
 		nes) printf '%s' 'Nintendo%20-%20Nintendo%20Entertainment%20System' ;;
 		gb) printf '%s' 'Nintendo%20-%20Game%20Boy' ;;
 		gbc) printf '%s' 'Nintendo%20-%20Game%20Boy%20Color' ;;
+		gba) printf '%s' 'Nintendo%20-%20Game%20Boy%20Advance' ;;
 		zx) printf '%s' 'Sinclair%20-%20ZX%20Spectrum' ;;
 		*) return 1 ;;
 	esac
