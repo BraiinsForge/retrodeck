@@ -59,7 +59,7 @@ trap restore_service_after_failure EXIT
 
 # Validate the complete payload before stopping a running service.
 for executable in \
-  nes-deck gb-deck zx-deck ten-seconds-deck chiptune-deck; do
+  nes-deck gb-deck zx-deck gba-deck ten-seconds-deck chiptune-deck; do
   [ -x "$stage/nes-deck/$executable" ] || {
     echo "Staged executable is missing: $executable" >&2
     exit 1
@@ -196,6 +196,7 @@ fi
 cp -p "$stage/nes-deck/nes-deck" "$base/nes-deck"
 cp -p "$stage/nes-deck/gb-deck" "$base/gb-deck"
 cp -p "$stage/nes-deck/zx-deck" "$base/zx-deck"
+cp -p "$stage/nes-deck/gba-deck" "$base/gba-deck"
 ln -sfn retrodeck-native "$base/ten-seconds-deck"
 ln -sfn retrodeck-native "$base/chiptune-deck"
 cp -p "$stage/nes-deck/retrodeck-native" "$base/retrodeck-native"
