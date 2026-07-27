@@ -63,11 +63,10 @@
     :selector-status "/var/run/deck-wifi/status"))
 
 (defun dashboard-wifi-value (values name description)
-  (let ((missing (gensym)))
-    (let ((value (getf values name missing)))
-      (if (eq value missing)
-          (error "Unknown dashboard Wi-Fi ~A ~S" description name)
-          (if (listp value) (copy-tree value) value)))))
+  (let ((value (getf values name *plist-missing-marker*)))
+    (if (eq value *plist-missing-marker*)
+        (error "Unknown dashboard Wi-Fi ~A ~S" description name)
+        (if (listp value) (copy-tree value) value))))
 
 (defun dashboard-wifi-label (name)
   (dashboard-wifi-value *dashboard-wifi-labels* name "label"))

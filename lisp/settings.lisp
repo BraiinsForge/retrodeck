@@ -74,11 +74,10 @@
     :terminal :keymap :wifi))
 
 (defun dashboard-settings-value (values name description)
-  (let ((missing (gensym)))
-    (let ((value (getf values name missing)))
-      (if (eq value missing)
-          (error "Unknown dashboard settings ~A ~S" description name)
-          (if (listp value) (copy-list value) value)))))
+  (let ((value (getf values name *plist-missing-marker*)))
+    (if (eq value *plist-missing-marker*)
+        (error "Unknown dashboard settings ~A ~S" description name)
+        (if (listp value) (copy-list value) value))))
 
 (defun dashboard-settings-label (name)
   (dashboard-settings-value *dashboard-settings-labels* name "label"))

@@ -702,9 +702,9 @@
          (keyboard (or (getf arguments :keyboard-actions) nil))
          (now (getf arguments :now))
          (layout (getf arguments :layout))
-         (missing (gensym))
-         (quarantine (getf arguments :controller-quarantined-p missing)))
-    (when (eq quarantine missing)
+         (quarantine (getf arguments :controller-quarantined-p
+                           *plist-missing-marker*)))
+    (when (eq quarantine *plist-missing-marker*)
       (error "Dashboard controls need explicit audio quarantine state"))
     (check-type now (integer 0 *))
     (check-type layout list)
@@ -795,10 +795,17 @@
             effects (append effects (dashboard-loop-screen-effects))))
     (values next effects)))
 
-(defun dashboard-loop-poll-timeout (state)
+(defun dashboard-loop-poll-timeout (state &optional now)
   (if (and (eq (getf state :view) :credits)
            (not (getf state :reduced-motion)))
-      (dashboard-timing :animated-poll-ms)
+      (let ((interval (dashboard-timing :animated-poll-ms)))
+        ;; Rendering happens before the poll; waiting the full interval on
+        ;; top of the render time would halve the crawl's frame rate.
+        (if now
+            (max 0 (min interval
+                        (- (+ (getf state :credits-rendered-at) interval)
+                           now)))
+            interval))
       (dashboard-timing :main-poll-ms)))
 
 (defun dashboard-reduce-network-result (state event)
@@ -1834,7 +1841,12 @@
         (values after-begin runtime begin-trace)
         (let ((input
                 (dashboard-runtime-poll-input
-                 runtime (dashboard-loop-poll-timeout after-begin))))
+                 runtime
+                 (if (and (eq (getf after-begin :view) :credits)
+                          (not (getf after-begin :reduced-motion)))
+                     (dashboard-loop-poll-timeout
+                      after-begin (dashboard-runtime-read-clock runtime))
+                     (dashboard-loop-poll-timeout after-begin)))))
           (multiple-value-bind (after-input input-trace)
               (dashboard-runtime-dispatch-input after-begin runtime input)
             (values after-input runtime

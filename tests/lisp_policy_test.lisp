@@ -3641,6 +3641,10 @@ secret!9
   (let ((credits (copy-list state)))
     (setf (getf credits :view) :credits)
     (assert (= (retrodeck:dashboard-loop-poll-timeout credits) 66))
+    (setf (getf credits :credits-rendered-at) 200)
+    (assert (= (retrodeck:dashboard-loop-poll-timeout credits 240) 26))
+    (assert (= (retrodeck:dashboard-loop-poll-timeout credits 300) 0))
+    (setf (getf credits :credits-rendered-at) 0)
     (multiple-value-bind (animated effects)
         (retrodeck:dashboard-reduce credits '(:tick :now 200))
       (assert (equal effects '((:render) (:present))))
@@ -4311,7 +4315,10 @@ secret!9
           (assert (eq (getf after-animation :view) :credits))
           (assert (equal animation-trace
                          '((:reap-sound) (:render) (:present))))
-          (assert (equal *input-poll-arguments* '(0 66)))))
+          ;; The first credits iteration has no prior repaint, so the
+          ;; poll returns immediately and the tick renders right away;
+          ;; later iterations wait out the 66 ms deadline remainder.
+          (assert (equal *input-poll-arguments* '(0 0)))))
       (setf *input-poll-result* '(0 0 0 0 0 1 1))
       (multiple-value-bind
             (after-shutdown shutdown-runtime shutdown-trace)

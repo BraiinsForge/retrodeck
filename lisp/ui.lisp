@@ -2,6 +2,11 @@
 
 (defconstant +bitmap-glyph-width+ 5)
 (defconstant +bitmap-glyph-height+ 7)
+
+;; Shared missing-value marker for plist lookups. A fresh (gensym) per
+;; lookup costs ~143 us on the Deck and litters the heap; hot render
+;; loops do thousands of lookups per second.
+(defparameter *plist-missing-marker* '#:missing)
 (defconstant +bitmap-glyph-advance+ 6)
 
 (defun display-ascii (text)
