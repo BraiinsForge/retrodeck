@@ -68,6 +68,19 @@ const RUN_MAIN: &str = r#"
     1))
 "#;
 
+const RUN_REPL: &str = r#"
+(handler-case
+    (progn
+      (setf *package* (or (find-package "RETRODECK") *package*))
+      (format t "retrodeck: interactive REPL (loaded definitions are live)~%")
+      (finish-output)
+      (si::top-level t)
+      0)
+  (error (condition)
+    (format *error-output* "retrodeck: REPL failed: ~A~%" condition)
+    1))
+"#;
+
 #[cfg(feature = "lisp-image")]
 unsafe extern "C" {
     fn ecl_init_module(block: ClObject, entry: unsafe extern "C" fn(ClObject)) -> ClObject;
@@ -439,6 +452,10 @@ impl Ecl {
 
     fn run(&self) -> Result<u8, String> {
         decode_exit_code(self.evaluate(RUN_MAIN))
+    }
+
+    fn repl(&self) -> Result<u8, String> {
+        decode_exit_code(self.evaluate(RUN_REPL))
     }
 
     fn evaluate(&self, source: &str) -> ClObject {
@@ -1625,6 +1642,11 @@ fn run() -> Result<u8, String> {
     process::install_signal_handlers()?;
     ecl.register_primitives()?;
     load_lisp(&ecl)?;
+    // RETRO_DECK_REPL drops into an interactive top level over the loaded
+    // tree (the compiled image in production builds) instead of MAIN.
+    if env::var_os("RETRO_DECK_REPL").is_some() {
+        return ecl.repl();
+    }
     ecl.run()
 }
 
