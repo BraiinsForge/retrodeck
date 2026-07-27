@@ -6,6 +6,9 @@ use std::sync::{Condvar, Mutex, OnceLock};
 
 const AUDIO_DEVICE: &std::ffi::CStr = c"/dev/dsp";
 const QUEUE_FRAMES: usize = 16384;
+// Start the queue with a silent cushion so a late emulation window drains
+// slack instead of underrunning the device audibly.
+const CUSHION_FRAMES: usize = 1024;
 const WRITE_CHUNK_FRAMES: usize = 2048;
 
 const SNDCTL_DSP_SETFMT: libc::c_ulong = 0xc0045005;
@@ -233,7 +236,7 @@ pub fn open(source_rate: u32, volume_percent: i32) -> Result<(), String> {
         let mut guard = shared().lock().expect("audio queue lock");
         guard.queue = vec![0; QUEUE_FRAMES];
         guard.head = 0;
-        guard.size = 0;
+        guard.size = CUSHION_FRAMES;
         guard.dropped = 0;
         guard.stopping = false;
         guard.worker_failed = false;

@@ -511,6 +511,21 @@ impl FrameClock {
         }
     }
 
+    /// Nanoseconds the loop is running behind the next frame deadline;
+    /// zero or negative when on schedule.
+    pub fn lateness(&self) -> i64 {
+        if self.frame_nanoseconds <= 0 {
+            return 0;
+        }
+        let deadline =
+            self.start_nanoseconds + (self.frame_number + 1) * self.frame_nanoseconds;
+        monotonic_now() - deadline
+    }
+
+    pub fn frame_nanoseconds(&self) -> i64 {
+        self.frame_nanoseconds
+    }
+
     pub fn wait_for_next_frame(&mut self) {
         if self.frame_nanoseconds <= 0 {
             return;

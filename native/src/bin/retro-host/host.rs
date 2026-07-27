@@ -192,6 +192,7 @@ static CONFIG: std::sync::OnceLock<&'static CoreConfig> = std::sync::OnceLock::n
 static SYSTEM_DIRECTORY: std::sync::OnceLock<std::ffi::CString> = std::sync::OnceLock::new();
 static PIXEL_FORMAT: AtomicU32 = AtomicU32::new(PIXEL_FORMAT_XRGB8888);
 static VIDEO_FAILED: AtomicBool = AtomicBool::new(false);
+static PRESENT_SKIP: AtomicBool = AtomicBool::new(false);
 static VIDEO_DIVISOR: AtomicU32 = AtomicU32::new(1);
 static VIDEO_CALLBACKS: AtomicU64 = AtomicU64::new(0);
 static AUDIO_FRAMES: AtomicU64 = AtomicU64::new(0);
@@ -327,6 +328,12 @@ unsafe extern "C" fn video_callback(
     let calls = VIDEO_CALLBACKS.fetch_add(1, Ordering::Relaxed) + 1;
     let divisor = u64::from(VIDEO_DIVISOR.load(Ordering::Relaxed));
     if divisor > 1 && calls % divisor != 0 {
+        return;
+    }
+    // The pacing loop marks frames that are already late; shedding their
+    // present keeps the audio fed instead of chasing a frame the panel
+    // would drop anyway.
+    if PRESENT_SKIP.swap(false, Ordering::Relaxed) {
         return;
     }
     let rgb565 = PIXEL_FORMAT.load(Ordering::Relaxed) == PIXEL_FORMAT_RGB565;
@@ -661,6 +668,9 @@ pub fn run_host(configuration: &'static CoreConfig, arguments: &[String]) -> u8 
     let mut previous_audio_frames = 0_u64;
     let mut previous_audio_callbacks = 0_u64;
     while !retrodeck_native::process::shutdown_requested() && !VIDEO_FAILED.load(Ordering::Relaxed) {
+        if test_frames.is_none() && clock.lateness() > clock.frame_nanoseconds() / 2 {
+            PRESENT_SKIP.store(true, Ordering::Relaxed);
+        }
         unsafe { retro_run() };
         frames += 1;
         if let Some(limit) = test_frames
