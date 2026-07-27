@@ -83,6 +83,7 @@ details when they are needed for archaeology.
 | --- | --- | --- | --- |
 | NES | FCEUmm | 256 by 224 after vertical overscan crop | 60.100 Hz |
 | GB and GBC | Gambatte | 160 by 144 | 59.728 Hz |
+| GBA | gpSP | 240 by 160 | 59.728 Hz |
 | ZX Spectrum | Fuse | 320 by 240 core output | 50 Hz |
 
 - NES renders at exact 2x scale as 512 by 448 inside the safe area.
@@ -117,9 +118,13 @@ details when they are needed for archaeology.
   application clock to avoid slowing emulation.
 - Gambatte produces 32,768 Hz and is resampled to the Deck's verified 32 kHz
   OSS rate.
-- NES battery RAM is saved atomically beside the ROM as `.srm`. GB and GBC use
-  `.sav`, plus `.rtc` when the cartridge exposes a real-time clock. Deployment
-  merges ROM directories and preserves these sidecars.
+- NES battery RAM is saved atomically beside the ROM as `.srm`. GB, GBC, and
+  GBA use `.sav`, plus `.rtc` when the cartridge exposes a real-time clock.
+  Deployment merges ROM directories and preserves these sidecars.
+- gpSP looks for the official `gba_bios.bin` beside the ROMs in
+  `/mnt/data/roms/gba/` (never committed, never uploadable) and logs which
+  BIOS it uses; without the file it falls back to its built-in HLE BIOS with
+  reduced compatibility. The dynarec is enabled; frameskip is off.
 - ZX TAP files are read-only tape media and have no automatic save sidecar.
 
 ## Terminal

@@ -41,7 +41,7 @@ The dashboard, timer, and chiptune player are startup-loaded Common Lisp
 served by `retrodeck-native`; deployment installs them as `deck-menu`,
 `ten-seconds-deck`, and `chiptune-deck` symlinks to that binary. The console
 emulators are Rust libretro hosts (`native/src/bin/retro-host/`) with the
-pinned FCEUmm, Gambatte, and Fuse cores statically linked, one binary per
+pinned FCEUmm, Gambatte, Fuse, and gpSP cores statically linked, one binary per
 console. The `libretro-host-smoke` flake check runs each emulator headless
 under QEMU against a tracked ROM and pins its 120-frame video hash.
 
@@ -54,6 +54,7 @@ nix build --no-link --print-out-paths .#retrodeck-native
 nix build --no-link --print-out-paths .#nes-deck
 nix build --no-link --print-out-paths .#gb-deck
 nix build --no-link --print-out-paths .#zx-deck
+nix build --no-link --print-out-paths .#gba-deck
 nix build --no-link --print-out-paths .#fbterm-deck
 nix build --no-link --print-out-paths .#rlwrap-deck
 nix build --no-link --print-out-paths .#lua-deck
@@ -69,6 +70,7 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 | `nes-deck` | `bin/nes-deck` |
 | `gb-deck` | `bin/gb-deck` |
 | `zx-deck` | `bin/zx-deck` |
+| `gba-deck` | `bin/gba-deck` |
 | `fbterm-deck` | `bin/{fbterm,loadkeys}` plus font and keymaps |
 | `rlwrap-deck` | `bin/rlwrap` |
 | `lua-deck` | `bin/lua` |

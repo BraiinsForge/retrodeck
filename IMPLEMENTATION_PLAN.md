@@ -23,8 +23,8 @@ built-in HLE BIOS with a log line when the file is absent.
 - [x] Smoke: freely-licensed homebrew ROM in `roms/gba/` +
       pinned-frame-hash entry in `libretro-host-smoke` (HLE BIOS in
       the sandbox); `verify-arm-builds` + deploy manifest gain gba-deck
-- [ ] Deck test with the owner's BIOS + Slime MoriMori (Japanese dump)
-- [ ] Docs: BUILD.md + DECK_NOTES.md (BIOS drop instructions)
+- [x] Deck test with the owner's BIOS + Slime MoriMori (Japanese dump)
+- [x] Docs: BUILD.md + DECK_NOTES.md (BIOS drop instructions)
 
 ## GBC framerate (open)
 
