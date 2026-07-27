@@ -3643,8 +3643,18 @@ secret!9
     (assert (= (retrodeck:dashboard-loop-poll-timeout credits) 66))
     (multiple-value-bind (animated effects)
         (retrodeck:dashboard-reduce credits '(:tick :now 200))
-      (declare (ignore animated))
-      (assert (equal effects '((:render) (:present))))))
+      (assert (equal effects '((:render) (:present))))
+      (assert (= (getf animated :credits-rendered-at) 200))
+      ;; Early loop wake-ups within the frame budget must not repaint;
+      ;; free-running renders read as stutter on the device.
+      (multiple-value-bind (early early-effects)
+          (retrodeck:dashboard-reduce animated '(:tick :now 240))
+        (assert (null early-effects))
+        (assert (= (getf early :credits-rendered-at) 200))
+        (multiple-value-bind (due due-effects)
+            (retrodeck:dashboard-reduce early '(:tick :now 266))
+          (assert (equal due-effects '((:render) (:present))))
+          (assert (= (getf due :credits-rendered-at) 266))))))
   (let ((credits (retrodeck:dashboard-loop-initial-state
                   games :reduced-motion t)))
     (setf (getf credits :view) :credits)
