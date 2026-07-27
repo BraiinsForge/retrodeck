@@ -119,10 +119,12 @@ pub struct CoreConfig {
     pub rom_usage: &'static str,
     pub save_extension: &'static str,
     pub minimum_rom_bytes: usize,
+    pub maximum_rom_bytes: usize,
     pub player_count: u32,
     pub has_rtc: bool,
     pub zx: bool,
     pub nes: bool,
+    pub gba: bool,
 }
 
 pub const NES_CONFIG: CoreConfig = CoreConfig {
@@ -132,10 +134,12 @@ pub const NES_CONFIG: CoreConfig = CoreConfig {
     rom_usage: "ROM.nes",
     save_extension: ".srm",
     minimum_rom_bytes: 16,
+    maximum_rom_bytes: 8 * 1024 * 1024,
     player_count: 2,
     has_rtc: false,
     zx: false,
     nes: true,
+    gba: false,
 };
 
 pub const GB_CONFIG: CoreConfig = CoreConfig {
@@ -145,10 +149,12 @@ pub const GB_CONFIG: CoreConfig = CoreConfig {
     rom_usage: "ROM.gb|ROM.gbc",
     save_extension: ".sav",
     minimum_rom_bytes: 0x150,
+    maximum_rom_bytes: 8 * 1024 * 1024,
     player_count: 1,
     has_rtc: true,
     zx: false,
     nes: false,
+    gba: false,
 };
 
 pub const ZX_CONFIG: CoreConfig = CoreConfig {
@@ -158,13 +164,29 @@ pub const ZX_CONFIG: CoreConfig = CoreConfig {
     rom_usage: "ROM.tap",
     save_extension: ".sav",
     minimum_rom_bytes: 4,
+    maximum_rom_bytes: 8 * 1024 * 1024,
     player_count: 2,
     has_rtc: false,
     zx: true,
     nes: false,
+    gba: false,
 };
 
-const MAXIMUM_ROM_BYTES: usize = 8 * 1024 * 1024;
+pub const GBA_CONFIG: CoreConfig = CoreConfig {
+    frontend_name: "gba-deck",
+    default_core_name: "gpSP",
+    rom_description: "Game Boy Advance",
+    rom_usage: "ROM.gba",
+    save_extension: ".sav",
+    minimum_rom_bytes: 192,
+    maximum_rom_bytes: 32 * 1024 * 1024,
+    player_count: 1,
+    has_rtc: true,
+    zx: false,
+    nes: false,
+    gba: true,
+};
+
 
 static CONFIG: std::sync::OnceLock<&'static CoreConfig> = std::sync::OnceLock::new();
 static SYSTEM_DIRECTORY: std::sync::OnceLock<std::ffi::CString> = std::sync::OnceLock::new();
@@ -184,6 +206,17 @@ fn nes_variable(key: &CStr) -> Option<&'static CStr> {
         b"fceumm_region" => Some(c"Auto"),
         b"fceumm_overscan_h_left" | b"fceumm_overscan_h_right" => Some(c"0"),
         b"fceumm_overscan_v_top" | b"fceumm_overscan_v_bottom" => Some(c"8"),
+        _ => None,
+    }
+}
+
+fn gba_variable(key: &CStr) -> Option<&'static CStr> {
+    match key.to_bytes() {
+        // The official BIOS is picked up from the ROM directory when the
+        // owner has dropped it there; gpSP falls back to its HLE BIOS.
+        b"gpsp_bios" => Some(c"auto"),
+        b"gpsp_drc" => Some(c"enabled"),
+        b"gpsp_frameskip" => Some(c"disabled"),
         _ => None,
     }
 }
@@ -246,6 +279,8 @@ unsafe extern "C" fn environment_callback(command: c_uint, data: *mut c_void) ->
                 nes_variable(key)
             } else if config().zx {
                 zx_variable(key)
+            } else if config().gba {
+                gba_variable(key)
             } else {
                 None
             };
@@ -349,7 +384,7 @@ fn read_rom(path: &Path, configuration: &CoreConfig) -> Result<Vec<u8>, String> 
     let size = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
     if !metadata.is_file()
         || size < configuration.minimum_rom_bytes
-        || size > MAXIMUM_ROM_BYTES
+        || size > configuration.maximum_rom_bytes
     {
         return Err(format!(
             "{} ROM has an invalid size",
@@ -507,6 +542,14 @@ pub fn run_host(configuration: &'static CoreConfig, arguments: &[String]) -> u8 
     let directory = std::ffi::CString::new(parent.to_string_lossy().into_owned())
         .unwrap_or_default();
     SYSTEM_DIRECTORY.set(directory).ok();
+    if configuration.gba {
+        let bios = if parent.join("gba_bios.bin").is_file() {
+            "official BIOS found beside the ROM"
+        } else {
+            "no gba_bios.bin beside the ROM; using the built-in HLE BIOS"
+        };
+        eprintln!("{name}: {bios}");
+    }
 
     if let Ok(divisor) = std::env::var("RETRO_DECK_VIDEO_DIVISOR")
         && std::env::var_os("RETRO_DECK_RUNTIME_DIAGNOSTICS").is_some()
