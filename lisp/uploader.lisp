@@ -26,7 +26,8 @@
   '(("nes" ".nes" "#FF5F00" 8388608 :nes)
     ("gb" ".gb" "#87AF87" 8388608 :gb)
     ("gbc" ".gbc" "#5F87D7" 8388608 :gbc)
-    ("zx" ".tap" "#AF87D7" 8388608 :zx)))
+    ("zx" ".tap" "#AF87D7" 8388608 :zx)
+    ("gba" ".gba" "#875FD7" 33554432 :gba)))
 (defparameter *palette-specs*
   '(("background" . "Background") ("text-dark" . "Dark text")
     ("field" . "Field") ("surface" . "Surface")

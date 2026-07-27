@@ -89,10 +89,10 @@
     (let ((games (getf state :games))
           (crawl (getf state :credits-crawl)))
       (check (and palette-loaded-p credits-loaded-p
-                  (= (length games) 20) (= (length palette) 22)
+                  (= (length games) 21) (= (length palette) 22)
                   (string= (getf (first games) :id) "mario")
-                  (string= (getf (nth 12 games) :id) "ten-seconds")
-                  (string= (getf (nth 13 games) :id) "lua-repl")
+                  (string= (getf (nth 13 games) :id) "ten-seconds")
+                  (string= (getf (nth 14 games) :id) "lua-repl")
                   (string= (getf (car (last games)) :id) "reboot")
                   (= (length (getf crawl :static-lines)) 30)
                   (plusp (getf crawl :content-height))
@@ -111,7 +111,7 @@
       (declare (ignore runtime palette))
       (let ((crawl (getf state :credits-crawl)))
         (check (and palette-loaded-p (not credits-loaded-p)
-                    (= (length (getf state :games)) 20)
+                    (= (length (getf state :games)) 21)
                     (null (getf crawl :lines))
                     (null (getf crawl :static-lines))
                     (zerop (getf crawl :content-height)))
@@ -127,7 +127,7 @@
   (let ((*error-output* (make-broadcast-stream)))
     (multiple-value-bind (games palette loaded-p)
         (load-dashboard-bootstrap "@games@" "/no/such/retrodeck-palette.tsv")
-      (check (and (not loaded-p) (= (length games) 20)
+      (check (and (not loaded-p) (= (length games) 21)
                   (equal palette *dashboard-palette*))
              "Dashboard palette fallback diverged")))
   (let ((request (format nil "test net~%secret!9~%")))
@@ -375,18 +375,18 @@
     (let ((network '(:ssid "net1" :wlan-ipv4 "10.249.110.248"
                      :wireguard-ipv4 "10.0.0.10" :selector "CONNECTED")))
       (dolist (fixture
-               '((42 60 "us" :volume-down "" #xb628615334d6949b)
-                 (0 60 "us" :volume-up "" #x097e478ee33fcb5b)
-                 (42 100 "us" :brightness-up "" #xfba867a6874157cf)
-                 (42 60 "cz" :keymap "" #x24112e9d4d278c3b)
-                 (42 60 "us" :wifi "" #xa3bbb4e812dbc58b)
-                 (42 60 "us" :terminal "" #x7e9d25d1f7014bf3)
+               '((42 60 "us" :volume-down "" #xfe85a35360bbf73b)
+                 (0 60 "us" :volume-up "" #x7644b2469ecb1afb)
+                 (42 100 "us" :brightness-up "" #x077200d78793022f)
+                 (42 60 "cz" :keymap "" #xa36aed65b8604ddb)
+                 (42 60 "us" :wifi "" #x455946051c5fa1eb)
+                 (42 60 "us" :terminal "" #xc2cf74bde65d4213)
                  (42 60 "us" :volume-down
                   "VOLUME SAVED; CONFIRMATION TONE FAILED"
-                  #xfffa4962a3bae25b)
+                  #xaf8cc58594a5a6fb)
                  (42 60 "us" :volume-down
                   "THIS SETTINGS STATUS FIXTURE IS INTENTIONALLY LONG ENOUGH TO USE THE SMALL FOOTER SCALE ACROSS THE COMPLETE DISPLAY"
-                  #x7f67452d3a69f55b)))
+                  #x03c80604a047bcfb)))
         (destructuring-bind
             (volume brightness keymap selected status expected) fixture
           (check (equal (render-dashboard-settings
@@ -578,7 +578,8 @@
     (check (equal (retrodeck.native:input-poll 0 0) '(0 0 0 0 0 0 0)) "Empty aggregate input poll crossed the native boundary incorrectly")
     (unless (equal (poll-native-input nil 0)
                    '(:poll-ready-p nil :control-count 0 :touch-count 0
-                     :touch-lost-p nil :rescan-controls-p nil :shutdown-p nil))
+                     :touch-lost-p nil :rescan-controls-p nil :shutdown-p nil
+                     :refresh-p nil))
       (error "Aggregate input poll did not normalize under target ECL"))
     (when (retrodeck.native:input-poll 1 0)
       (error "Closed Wayland input unexpectedly produced a snapshot"))

@@ -77,6 +77,11 @@
    :system :gbc
    :rom "/mnt/data/roms/gbc/super-mario-bros-deluxe.gbc"
    :color "#D78787")
+  (:id "slime-morimori"
+   :title "SLIME MORIMORI"
+   :system :gba
+   :rom "/mnt/data/roms/gba/slime-morimori.gba"
+   :color "#875FD7")
   (:id "elite"
    :title "ELITE"
    :system :zx

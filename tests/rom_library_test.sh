@@ -33,7 +33,7 @@ fi
 tab=$(printf '\t')
 while IFS="$tab" read -r id title system path color; do
 	case $system in
-		nes|gb|gbc|zx)
+		nes|gb|gbc|gba|zx)
 			prefix=/mnt/data/roms/$system/
 			case $path in
 				"$prefix"*) relative=${path#"$prefix"} ;;

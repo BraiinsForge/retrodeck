@@ -129,9 +129,9 @@
 
 (defun validate-system (value)
   (unless (and (symbolp value)
-               (member value '(:nes :gb :gbc :zx :deck) :test #'eq))
+               (member value '(:nes :gb :gbc :gba :zx :deck) :test #'eq))
     (catalog-error
-     "game :system must be one of :nes, :gb, :gbc, :zx, or :deck"))
+     "game :system must be one of :nes, :gb, :gbc, :gba, :zx, or :deck"))
   (string-downcase (symbol-name value)))
 
 (defun validate-rom-path (value system)
@@ -145,6 +145,7 @@
           (cond ((eq system :nes) ".nes")
                 ((eq system :gb) ".gb")
                 ((eq system :gbc) ".gbc")
+                ((eq system :gba) ".gba")
                 ((eq system :zx) ".tap")
                 ((eq system :deck) nil)
                 (t (catalog-error "unsupported game system ~S" system)))))

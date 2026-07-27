@@ -4,6 +4,7 @@
   '((:nes "NES")
     (:gb "GAME BOY")
     (:gbc "GBC")
+    (:gba "GBA")
     (:zx "ZX SPECTRUM")
     (:deck "DECK")))
 
@@ -34,6 +35,7 @@
 (defparameter *dashboard-executables*
   '((:nes . "/mnt/data/nes-deck/nes-deck")
     (:gb . "/mnt/data/nes-deck/gb-deck")
+    (:gba . "/mnt/data/nes-deck/gba-deck")
     (:zx . "/mnt/data/nes-deck/zx-deck")
     (:deck . "/mnt/data/nes-deck/ten-seconds-deck")
     (:chiptunes . "/mnt/data/nes-deck/chiptune-deck")
@@ -126,7 +128,7 @@
 
 (defun dashboard-manifest-system (name line-number)
   (or (cdr (assoc name '(("nes" . :nes) ("gb" . :gb) ("gbc" . :gbc)
-                         ("zx" . :zx) ("deck" . :deck))
+                         ("gba" . :gba) ("zx" . :zx) ("deck" . :deck))
                   :test #'string=))
       (error "Invalid system on manifest line ~D" line-number)))
 
@@ -505,6 +507,7 @@
   (case (getf application :system)
     (:nes :nes)
     ((:gb :gbc) :gb)
+    (:gba :gba)
     (:zx :zx)
     (:deck (if (dashboard-application-id-p application "chiptunes")
                :chiptunes

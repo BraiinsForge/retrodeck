@@ -2405,6 +2405,7 @@ secret!9
                '((:nes "NES")
                  (:gb "GAME BOY")
                  (:gbc "GBC")
+                 (:gba "GBA")
                  (:zx "ZX SPECTRUM")
                  (:deck "DECK"))))
 (assert (string= (retrodeck:dashboard-system-label :gbc) "GBC"))
@@ -2437,6 +2438,7 @@ secret!9
 (assert (equal retrodeck:*dashboard-executables*
                '((:nes . "/mnt/data/nes-deck/nes-deck")
                  (:gb . "/mnt/data/nes-deck/gb-deck")
+                 (:gba . "/mnt/data/nes-deck/gba-deck")
                  (:zx . "/mnt/data/nes-deck/zx-deck")
                  (:deck . "/mnt/data/nes-deck/ten-seconds-deck")
                  (:chiptunes . "/mnt/data/nes-deck/chiptune-deck")
@@ -2559,13 +2561,13 @@ secret!9
         (retrodeck:load-dashboard-bootstrap manifest-path palette-path)
       (assert loaded-p)
       (assert
-       (equal (mapcar (lambda (game) (getf game :id)) (subseq games 0 13))
+       (equal (mapcar (lambda (game) (getf game :id)) (subseq games 0 14))
               '("mario" "micro-mages" "kirbys-adventure" "metroid" "tetris"
                 "pokemon-red" "final-fantasy-legend-iii" "kirbys-dream-land"
-                "donkey-kong-country" "super-mario-bros-deluxe" "elite"
-                "knight-lore" "ten-seconds")))
+                "donkey-kong-country" "super-mario-bros-deluxe"
+                "slime-morimori" "elite" "knight-lore" "ten-seconds")))
       (assert
-       (equal (mapcar (lambda (game) (getf game :id)) (subseq games 13))
+       (equal (mapcar (lambda (game) (getf game :id)) (subseq games 14))
               '("lua-repl" "lisp-repl" "python-repl" "scheme-repl"
                 "chiptunes" "terminal" "reboot")))
       (assert (equal palette retrodeck:*dashboard-palette*)))
@@ -2582,7 +2584,7 @@ secret!9
            manifest-path palette-path :credits-path credits-path)
         (assert palette-loaded-p)
         (assert credits-loaded-p)
-        (assert (= (length (getf state :games)) 20))
+        (assert (= (length (getf state :games)) 21))
         (assert (getf state :reduced-motion))
         (assert (= (length (getf (getf state :credits-crawl) :static-lines))
                    30))
@@ -4376,7 +4378,7 @@ secret!9
              (assert (eq returned-runtime runtime))
              (assert (equal traces '(((:reap-sound)) ((:reap-sound)))))
              (assert (eq reason :limit))
-             (assert (= (length (getf final :games)) 20))
+             (assert (= (length (getf final :games)) 21))
              (assert (string= (getf (first (getf final :games)) :id)
                               "mario"))
              (assert (= (getf (getf final :settings) :volume) 37))
