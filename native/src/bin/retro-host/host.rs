@@ -216,6 +216,9 @@ fn gba_variable(key: &CStr) -> Option<&'static CStr> {
         // owner has dropped it there; gpSP falls back to its HLE BIOS.
         b"gpsp_bios" => Some(c"auto"),
         b"gpsp_drc" => Some(c"enabled"),
+        // 32768 Hz rides the same verified 32 kHz OSS path as Gambatte;
+        // the 65536 Hz default underruns the Deck's audio device.
+        b"gpsp_sound_rate" => Some(c"32768"),
         b"gpsp_frameskip" => Some(c"disabled"),
         _ => None,
     }

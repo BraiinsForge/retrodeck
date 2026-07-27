@@ -295,8 +295,14 @@ cp -p "$stage/etc/init.d/nes-deck" /etc/init.d/nes-deck
 cp -p "$stage/etc/init.d/nes-deck-swap" /etc/init.d/nes-deck-swap
 cp -p "$stage/etc/init.d/nes-deck-uploader" \
   /etc/init.d/nes-deck-uploader
+cp -p "$stage/usr/sbin/deck-keyboard-quirks" /usr/sbin/deck-keyboard-quirks
+mkdir -p /etc/hotplug.d/usb
+cp -p "$stage/etc/hotplug.d/usb/90-nes-deck-keyboard" \
+  /etc/hotplug.d/usb/90-nes-deck-keyboard
 chmod 0700 /usr/bin/ecl /usr/sbin/deck-wifi-profile-add \
   /usr/sbin/deck-wifi-select /usr/sbin/deck-wifi-watch \
+  /usr/sbin/deck-keyboard-quirks \
+  /etc/hotplug.d/usb/90-nes-deck-keyboard \
   /etc/init.d/deck-wifi \
   /etc/init.d/nes-deck /etc/init.d/nes-deck-swap \
   /etc/init.d/nes-deck-uploader
