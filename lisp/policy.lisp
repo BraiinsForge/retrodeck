@@ -290,7 +290,7 @@
     (:controller-scan-ms . 1000)
     (:touch-reconnect-ms . 1000)
     (:main-poll-ms . 250)
-    (:animated-poll-ms . 40)
+    (:animated-poll-ms . 66)
     (:network-refresh-ms . 2000)
     (:console-mirror-ms . 100)))
 

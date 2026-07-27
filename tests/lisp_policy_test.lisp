@@ -2457,7 +2457,7 @@ secret!9
                  (:controller-scan-ms . 1000)
                  (:touch-reconnect-ms . 1000)
                  (:main-poll-ms . 250)
-                 (:animated-poll-ms . 40)
+                 (:animated-poll-ms . 66)
                  (:network-refresh-ms . 2000)
                  (:console-mirror-ms . 100))))
 (assert (= (retrodeck:dashboard-timing :reboot-confirm-ms) 4000))
@@ -3640,7 +3640,7 @@ secret!9
 
   (let ((credits (copy-list state)))
     (setf (getf credits :view) :credits)
-    (assert (= (retrodeck:dashboard-loop-poll-timeout credits) 40))
+    (assert (= (retrodeck:dashboard-loop-poll-timeout credits) 66))
     (multiple-value-bind (animated effects)
         (retrodeck:dashboard-reduce credits '(:tick :now 200))
       (declare (ignore animated))
@@ -4301,7 +4301,7 @@ secret!9
           (assert (eq (getf after-animation :view) :credits))
           (assert (equal animation-trace
                          '((:reap-sound) (:render) (:present))))
-          (assert (equal *input-poll-arguments* '(0 40)))))
+          (assert (equal *input-poll-arguments* '(0 66)))))
       (setf *input-poll-result* '(0 0 0 0 0 1 1))
       (multiple-value-bind
             (after-shutdown shutdown-runtime shutdown-trace)
