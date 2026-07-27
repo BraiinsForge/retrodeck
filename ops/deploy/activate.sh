@@ -273,7 +273,7 @@ mv "$base/langs/chibi.new" "$base/langs/chibi"
 cp -p "$stage/nes-deck/langs/lua" "$base/langs/lua"
 cp -p "$stage/nes-deck/langs/python" "$base/langs/python"
 
-for system in nes gb gbc zx; do
+for system in nes gb gbc zx gba; do
   mkdir -p "/mnt/data/roms/$system"
   cp -Rp "$stage/roms/$system/." "/mnt/data/roms/$system/"
 done
