@@ -40,3 +40,13 @@ Remaining, inherently: the 63 Hz panel duplicates ~3 frames/s of
 59.7 Hz content (micro-stutter in smooth scrolling), and the
 compositor repaints occluded widgets under the game on every commit
 (~18% CPU) — both are `BMC_COMPLIANCE_PLAN.org` Phase 2 upstream asks.
+
+Credits crawl (closed 2026-07-27): the "Minecraft lag" was
+`dashboard-credits-value` allocating a `(gensym)` per lookup
+(~143 us + garbage), six lookups per star per frame in the starfield.
+Shared missing-value sentinel + hoisted star loop + deadline-aware
+credits poll: render p50 122.6 ms -> 8.2 ms, over-budget frames
+690/700 -> 0, verified in the deployed image via `RETRO_DECK_REPL`
+probes. The projector fixed-point walk from the earlier attempts
+stays; the two symptom-level fixes taught the lesson recorded in the
+session memory: measure the production image before theorizing.
