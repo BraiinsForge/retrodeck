@@ -73,6 +73,9 @@ verify_package nes-deck bin/nes-deck
 verify_package gb-deck bin/gb-deck
 verify_package zx-deck bin/zx-deck
 verify_package gba-deck bin/gba-deck
+verify_package doom-deck bin/doom-deck
+build_flake .#checks.x86_64-linux.doom-host-smoke >/dev/null
+echo "doom-host-smoke: OK"
 verify_package fbterm-deck bin/fbterm bin/loadkeys
 verify_package rlwrap-deck bin/rlwrap
 verify_package lua-deck bin/lua

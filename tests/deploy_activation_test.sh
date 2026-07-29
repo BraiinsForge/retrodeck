@@ -77,4 +77,27 @@ grep -Fq 'cp -p "$stage/nes-deck/lisp/credits.lisp" "$base/lisp/credits.lisp"' \
 grep -Fq 'cp -p "$stage/nes-deck/lisp/dashboard.lisp" "$base/lisp/dashboard.lisp"' \
   "$activation" || fail 'activation does not install the Lisp dashboard'
 
+grep -Fq 'doom=$(build_flake .#doom-deck)' "$deployer" ||
+  fail 'deployer does not build the DOOM host'
+grep -Fq 'cp "$doom/bin/doom-deck" "$payload/nes-deck/doom-deck"' "$deployer" ||
+  fail 'deployer does not stage the DOOM host'
+grep -Fq -e "-name 'doom-deck' -o" "$deployer" ||
+  fail 'deployer does not make the DOOM host executable'
+grep -Fq -e "find deploy/doom -maxdepth 1 -type f -name '*.wad'" "$deployer" ||
+  fail 'deployer does not stage DOOM WADs'
+grep -Fq '"$gba" "$doom"' "$deployer" ||
+  fail 'deployer does not collect the GBA and DOOM license notices'
+grep -Fq 'nes-deck gb-deck zx-deck gba-deck doom-deck ten-seconds-deck' \
+  "$activation" || fail 'activation does not validate the staged DOOM host'
+grep -Fq 'cp -p "$stage/nes-deck/doom-deck" "$base/doom-deck"' "$activation" ||
+  fail 'activation does not install the DOOM host'
+# DOOM's saves live outside the games directory because activation replaces
+# that directory wholesale on every deployment.
+grep -Fq '/mnt/data/doom' "$activation" ||
+  fail 'activation does not create the persistent DOOM save directory'
+grep -Fq 'RETRO_DECK_DOOM_STATE' "$repo_root/lisp/policy.lisp" ||
+  fail 'policy does not point DOOM at a persistent save directory'
+grep -Fq '"$base/games.new/"' "$activation" ||
+  fail 'activation no longer replaces the games directory; recheck DOOM saves'
+
 printf 'deploy-activation-test: OK\n'

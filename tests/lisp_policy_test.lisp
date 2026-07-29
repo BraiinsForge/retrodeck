@@ -1499,18 +1499,18 @@
        (*regular-file-result* (test-file-string credits-path))
        (credits (retrodeck:load-project-credits credits-path))
        (crawl (retrodeck:make-project-credits-crawl credits)))
-  (assert (= (length credits) 30))
+  (assert (= (length credits) 33))
   (assert (string= (getf (first credits) :project) "FCEUmm"))
   (assert (string= (getf (car (last credits)) :project)
                    "OpenGameArt contributors"))
-  (assert (= (length (getf crawl :lines)) 95))
-  (assert (= (length (getf crawl :static-lines)) 30))
-  (assert (= (getf crawl :content-height) 5076))
+  (assert (= (length (getf crawl :lines)) 104))
+  (assert (= (length (getf crawl :static-lines)) 33))
+  (assert (= (getf crawl :content-height) 5556))
   (assert (equal (first (getf crawl :lines))
                  '(:text "RETRO DECK" :source-y 0
                    :source-width 236 :source-height 28)))
   (assert (equal (car (last (getf crawl :lines)))
-                 '(:text "THANK YOU" :source-y 5032
+                 '(:text "THANK YOU" :source-y 5512
                    :source-width 212 :source-height 28)))
   (assert (every (lambda (line)
                    (and (<= (getf line :source-width) 1040)
@@ -1530,11 +1530,11 @@
   (assert (= (decode-native-unsigned-64 (first *projection-arguments*))
              2000))
   (assert (equal (rest *projection-arguments*)
-                 '(1 20 9076 420 4000 56 72 104 210 480 #xffffac)))
+                 '(1 20 9556 420 4000 56 72 104 210 480 #xffffac)))
   (let ((projected (nreverse *projected-text-calls*)))
-    (assert (= (length projected) 95))
+    (assert (= (length projected) 104))
     (assert (equal (first projected) '(17 0)))
-    (assert (equal (car (last projected)) '(17 5032))))
+    (assert (equal (car (last projected)) '(17 5512))))
   (assert (= (length *canvas-fill-calls*) 96))
   (assert (null *canvas-glyph-calls*))
   (assert (<= (length *text-mask-calls*) 101))
@@ -2441,6 +2441,7 @@ secret!9
                  (:gba . "/mnt/data/nes-deck/gba-deck")
                  (:zx . "/mnt/data/nes-deck/zx-deck")
                  (:deck . "/mnt/data/nes-deck/ten-seconds-deck")
+                 (:doom . "/mnt/data/nes-deck/doom-deck")
                  (:chiptunes . "/mnt/data/nes-deck/chiptune-deck")
                  (:terminal . "/mnt/data/nes-deck/terminal/retro-terminal")
                  (:reboot . "/sbin/reboot"))))
@@ -2561,13 +2562,13 @@ secret!9
         (retrodeck:load-dashboard-bootstrap manifest-path palette-path)
       (assert loaded-p)
       (assert
-       (equal (mapcar (lambda (game) (getf game :id)) (subseq games 0 14))
+       (equal (mapcar (lambda (game) (getf game :id)) (subseq games 0 15))
               '("mario" "micro-mages" "kirbys-adventure" "metroid" "tetris"
                 "pokemon-red" "final-fantasy-legend-iii" "kirbys-dream-land"
                 "donkey-kong-country" "super-mario-bros-deluxe"
-                "slime-morimori" "elite" "knight-lore" "ten-seconds")))
+                "slime-morimori" "elite" "knight-lore" "ten-seconds" "doom")))
       (assert
-       (equal (mapcar (lambda (game) (getf game :id)) (subseq games 14))
+       (equal (mapcar (lambda (game) (getf game :id)) (subseq games 15))
               '("lua-repl" "lisp-repl" "python-repl" "scheme-repl"
                 "chiptunes" "terminal" "reboot")))
       (assert (equal palette retrodeck:*dashboard-palette*)))
@@ -2584,10 +2585,10 @@ secret!9
            manifest-path palette-path :credits-path credits-path)
         (assert palette-loaded-p)
         (assert credits-loaded-p)
-        (assert (= (length (getf state :games)) 21))
+        (assert (= (length (getf state :games)) 22))
         (assert (getf state :reduced-motion))
         (assert (= (length (getf (getf state :credits-crawl) :static-lines))
-                   30))
+                   33))
         (assert (getf runtime :auto-presentation))
         (assert (string= (getf runtime :wayland-display)
                          (retrodeck::dashboard-environment-value "PATH")))
@@ -2814,6 +2815,67 @@ secret!9
                    :label "ten-seconds"
                    :touch-supervision t
                    :mirror-console nil))))
+
+;; DOOM is catalogued as a Deck entry but launches like a console: its own
+;; host binary, the WAD as an argument, and the exit cross plus hold-to-exit
+;; that 10 SECONDS deliberately does not get.
+(let ((plan
+        (retrodeck:dashboard-launch-plan
+         '(:id "doom" :title "DOOM" :system :deck
+           :rom "/mnt/data/nes-deck/games/doom/doom.wad" :color #xd75f5f)
+         42 :wayland t)))
+  (assert (equal plan
+                 '(:executable "/mnt/data/nes-deck/doom-deck"
+                   :arguments ("/mnt/data/nes-deck/games/doom/doom.wad")
+                   :environment
+                   (("RETRO_DECK_VOLUME_PERCENT" . "42")
+                    ("RETRO_DECK_EXIT_HINT" . "1")
+                    ("RETRO_DECK_DOOM_STATE" . "/mnt/data/doom")
+                    ("RETRO_DECK_PRESENTATION" . "layer-shell"))
+                   :label "doom"
+                   :touch-supervision t
+                   :mirror-console nil))))
+
+;; The framebuffer path keeps the hold-to-exit supervision too, which is
+;; what distinguishes the DOOM route from every other Deck entry.
+(let ((plan
+        (retrodeck:dashboard-launch-plan
+         '(:id "freedoom" :title "FREEDOOM" :system :deck
+           :rom "/mnt/data/nes-deck/games/doom/freedoom1.wad" :color #xd75f5f)
+         0)))
+  (assert (string= (getf plan :executable) "/mnt/data/nes-deck/doom-deck"))
+  (assert (equal (getf plan :arguments)
+                 '("/mnt/data/nes-deck/games/doom/freedoom1.wad")))
+  (assert (eq (getf plan :touch-supervision) t))
+  ;; Saves must not be routed into the games directory, which activation
+  ;; replaces wholesale on every deployment.
+  (let ((state (cdr (assoc "RETRO_DECK_DOOM_STATE" (getf plan :environment)
+                           :test #'string=))))
+    (assert (string= state "/mnt/data/doom"))
+    (assert (not (search "/nes-deck/games/" state)))))
+
+;; Routing on the extension, so a second IWAD needs no code change. A
+;; console ROM that happens to end in .wad must not reach the DOOM host.
+(assert (eq (retrodeck::dashboard-application-route
+             '(:id "doom" :system :deck
+               :rom "/mnt/data/nes-deck/games/doom/doom.wad"))
+            :doom))
+(assert (eq (retrodeck::dashboard-application-route
+             '(:id "doom-upper" :system :deck
+               :rom "/mnt/data/nes-deck/games/doom/DOOM.WAD"))
+            :doom))
+(assert (eq (retrodeck::dashboard-application-route
+             '(:id "ten-seconds" :system :deck
+               :rom "/mnt/data/nes-deck/games/ten-seconds"))
+            :deck))
+(assert (eq (retrodeck::dashboard-application-route
+             '(:id "odd" :system :nes :rom "/mnt/data/roms/nes/odd.wad"))
+            :nes))
+(dolist (rom '(".wad" "/mnt/data/nes-deck/games/doom/wad" "" "/a/b.wadx"))
+  (assert (not (retrodeck::dashboard-wad-application-p
+                (list :id "edge" :system :deck :rom rom)))))
+(assert (not (retrodeck::dashboard-wad-application-p
+              '(:id "no-rom" :system :deck :rom nil))))
 
 (let ((plan
         (retrodeck:dashboard-launch-plan
@@ -4386,7 +4448,7 @@ secret!9
          (assert credits-loaded-p)
          (assert (not (getf state :reduced-motion)))
          (assert (= (length (getf (getf state :credits-crawl) :static-lines))
-                    30))
+                    33))
          (let ((candidate-palette (copy-tree palette)))
            (setf (cdr (assoc :background candidate-palette)) #x010203)
            (multiple-value-bind (final returned-runtime traces reason)
@@ -4395,7 +4457,7 @@ secret!9
              (assert (eq returned-runtime runtime))
              (assert (equal traces '(((:reap-sound)) ((:reap-sound)))))
              (assert (eq reason :limit))
-             (assert (= (length (getf final :games)) 21))
+             (assert (= (length (getf final :games)) 22))
              (assert (string= (getf (first (getf final :games)) :id)
                               "mario"))
              (assert (= (getf (getf final :settings) :volume) 37))
