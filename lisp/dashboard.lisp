@@ -2047,6 +2047,9 @@
                  (dashboard-directory-path
                   (or (getf options :cover-directory)
                       *dashboard-cover-directory*)))
+               (*dashboard-settings-icon-path*
+                 (or (getf options :settings-icon)
+                     *dashboard-settings-icon-path*))
                (owned nil))
            (format *error-output* "deck-menu: loaded ~D local covers~%"
                    (count-if #'dashboard-cover-raster (getf state :games)))

@@ -987,6 +987,32 @@
 (assert-signals error (retrodeck:run-dashboard-main '("--manifest" "/tmp/x")))
 (let ((*standard-output* (make-broadcast-stream)))
   (assert (zerop (retrodeck:run-dashboard-main '("--help")))))
+(let* ((manifest (test-menu-path "games.tsv" t))
+       (palette (test-menu-path "palette.tsv" t))
+       (credits (test-menu-path "credits.tsv" t))
+       (*regular-file-results*
+         (list (cons manifest (test-file-string manifest))
+               (cons palette (test-file-string palette))
+               (cons credits (test-file-string credits))))
+       (*raster-png-result* 23)
+       (*raster-png-arguments* nil)
+       (*raster-png-calls* nil))
+  (with-runtime-device-fixture ()
+    (let ((*process-shutdown-status* 1)
+          (*input-poll-result* '(0 0 0 0 0 1 1))
+          (*input-poll-arguments* nil)
+          (retrodeck:*dashboard-wayland-display-environment*
+            "RETRODECK_TEST_NO_WAYLAND")
+          (*error-output* (make-broadcast-stream)))
+      (assert (zerop
+               (retrodeck:run-dashboard-main
+                (list "--manifest" manifest "--palette" palette
+                      "--credits" credits
+                      "--settings-icon" "/tmp/override-settings.png"))))
+      (assert (equal *raster-png-arguments*
+                     '("/tmp/override-settings.png" 23 23)))
+      (assert (= (length *raster-png-calls*) 1))
+      (assert (= *fbdev-close-count* 1)))))
 (assert-unary-table #'equal #'retrodeck:chiptune-control-commands
                     '(((:kind :keyboard :code 28 :shift nil :repeat nil) nil)
                       ((:kind :gamepad :edges #x001) (:back))
