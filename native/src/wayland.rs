@@ -406,7 +406,7 @@ impl Widget {
                 continue;
             };
             let remaining = deadline.saturating_duration_since(Instant::now());
-            let (touch_flags, control_flags) = {
+            let (touch_flags, ready) = {
                 let mut descriptors = vec![PollFd::from_borrowed_fd(
                     guard.connection_fd(),
                     PollFlags::IN | PollFlags::ERR,
@@ -414,10 +414,10 @@ impl Widget {
                 controls.append_poll_descriptors(&mut descriptors);
                 let _ = polling::wait_for(&mut descriptors, remaining)?;
                 let ready = descriptors.iter().map(PollFd::revents).collect::<Vec<_>>();
-                (ready[0], ready[1..].to_vec())
+                (ready[0], ready)
             };
 
-            controls.read_ready(&control_flags);
+            controls.read_ready(&ready[1..]);
             let touch_ready = touch_flags
                 .intersects(PollFlags::IN | PollFlags::ERR | PollFlags::HUP | PollFlags::NVAL);
             if !touch_ready {
@@ -596,7 +596,7 @@ impl Widget {
         let surface = self
             .state
             .surface
-            .clone()
+            .as_ref()
             .expect("created while opening widget");
         let slot = &mut self.state.slots[index];
         draw(slot.mapping.pixels());
