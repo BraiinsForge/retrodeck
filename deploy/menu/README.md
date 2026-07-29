@@ -47,6 +47,8 @@ The launcher also expects:
 - `/mnt/data/nes-deck/gb-deck`
 - `/mnt/data/nes-deck/zx-deck`
 - `/mnt/data/nes-deck/ten-seconds-deck`
+- `/mnt/data/nes-deck/doom-deck` (optional; a missing DOOM host is logged as a
+  warning and only its own card fails to launch)
 - `/mnt/data/nes-deck/chiptune-deck`
 - `/mnt/data/nes-deck/ecl/bin/ecl.bin` (ECL 26.5.5)
 - `/mnt/data/nes-deck/ecl/lib/ecl/` (the ECL runtime directory)
@@ -132,6 +134,14 @@ physical keyboard is routed through Fuse's dedicated Spectrum-keyboard port.
 Its letters, digits, Space, Enter, Backspace, modifiers, and arrow keys remain
 keyboard keys instead of being translated to console buttons.
 
+The Deck **DOOM** entry runs the fbDOOM host against the IWAD named in the
+catalog. Unlike the other Deck entries it is supervised like a console: it
+draws the exit cross and a two-second hold anywhere returns to the dashboard.
+Its savegames are written below `/mnt/data/doom`, which activation never
+replaces. Controller mapping and the always-run setting are applied after the
+engine reads its configuration, so neither a stale config nor fbDOOM's
+compiled-out configuration writer can restore keyboard-only bindings.
+
 The Deck-native **10 SECONDS** game owns touch while it runs and has its own
 BACK action. Physical A on either controller also starts and stops it. Short
 start and result chiptunes follow the dashboard volume.
@@ -174,7 +184,9 @@ five required keys:
 3. `:system` - one of `:nes`, `:gb`, `:gbc`, `:zx`, or `:deck`
 4. `:rom` - normalized absolute path below `/mnt/data/roms/<system>/` with the
    system's required extension; Deck applications stay below
-   `/mnt/data/nes-deck/games/`
+   `/mnt/data/nes-deck/games/`. A Deck entry whose path ends in `.wad` is
+   routed to the DOOM host with that IWAD as its argument, so additional
+   IWADs are catalog-only changes.
 5. `:color` - exact canonical xterm-256 `#RRGGBB` accent color
 
 `compile-catalog.lisp` permits no missing, duplicate, or unknown keys. It

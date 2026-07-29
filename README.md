@@ -94,10 +94,11 @@ build and test commands are in [BUILD.md](BUILD.md).
 | Game Boy | Gambatte | `/mnt/data/roms/gb` |
 | Game Boy Color | Gambatte | `/mnt/data/roms/gbc` |
 | ZX Spectrum | Fuse | `/mnt/data/roms/zx` |
-| Deck | Native programs and REPLs | `/mnt/data/langs`, `/mnt/data/chiptunes` |
+| Deck | Native programs, DOOM, and REPLs | `/mnt/data/langs`, `/mnt/data/chiptunes`, `/mnt/data/doom` |
 
 The Deck section contains:
 
+- DOOM, the fbDOOM engine with sound effects and OPL music
 - 10 Seconds, a native touch and controller timing game
 - a `/bin/ash` framebuffer terminal with US ANSI and Czech QWERTZ layouts
 - Lua 5.5, rlwrap-backed ECL Common Lisp 26.5.5, MicroPython 1.25, and
@@ -159,9 +160,10 @@ crawl with a static project/license sheet and disable animation wakeups.
 The Common Lisp REPL runs through `rlwrap`; editable command history persists
 privately as `/mnt/data/langs/lisp/.ecl_history`.
 
-Console emulators show an outlined cross in the top-left corner. Hold it for
-two seconds to return to the dashboard. A two-second hold anywhere also leaves
-a running emulator or terminal, and touch does not emulate game controls. In
+Console emulators and DOOM show an outlined cross in the top-left corner. Hold
+it for two seconds to return to the dashboard. A two-second hold anywhere also
+leaves a running emulator or terminal, and touch does not emulate game
+controls. In
 the chiptune player, the top-right cross returns immediately. The four bottom
 icons control playback mode, previous file, play/pause, and next file.
 Controller Left/Right also changes files, Up/Down changes the persistent volume
@@ -186,7 +188,28 @@ same hub ports to preserve Player 1 and Player 2 across boots.
 | Start | Start |
 | Select | Back |
 
-NES, GB, and GBC use this mapping. ZX Spectrum assigns
+NES, GB, and GBC use this mapping. DOOM needs more distinct actions than a
+console pad provides, so it is the one program where X and Y do not repeat A
+and B:
+
+| DOOM action | THEGamepad |
+| --- | --- |
+| Walk forward and back | D-pad Up and Down |
+| Turn | D-pad Left and Right |
+| Strafe | L and R |
+| Fire | A |
+| Open, use, activate menu entry | B for use, A in menus |
+| Previous and next weapon | X and Y |
+| Menu | Start |
+| Automap | Back |
+
+Running is always on, so the D-pad moves at the speed the game was designed
+around. A connected keyboard also works, with the usual DOOM bindings, which
+is what lets you type savegame names. Either controller drives the single
+player; DOOM's own multiplayer is between machines and is not reachable from
+the dashboard.
+
+ZX Spectrum assigns
 Kempston to Player 1 and Sinclair 2 to Player 2; A/X fires, Back opens the
 Spectrum keyboard, L is Enter, and R is Space. A connected physical keyboard
 is passed through as the Spectrum keyboard, so letters, digits, Space, Enter,
@@ -217,6 +240,14 @@ NES battery SRAM is saved atomically beside the ROM as `.srm`. GB and GBC use
 `.sav` plus `.rtc` when the cartridge has a real-time clock. The deploy script
 preserves these sidecars. ZX TAP files are read-only tape media and do not
 produce automatic save files.
+
+DOOM is the exception: its IWADs are tracked in `deploy/doom/` rather than
+`roms/`, because they are program data rather than console ROMs, and its
+savegames live in `/mnt/data/doom`. They are deliberately kept out of the
+installed games directory, which every deployment replaces wholesale. DOOM's
+own settings do not persist across launches, because fbDOOM compiles out its
+configuration writer; the controller mapping and volume come from Retro Deck
+instead. See [deploy/doom/README.md](deploy/doom/README.md).
 
 ## Operations and recovery
 

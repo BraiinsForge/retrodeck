@@ -45,6 +45,25 @@ pinned FCEUmm, Gambatte, Fuse, and gpSP cores statically linked, one binary per
 console. The `libretro-host-smoke` flake check runs each emulator headless
 under QEMU against a tracked ROM and pins its 120-frame video hash.
 
+DOOM follows the same shape without being a libretro core. `doom-deck` links
+the pinned fbDOOM fork as a static archive (`doomLib`) into the Rust host in
+`native/src/bin/doom-host/`. The fork's framebuffer, tty-keyboard, and timer
+backends are excluded from that archive and replaced by the platform layer in
+`native/doom/`, which routes video, controllers, audio, and the clock through
+the same host modules the emulators use. Music needs three pieces fbDOOM
+carries no copy of — an OPL emulator, a MIDI reader, and a MUS converter — so
+those are vendored from the pinned Chocolate Doom release, with a Retro Deck
+OPL driver in place of the SDL one. The `doom-host-smoke` check runs DOOM
+headless against the pinned Freedoom IWAD for 600 frames and pins the video
+hash, the synthetic clock, the sound-effect count, and the presence of OPL
+output. It runs 600 frames rather than 120 because the title screen has to
+give way to demo playback before a weapon fires.
+
+Determinism in that check comes from `native/doom/i_timer_retrodeck.c`, which
+derives DOOM's clock from the presented frame count whenever
+`RETRO_DECK_TEST_FRAMES` is set. Without it, `I_GetTime` would read the wall
+clock and no frame hash could be pinned.
+
 ## Build packages individually
 
 Use `--no-link` to avoid leaving `result-*` symlinks in the repository:
@@ -55,6 +74,7 @@ nix build --no-link --print-out-paths .#nes-deck
 nix build --no-link --print-out-paths .#gb-deck
 nix build --no-link --print-out-paths .#zx-deck
 nix build --no-link --print-out-paths .#gba-deck
+nix build --no-link --print-out-paths .#doom-deck
 nix build --no-link --print-out-paths .#fbterm-deck
 nix build --no-link --print-out-paths .#rlwrap-deck
 nix build --no-link --print-out-paths .#lua-deck
@@ -213,7 +233,7 @@ tests/verify-arm-builds.sh
 
 This rejects a missing executable, a non-ARM or dynamically linked binary, a
 Nix store reference, an incomplete ECL or fbterm runtime, and a changed CC0
-music payload. It also runs the ARM host under QEMU to exercise the embedded
+music payload. It includes `doom-deck` and its `doom-host-smoke` check. It also runs the ARM host under QEMU to exercise the embedded
 ECL callbacks, including Wayland and fbdev boundaries, projected credits frames,
 large elapsed times, helper stdin and process-result classification, and the
 audio-worker lifecycle.

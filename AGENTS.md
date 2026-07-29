@@ -16,3 +16,16 @@
 - Preserve `.sav`, `.rtc`, `.state`, and emulator configuration sidecars when
   moving a Deck ROM. Keep each sidecar beside its ROM in the same system
   directory.
+
+## Deck program data
+
+- Data files belonging to a Deck program rather than to a console live under
+  `deploy/<program>/`, not under `roms/`. The only such directory today is
+  `deploy/doom/`, holding the DOOM IWADs.
+- Owner-supplied IWADs are private commercial data on the same terms as the
+  ROMs above. Record each one in `deploy/doom/SHA256SUMS`.
+- DOOM catalog entries use `:system :deck` and a `:rom` path below
+  `/mnt/data/nes-deck/games/doom/` ending in `.wad`. Routing keys off that
+  extension, so extra IWADs need no code change.
+- Never point a DOOM entry's saves into the installed games directory:
+  activation replaces it wholesale. Saves belong in `/mnt/data/doom`.

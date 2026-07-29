@@ -85,8 +85,46 @@ details when they are needed for archaeology.
 | GB and GBC | Gambatte | 160 by 144 | 59.728 Hz |
 | GBA | gpSP | 240 by 160 | 59.728 Hz |
 | ZX Spectrum | Fuse | 320 by 240 core output | 50 Hz |
+| DOOM | fbDOOM | 320 by 200 | 35 Hz (DOOM's tic rate) |
 
 - NES renders at exact 2x scale as 512 by 448 inside the safe area.
+- DOOM renders at exact 2x scale as 640 by 400 inside the safe area, so the
+  panel keeps black margins left and right. The engine's renderer is fixed at
+  320 by 200; nothing widescreen is available without changing DOOM's own
+  resolution assumptions.
+- DOOM's own framebuffer, rotation, and BGR565 patches are unused. Its
+  platform layer lives in `native/doom/` and hands finished frames to the
+  same scaler and presentation paths as the emulators, so it works on the
+  BMC compositor as well as the framebuffer fallback.
+- DOOM audio is one 44.1 kHz stereo stream: sound effects are point-resampled
+  from their original 11 kHz DMX lumps and summed on top of the emulated OPL
+  music.
+- OPL music is on and holds a flat 35.0 fps with no shed frames at the full
+  44100 Hz, indistinguishable from running with no music at all. Two things
+  had to be true for that.
+- The emulator choice. Chocolate Doom's later Nuked OPL3 always emulates at
+  49716 Hz internally whatever output rate it is handed, so it costs about 80%
+  of a core and does not tune down: dropping its rate from 22050 to 8000 Hz
+  changed nothing measurable, which is what exposed the fixed internal rate.
+  DOSBox's dbopl, from Chocolate Doom 2.2.1, runs at the rate it is given.
+- The clock. The driver advances emulated time per *consumed* chip frame, not
+  per generated batch. Advancing per batch lets a caller consume frames
+  already in hand while the clock stands still, which stalls the timers the
+  chip-detection handshake reads back: detection failed, DOOM discarded the
+  music module, and nothing played. Watch for `OPL_Init: Using driver` in the
+  log, and note that an uninitialised chip emits enough noise to make a
+  naive "did any sample come out" check pass while no song is playing.
+- fbDOOM never calls `OPL_InitRegisters`, so the driver performs that
+  initialisation itself. Nuked sounded regardless; dbopl stays silent without
+  the waveform-enable write.
+- `RETRO_DECK_DOOM_MUSIC=0` disables music; `RETRO_DECK_DOOM_MUSIC_RATE`
+  emulates the chip below the output rate and upsamples. Neither is needed.
+- Shedding a present only helps when presentation is what made a frame late.
+  DOOM never sheds twice in a row, because when the cost is elsewhere the
+  lateness never recovers and an unconditional rule sheds nearly every frame,
+  freezing the picture while the engine still runs at rate. That was the
+  original "lag spike" symptom, and it is why frame rate alone is a
+  misleading measure here; the shed count is the one to watch.
 - The chiptune player supports GME formats and 44.1 kHz mono or stereo Ogg
   Vorbis. It does not recurse without bounds or follow symbolic links.
 - Console emulators display a top-left exit cross. Holding anywhere for two
