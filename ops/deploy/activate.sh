@@ -250,6 +250,12 @@ rm -rf "$base/games"
 mv "$base/games.new" "$base/games"
 cp -Rp "$stage/nes-deck/terminal/." "$base/terminal/"
 cp -Rp "$stage/nes-deck/licenses/." "$base/licenses/"
+# Merged, never replaced: the rest of this directory is the persistent
+# Libretro cover cache, which takes a bounded download to refill.
+if [ -d "$stage/nes-deck/covers" ]; then
+  mkdir -p "$base/covers"
+  cp -Rp "$stage/nes-deck/covers/." "$base/covers/"
+fi
 
 rm -rf /mnt/data/bmc-widgets/retro-deck.new
 cp -Rp "$stage/bmc-widgets/retro-deck" \

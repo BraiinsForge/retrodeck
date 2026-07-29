@@ -202,12 +202,34 @@ done
 # them below /mnt/data/nes-deck/games. The activation step merges this
 # directory, so an owner-supplied WAD, default.cfg, and savegame/ already on
 # the Deck all survive an update.
-mkdir -p "$payload/nes-deck/games/doom"
+mkdir -p "$payload/nes-deck/games/doom" "$payload/nes-deck/covers"
 if [[ -d deploy/doom ]]; then
   # -p so the owner-private 0600 mode survives onto the Deck, as it does
   # for the console ROMs.
   find deploy/doom -maxdepth 1 -type f -name '*.wad' \
     -exec cp -p {} "$payload/nes-deck/games/doom/" \;
+
+  # Render each IWAD's own title screen as its carousel cover. The cover
+  # cache is keyed by catalog id, and Libretro has no box art for a Deck
+  # entry, so nothing else would ever fill these in. Generating from the
+  # owner's WAD also keeps id Software's artwork out of this repository.
+  while IFS= read -r wad; do
+    id=$(awk -F'\t' -v name="${wad##*/}" \
+      'index($4, "/" name) && substr($4, length($4) - length(name)) == "/" name {
+         print $1; exit
+       }' deploy/menu/games.tsv)
+    if [[ -z $id ]]; then
+      echo "No catalog entry for $wad; skipping its cover" >&2
+      continue
+    fi
+    if nix shell nixpkgs#python3 -c python3 ops/lib/extract-doom-cover.py \
+      "$wad" "$payload/nes-deck/covers/$id.png"; then
+      chmod 0600 "$payload/nes-deck/covers/$id.png"
+    else
+      echo "Could not render a cover for $wad; continuing" >&2
+      rm -f "$payload/nes-deck/covers/$id.png"
+    fi
+  done < <(find deploy/doom -maxdepth 1 -type f -name '*.wad')
 fi
 
 find "$payload/nes-deck" -type f \( \

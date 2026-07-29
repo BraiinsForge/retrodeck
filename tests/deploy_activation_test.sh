@@ -87,6 +87,19 @@ grep -Fq -e "find deploy/doom -maxdepth 1 -type f -name '*.wad'" "$deployer" ||
   fail 'deployer does not stage DOOM WADs'
 grep -Fq '"$gba" "$doom"' "$deployer" ||
   fail 'deployer does not collect the GBA and DOOM license notices'
+grep -Fq 'ops/lib/extract-doom-cover.py' "$deployer" ||
+  fail 'deployer does not render DOOM covers'
+[[ -f $repo_root/ops/lib/extract-doom-cover.py ]] ||
+  fail 'the DOOM cover renderer is missing'
+python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" \
+  "$repo_root/ops/lib/extract-doom-cover.py" ||
+  fail 'the DOOM cover renderer does not parse'
+# Merged rather than replaced, so the Libretro cover cache survives.
+grep -Fq 'cp -Rp "$stage/nes-deck/covers/." "$base/covers/"' "$activation" ||
+  fail 'activation does not merge the staged covers'
+if grep -Fq 'rm -rf "$base/covers"' "$activation"; then
+  fail 'activation deletes the persistent cover cache'
+fi
 grep -Fq 'nes-deck gb-deck zx-deck gba-deck doom-deck ten-seconds-deck' \
   "$activation" || fail 'activation does not validate the staged DOOM host'
 grep -Fq 'cp -p "$stage/nes-deck/doom-deck" "$base/doom-deck"' "$activation" ||
