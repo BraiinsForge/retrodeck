@@ -2,7 +2,7 @@
 //! sampled as held levels by the libretro input callback.
 
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 pub const PAD_A: u32 = 1 << 0;
@@ -151,10 +151,10 @@ struct Inner {
 
 struct Shared {
     inner: Mutex<Inner>,
-    pad_state: Mutex<[u32; PLAYER_COUNT]>,
+    pad_state: [AtomicU32; PLAYER_COUNT],
     /// Gamepads only, with X and Y kept apart from A and B. The keyboard
     /// fallback is deliberately absent: DOOM reads real keys instead.
-    pad_distinct: Mutex<[u32; PLAYER_COUNT]>,
+    pad_distinct: [AtomicU32; PLAYER_COUNT],
     stopping: AtomicBool,
 }
 
@@ -172,8 +172,8 @@ fn shared() -> &'static Shared {
                 zx: false,
                 diagnostics: false,
             }),
-            pad_state: Mutex::new([0; PLAYER_COUNT]),
-            pad_distinct: Mutex::new([0; PLAYER_COUNT]),
+            pad_state: std::array::from_fn(|_| AtomicU32::new(0)),
+            pad_distinct: std::array::from_fn(|_| AtomicU32::new(0)),
             stopping: AtomicBool::new(false),
         }))
     })
@@ -268,23 +268,20 @@ fn gamepad_state_mapped(gamepad: &Gamepad, key_to_pad: fn(u16) -> u32) -> u32 {
 }
 
 fn publish_states(inner: &Inner) {
-    let mut published = shared().pad_state.lock().expect("pad state lock");
     let next = [
         inner.keyboard_mask | inner.gamepads[0].state,
         inner.gamepads[1].state,
     ];
-    if inner.diagnostics && *published != next {
-        for (player, state) in next.iter().enumerate() {
-            if published[player] != *state {
-                eprintln!("Retro Deck: input diagnostic P{player} state=0x{state:02x}");
-            }
+    for (player, state) in next.iter().enumerate() {
+        let previous = shared().pad_state[player].swap(*state, Ordering::Release);
+        if inner.diagnostics && previous != *state {
+            eprintln!("Retro Deck: input diagnostic P{player} state=0x{state:02x}");
         }
     }
-    *published = next;
-    drop(published);
-
-    let mut distinct = shared().pad_distinct.lock().expect("pad distinct lock");
-    *distinct = [inner.gamepads[0].distinct, inner.gamepads[1].distinct];
+    let distinct = [inner.gamepads[0].distinct, inner.gamepads[1].distinct];
+    for (player, state) in distinct.iter().enumerate() {
+        shared().pad_distinct[player].store(*state, Ordering::Release);
+    }
 }
 
 fn resynchronize(gamepad: &mut Gamepad) -> bool {
@@ -779,8 +776,8 @@ pub fn shutdown() {
 pub fn joypad_state(port: u32) -> u32 {
     shared()
         .pad_state
-        .lock()
-        .map(|states| states.get(port as usize).copied().unwrap_or(0))
+        .get(port as usize)
+        .map(|state| state.load(Ordering::Acquire))
         .unwrap_or(0)
 }
 
@@ -789,8 +786,8 @@ pub fn joypad_state(port: u32) -> u32 {
 pub fn joypad_distinct_state(port: u32) -> u32 {
     shared()
         .pad_distinct
-        .lock()
-        .map(|states| states.get(port as usize).copied().unwrap_or(0))
+        .get(port as usize)
+        .map(|state| state.load(Ordering::Acquire))
         .unwrap_or(0)
 }
 
