@@ -20,6 +20,7 @@ NES_EMULATOR=$BASE/nes-deck
 GB_EMULATOR=$BASE/gb-deck
 ZX_EMULATOR=$BASE/zx-deck
 DECK_GAME=$BASE/ten-seconds-deck
+DOOM_GAME=$BASE/doom-deck
 CHIPTUNE_PLAYER=$BASE/chiptune-deck
 CHIPTUNE_DIRECTORY=/mnt/data/chiptunes
 CATALOG=$MENU_DIR/games.sexp
@@ -143,6 +144,12 @@ fi
 if [ ! -x "$CHIPTUNE_PLAYER" ]; then
 	log_message "chiptune player is missing or not executable: $CHIPTUNE_PLAYER"
 	exit 1
+fi
+# DOOM is deliberately not a hard requirement. A dashboard that refuses to
+# start because one optional program is absent leaves the Deck with no user
+# interface at all; a missing host only makes its own card fail to launch.
+if [ ! -x "$DOOM_GAME" ]; then
+	log_message "warning: DOOM host is missing or not executable: $DOOM_GAME"
 fi
 if [ ! -x "$TERMINAL" ]; then
 	log_message "terminal launcher is missing or not executable: $TERMINAL"

@@ -38,10 +38,12 @@
     (:gba . "/mnt/data/nes-deck/gba-deck")
     (:zx . "/mnt/data/nes-deck/zx-deck")
     (:deck . "/mnt/data/nes-deck/ten-seconds-deck")
+    (:doom . "/mnt/data/nes-deck/doom-deck")
     (:chiptunes . "/mnt/data/nes-deck/chiptune-deck")
     (:terminal . "/mnt/data/nes-deck/terminal/retro-terminal")
     (:reboot . "/sbin/reboot")))
 
+(defparameter *dashboard-doom-state-directory* "/mnt/data/doom")
 (defparameter *dashboard-cover-directory* "/mnt/data/nes-deck/covers/")
 (defparameter *dashboard-settings-icon-path*
   "/mnt/data/nes-deck/menu/settings-icon.png")
@@ -503,15 +505,26 @@
   (and (eq (getf application :system) :deck)
        (string= (getf application :id) id)))
 
+(defun dashboard-wad-application-p (application)
+  "True for a Deck entry whose content is a DOOM WAD.
+Routing on the extension rather than on one fixed id lets a second IWAD be
+added as another catalog entry without changing any code."
+  (let ((rom (getf application :rom)))
+    (and (eq (getf application :system) :deck)
+         (stringp rom)
+         (> (length rom) 4)
+         (string-equal ".wad" rom :start2 (- (length rom) 4)))))
+
 (defun dashboard-application-route (application)
   (case (getf application :system)
     (:nes :nes)
     ((:gb :gbc) :gb)
     (:gba :gba)
     (:zx :zx)
-    (:deck (if (dashboard-application-id-p application "chiptunes")
-               :chiptunes
-               :deck))
+    (:deck (cond ((dashboard-application-id-p application "chiptunes")
+                  :chiptunes)
+                 ((dashboard-wad-application-p application) :doom)
+                 (t :deck)))
     (otherwise
      (error "Unknown application system ~S" (getf application :system)))))
 
@@ -544,16 +557,25 @@
               (route (dashboard-application-route application))
               (arguments
                 (if (or (not (eq system :deck))
-                        (eq route :chiptunes))
+                        (member route '(:chiptunes :doom) :test #'eq))
                     (list (getf application :rom))
                     nil))
               (environment
                 (list (cons "RETRO_DECK_VOLUME_PERCENT"
                             (format nil "~D" volume-percent)))))
-         (unless (eq system :deck)
+         ;; DOOM is a Deck entry but plays like a console: it gets the exit
+         ;; cross and the two-second hold instead of 10 Seconds' own BACK.
+         (when (or (not (eq system :deck)) (eq route :doom))
            (setf environment
                  (append environment
                          (list (cons "RETRO_DECK_EXIT_HINT" "1")))))
+         ;; Savegames and default.cfg cannot live beside the WAD: the
+         ;; installed games directory is replaced on every activation.
+         (when (eq route :doom)
+           (setf environment
+                 (append environment
+                         (list (cons "RETRO_DECK_DOOM_STATE"
+                                     *dashboard-doom-state-directory*)))))
          (when wayland
            (setf environment
                  (append environment
@@ -568,7 +590,9 @@
                :arguments arguments
                :environment environment
                :label (getf application :id)
-               :touch-supervision (or wayland (not (eq system :deck)))
+               :touch-supervision (or wayland
+                                      (not (eq system :deck))
+                                      (eq route :doom))
                :mirror-console nil))))))
 
 (defun reboot-confirmation-active-p (deadline now)

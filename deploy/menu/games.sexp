@@ -96,4 +96,9 @@
    :title "10 SECONDS"
    :system :deck
    :rom "/mnt/data/nes-deck/games/ten-seconds"
-   :color "#FFAF87")))
+   :color "#FFAF87")
+  (:id "doom"
+   :title "DOOM"
+   :system :deck
+   :rom "/mnt/data/nes-deck/games/doom/doom.wad"
+   :color "#D75F5F")))
