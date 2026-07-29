@@ -261,8 +261,8 @@ pub fn open(source_rate: u32, volume_percent: i32) -> Result<(), String> {
         output_rate: output_rate(source_rate, negotiated),
         volume_percent,
         rate_remainder: 0,
-        resampled: Vec::new(),
-        mono: Vec::new(),
+        resampled: Vec::with_capacity(WRITE_CHUNK_FRAMES),
+        mono: Vec::with_capacity(WRITE_CHUNK_FRAMES),
     });
     Ok(())
 }
