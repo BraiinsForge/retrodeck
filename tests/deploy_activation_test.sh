@@ -58,6 +58,16 @@ grep -Fq '[ -s "$stage/nes-deck/lisp/credits.lisp" ]' "$activation" ||
   fail 'activation does not validate the staged editable Lisp credits'
 grep -Fq '[ -s "$stage/nes-deck/lisp/dashboard.lisp" ]' "$activation" ||
   fail 'activation does not validate the staged Lisp dashboard'
+grep -Fq 'RETRO_DECK_LISP_SOURCE=1' "$activation" ||
+  fail 'activation does not exercise staged source-loaded Lisp'
+grep -Fq '"$stage/nes-deck/ten-seconds-deck" extra' "$activation" ||
+  fail 'activation does not preflight the staged 10 Seconds alias'
+grep -Fq '[ "$ten_seconds_output" = "usage: ten-seconds-deck" ]' \
+  "$activation" || fail 'activation does not check the 10 Seconds usage result'
+grep -Fq '"$stage/nes-deck/chiptune-deck" extra extra' "$activation" ||
+  fail 'activation does not preflight the staged chiptune alias'
+grep -Fq '[ "$chiptune_output" = "usage: chiptune-deck CHIPTUNE_DIRECTORY" ]' \
+  "$activation" || fail 'activation does not check the chiptune usage result'
 grep -Fq 'cp -p "$stage/nes-deck/lisp/ui.lisp" "$base/lisp/ui.lisp"' \
   "$activation" || fail 'activation does not install the editable Lisp UI'
 grep -Fq 'cp -p "$stage/nes-deck/lisp/timer.lisp" "$base/lisp/timer.lisp"' \

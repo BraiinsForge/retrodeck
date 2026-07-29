@@ -157,6 +157,26 @@ scheme_result=$(
 }
 ECLDIR="$stage/nes-deck/ecl/lib/ecl/" \
   "$stage/nes-deck/retrodeck-native" "$stage/nes-deck/lisp/startup.lisp"
+ten_seconds_status=0
+ten_seconds_output=$(RETRO_DECK_LISP_SOURCE=1 \
+  ECLDIR="$stage/nes-deck/ecl/lib/ecl/" \
+  "$stage/nes-deck/ten-seconds-deck" extra 2>&1) || \
+  ten_seconds_status=$?
+[ "$ten_seconds_status" -eq 2 ] && \
+  [ "$ten_seconds_output" = "usage: ten-seconds-deck" ] || {
+  echo "Staged 10 Seconds entrypoint failed its usage smoke test" >&2
+  exit 1
+}
+chiptune_status=0
+chiptune_output=$(RETRO_DECK_LISP_SOURCE=1 \
+  ECLDIR="$stage/nes-deck/ecl/lib/ecl/" \
+  "$stage/nes-deck/chiptune-deck" extra extra 2>&1) || \
+  chiptune_status=$?
+[ "$chiptune_status" -eq 2 ] && \
+  [ "$chiptune_output" = "usage: chiptune-deck CHIPTUNE_DIRECTORY" ] || {
+  echo "Staged chiptune entrypoint failed its usage smoke test" >&2
+  exit 1
+}
 "$stage/nes-deck/menu/deck-menu" --help >/dev/null
 "$stage/nes-deck/menu/deck-menu" --validate-palette \
   "$stage/nes-deck/menu/palette.tsv"
