@@ -17,6 +17,20 @@ Verify the tracked copy:
 cd deploy/doom && sha256sum -c SHA256SUMS
 ```
 
+## Cover art
+
+The carousel cover is rendered at deployment time from the IWAD's own
+`TITLEPIC` graphic by `ops/lib/extract-doom-cover.py`, aspect-corrected from
+DOOM's 320x200 to 320x240 and written to `covers/<catalog id>.png`. Nothing
+is tracked here, because shipping a DOOM logo would mean redistributing id
+Software's artwork; the picture comes from the owner's own WAD instead.
+
+Libretro has no box art for a Deck entry, so `fetch-covers` never touches
+these files, and activation merges them into the cover cache rather than
+replacing it. An IWAD with no catalog entry is skipped with a warning, and a
+WAD whose graphics cannot be decoded only loses its cover: deployment
+continues.
+
 ## Adding another IWAD
 
 Drop it here and add a catalog entry in `deploy/menu/games.sexp` with
@@ -32,7 +46,9 @@ ending in `.wad`. Routing is by extension, so no code changes are needed:
 ```
 
 Regenerate `deploy/menu/games.tsv` afterwards, as
-[deploy/menu/README.md](../menu/README.md) describes.
+[deploy/menu/README.md](../menu/README.md) describes. Give the entry an `:id`
+and the deployer will render its cover automatically; the WAD is matched to
+the entry by the filename in its `:rom` path.
 
 ## Saves
 

@@ -137,8 +137,9 @@ keyboard keys instead of being translated to console buttons.
 The Deck **DOOM** entry runs the fbDOOM host against the IWAD named in the
 catalog. Unlike the other Deck entries it is supervised like a console: it
 draws the exit cross and a two-second hold anywhere returns to the dashboard.
-Its savegames are written below `/mnt/data/doom`, which activation never
-replaces. Controller mapping and the always-run setting are applied after the
+Its carousel cover is rendered from the IWAD's own title screen at deployment
+time, since Libretro has no box art for a Deck entry. Its savegames are
+written below `/mnt/data/doom`, which activation never replaces. Controller mapping and the always-run setting are applied after the
 engine reads its configuration, so neither a stale config nor fbDOOM's
 compiled-out configuration writer can restore keyboard-only bindings.
 
