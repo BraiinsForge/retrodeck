@@ -19,6 +19,11 @@ name = "retro-host"
 path = "src/bin/retro-host/main.rs"
 test = false
 
+[[bin]]
+name = "doom-host"
+path = "src/bin/doom-host/main.rs"
+test = false
+
 [profile.release]
 panic = "abort"
 strip = true
