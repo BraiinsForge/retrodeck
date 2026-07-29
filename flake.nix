@@ -23,6 +23,25 @@
       url = "github:libretro/gpsp/5b6e751f4abf368509146cd143c949c1946ac1ae";
       flake = false;
     };
+    # The Deck fbDOOM fork. Its framebuffer and tty backends are replaced by
+    # the Retro Deck platform layer in native/doom, so only the engine and
+    # the fork's multiplayer branch are used from here.
+    fbdoom-src = {
+      url = "github:BraiinsForge/fbDOOM-fork/26ea06ff3656e477019641d45b4c7d9066887503";
+      flake = false;
+    };
+    # fbDOOM carries i_oplmusic.c but not the OPL emulator, MIDI reader, or
+    # MUS converter it needs, and never compiles it. Those come from
+    # Chocolate Doom 2.2.1, pinned rather than a later release because it is
+    # the last one shipping DOSBox's dbopl emulator. Its successor, Nuked
+    # OPL3, always emulates at 49716 Hz internally whatever output rate it is
+    # asked for, which costs about 80% of a Deck core and cannot be tuned
+    # down. dbopl runs at the rate it is given. opl.h is byte-identical
+    # between the two releases, so the fork's music code is unaffected.
+    chocolate-doom-src = {
+      url = "github:chocolate-doom/chocolate-doom/2ddd290b8226e1d1f0c52e344e76150261a8c0c3";
+      flake = false;
+    };
     lua-src = {
       url = "https://www.lua.org/ftp/lua-5.5.0.tar.gz";
       flake = false;
@@ -30,7 +49,8 @@
   };
 
   outputs =
-    { self, nixpkgs, fenix, fceumm-src, gambatte-src, fuse-src, gpsp-src, lua-src }:
+    { self, nixpkgs, fenix, fceumm-src, gambatte-src, fuse-src, gpsp-src, lua-src
+    , fbdoom-src, chocolate-doom-src }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
@@ -55,6 +75,7 @@
         fileset = pkgs.lib.fileset.unions [
           ./native/Cargo.lock
           ./native/Cargo.toml
+          ./native/doom
           ./native/src
           ./protocol/deck-widget-v1.xml
         ];
@@ -222,6 +243,213 @@
           runHook postInstall
         '';
       };
+      # Freedoom stands in for the owner's private IWAD in the sandboxed
+      # frame-hash test. It is redistributable, so the test can be pinned and
+      # reproduced by anyone; it is never installed on a Deck.
+      freedoomWads = pkgs.fetchzip {
+        url = "https://github.com/freedoom/freedoom/releases/download/v0.13.0/freedoom-0.13.0.zip";
+        hash = "sha256-ieYfr4TYVRGUVriK/duN+iOlr8oAIAxz4IfnbG4hOis=";
+      };
+
+      # The license text fbDOOM's source headers point at. The fork ships no
+      # COPYING of its own.
+      gpl2Text = pkgs.fetchurl {
+        url = "https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt";
+        hash = "sha256-7a72Msu2Q+TnoiFxemxEGkwafJGObk1W3rw9hzmyM/Y=";
+      };
+
+      # The DOOM engine as a static archive. Everything platform-specific is
+      # dropped here and supplied by native/doom instead: the fork's
+      # framebuffer backend would fight the BMC compositor for the panel, its
+      # tty backend cannot see a THEGamepad, and its timer has to become
+      # deterministic for the pinned frame hash.
+      doomLib =
+        let
+          # The fork's own object list, minus the four files replaced by the
+          # Retro Deck platform layer. i_main.c stays: the build renames its
+          # main so myargc, myargv, and response-file handling are preserved.
+          engineSources = [
+            "i_main" "dummy" "am_map" "doomdef" "doomstat" "dstrings" "d_event"
+            "d_items" "d_iwad" "d_loop" "d_main" "d_mode" "d_net" "f_finale"
+            "f_wipe" "g_game" "hu_lib" "hu_stuff" "info" "i_cdmus" "i_endoom"
+            "i_joystick" "i_scale" "i_sound" "i_system" "memio" "m_argv"
+            "m_bbox" "m_cheat" "m_config" "m_controls" "m_fixed" "m_menu"
+            "m_misc" "m_random" "p_ceilng" "p_doors" "p_enemy" "p_floor"
+            "p_inter" "p_lights" "p_map" "p_maputl" "p_mobj" "p_plats"
+            "p_pspr" "p_saveg" "p_setup" "p_sight" "p_spec" "p_switch"
+            "p_telept" "p_tick" "p_user" "r_bsp" "r_data" "r_draw" "r_main"
+            "r_plane" "r_segs" "r_sky" "r_things" "sha1" "sounds" "statdump"
+            "st_lib" "st_stuff" "s_sound" "tables" "v_video" "wi_stuff"
+            "w_checksum" "w_file" "w_file_stdc_unbuffered" "w_main" "w_wad"
+            "z_zone" "aes_prng" "net_client" "net_common" "net_dedicated"
+            "net_gui" "net_io" "net_loop" "net_packet" "net_petname"
+            "net_query" "net_server" "net_structrw"
+            # NOSDL selects the POSIX network driver.
+            "net_posix"
+          ];
+          hostSources = [
+            "i_video_retrodeck" "i_input_retrodeck" "i_timer_retrodeck"
+            "i_sound_retrodeck" "opl_retrodeck"
+          ];
+          # Music: the fork's own i_oplmusic.c, paired with the Chocolate
+          # Doom pieces it needs. opl_sdl.c is deliberately absent, replaced
+          # by opl_retrodeck.c above; opl_linux.c and opl_obsd.c drive real
+          # ISA hardware and have no meaning here.
+          musicSources = [
+            "i_oplmusic" "opl" "dbopl" "opl_queue" "midifile" "mus2mid"
+          ];
+        in
+        pkgsCross.stdenv.mkDerivation {
+          pname = "doom-lib";
+          version = "0.1.0-20251201-deck";
+          src = fbdoom-src;
+          sourceRoot = "source/fbdoom";
+          buildInputs = [ pkgsCross.glibc.static ];
+
+          postPatch = ''
+            # The frontend owns the real main.
+            substituteInPlace i_main.c \
+              --replace-fail 'int main(int argc, char **argv)' \
+                'int doom_main(int argc, char **argv)'
+
+            # The fork hardcodes its config and savegame directory to /mnt,
+            # under a directory named after PACKAGE_TARNAME. The host points
+            # it beside the WAD instead, which the deployer merges rather
+            # than replaces, so savegames survive updates.
+            substituteInPlace m_config.c \
+              --replace-fail 'homedir = "/mnt";' \
+                'homedir = getenv("RETRO_DECK_DOOM_DIR");
+    if (homedir != NULL) {
+      return M_StringJoin(homedir, DIR_SEPARATOR_S, NULL);
+    }
+    homedir = "/mnt";'
+
+            # Register the Retro Deck sound module. Upstream compiles no
+            # sound module at all without SDL, so the table is empty and
+            # I_InitSound silently produces a mute game.
+            substituteInPlace i_sound.c \
+              --replace-fail 'extern sound_module_t sound_sdl_module;' \
+                'extern sound_module_t sound_sdl_module;
+extern sound_module_t sound_retrodeck_module;' \
+              --replace-fail '#ifdef FEATURE_SOUND
+    &sound_sdl_module,' \
+                '    &sound_retrodeck_module,
+#ifdef FEATURE_SOUND
+    &sound_sdl_module,'
+
+            # Register the OPL music module, which upstream also leaves out
+            # of the table. i_oplmusic.c supplies opl_io_port itself.
+            substituteInPlace i_sound.c \
+              --replace-fail '#ifdef FEATURE_SOUND
+    &music_sdl_module,' \
+                '    &music_opl_module,
+#ifdef FEATURE_SOUND
+    &music_sdl_module,'
+
+            # Vendor the OPL emulator, MIDI reader, and MUS converter.
+            cp ${chocolate-doom-src}/opl/opl.c \
+               ${chocolate-doom-src}/opl/opl.h \
+               ${chocolate-doom-src}/opl/dbopl.c \
+               ${chocolate-doom-src}/opl/dbopl.h \
+               ${chocolate-doom-src}/opl/opl_internal.h \
+               ${chocolate-doom-src}/opl/opl_queue.c \
+               ${chocolate-doom-src}/opl/opl_queue.h \
+               ${chocolate-doom-src}/src/midifile.c \
+               ${chocolate-doom-src}/src/midifile.h \
+               ${chocolate-doom-src}/src/mus2mid.c \
+               ${chocolate-doom-src}/src/mus2mid.h \
+               .
+            chmod u+w opl.c dbopl.c opl_queue.c midifile.c mus2mid.c
+
+            # midifile.c reads big-endian MIDI headers through SDL's byte
+            # swappers. fbDOOM's i_swap.h only covers the little-endian
+            # direction, so supply the two the reader needs.
+            substituteInPlace midifile.c \
+              --replace-fail '#include "midifile.h"' '#include "midifile.h"
+
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define SDL_SwapBE16(x) ((uint16_t) (x))
+#define SDL_SwapBE32(x) ((uint32_t) (x))
+#else
+#define SDL_SwapBE16(x) __builtin_bswap16((uint16_t) (x))
+#define SDL_SwapBE32(x) __builtin_bswap32((uint32_t) (x))
+#endif'
+
+            # Chocolate Doom's OPL dispatcher lists hardware drivers and the
+            # SDL one; only the Retro Deck software driver survives here.
+            substituteInPlace opl.c \
+              --replace-fail 'extern opl_driver_t opl_sdl_driver;' \
+                'extern opl_driver_t opl_retrodeck_driver;' \
+              --replace-fail '    &opl_sdl_driver,' \
+                '    &opl_retrodeck_driver,' \
+              --replace-fail '#include "SDL.h"' '#include <string.h>'
+
+            # OPL_Delay blocked on a condition variable that the SDL audio
+            # thread signalled; it is the only reason opl.c wanted SDL. Chip
+            # detection depends on it advancing emulated time, so it maps
+            # onto the driver's render-and-discard instead of becoming a
+            # no-op.
+            ${pkgs.python3}/bin/python3 - <<'PATCH'
+source = open("opl.c").read()
+# Replace the whole condition-variable delay block: the data struct, its
+# callback, and OPL_Delay itself.
+start = source.index("typedef struct\n{\n    int finished;")
+end = source.index("void OPL_SetPaused(int paused)")
+source = source[:start] + """extern void retrodeck_opl_delay(uint64_t microseconds);
+
+void OPL_Delay(uint64_t us)
+{
+    if (driver != NULL)
+    {
+        retrodeck_opl_delay(us);
+    }
+}
+
+""" + source[end:]
+open("opl.c", "w").write(source)
+PATCH
+
+            cp ${./native/doom}/*.c ${./native/doom}/*.h .
+          '';
+
+          buildPhase = ''
+            runHook preBuild
+            # -O2 with Cortex-A7 tuning rather than the -Ofast used for the
+            # emulator cores: -ffast-math would change DOOM's arithmetic and
+            # desynchronise the demos the frame-hash test depends on.
+            flags="-c -std=gnu99 -O2 -marm -march=armv7-a -mtune=cortex-a7 \
+              -mfpu=neon-vfpv4 -mfloat-abi=hard -fomit-frame-pointer \
+              -DNORMALUNIX -DLINUX -DSNDSERV -DFEATURE_MULTIPLAYER -I."
+            for unit in ${pkgs.lib.concatStringsSep " "
+                (engineSources ++ hostSources ++ musicSources)}; do
+              echo "[compiling $unit]"
+              $CC $flags -o "$unit.o" "$unit.c"
+            done
+            ${pkgsCross.stdenv.cc.targetPrefix}ar rcs libdoom.a *.o
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            install -Dm644 libdoom.a $out/lib/libdoom.a
+            install -Dm644 ../README.TXT \
+              $out/share/licenses/doom-deck/fbDOOM-README.TXT
+            # Neither fbDOOM nor the Deck fork ships a license file, so the
+            # GPL-2.0 text their headers refer to is pinned by hash here.
+            install -Dm644 ${gpl2Text} \
+              $out/share/licenses/doom-deck/DOOM-COPYING
+            # The OPL emulator, MIDI reader, and MUS converter.
+            install -Dm644 ${chocolate-doom-src}/COPYING \
+              $out/share/licenses/doom-deck/Chocolate-Doom-COPYING
+            runHook postInstall
+          '';
+
+          meta = {
+            description = "fbDOOM engine archive with the Retro Deck platform layer";
+            license = pkgs.lib.licenses.gpl2Only;
+          };
+        };
+
       # One Rust libretro host binary per console, with the core linked in.
       retroHost = { name, core, coreDerivation, coreLibrary, description, license
         , linkTimeOptimization ? false }:
@@ -330,7 +558,11 @@
               -l static=gmp \
               -l dl \
               -l m"
-            cargo build --release --locked --offline --features lisp-image
+            # Scoped to one binary on purpose: retro-host and doom-host each
+            # need a statically linked engine that this derivation does not
+            # provide, so an unscoped build would try to link them and fail.
+            cargo build --release --locked --offline --features lisp-image \
+              --bin retrodeck-native
             runHook postBuild
           '';
 
@@ -376,6 +608,65 @@
           coreLibrary = "fuse";
           description = "Fuse ZX Spectrum core with the Rust Deck frontend";
           license = pkgs.lib.licenses.gpl3Only;
+        };
+
+        doom-deck = pkgs.stdenvNoCC.mkDerivation {
+          pname = "doom-deck";
+          version = "1.0.0";
+
+          src = nativeSources;
+          cargoDeps = nativeCargoDeps;
+          cargoRoot = "native";
+          nativeBuildInputs = [
+            rustToolchain
+            pkgs.rustPlatform.cargoSetupHook
+            pkgsCross.stdenv.cc
+            pkgs.nukeReferences
+          ];
+          buildInputs = [
+            pkgsCross.glibc.static
+            staticCross.libvorbis
+            staticCross.zlib
+            gmeStaticCross
+            doomLib
+          ];
+          allowedReferences = [ ];
+
+          buildPhase = ''
+            runHook preBuild
+            cd native
+            export CARGO_HOME=$TMPDIR/cargo
+            export CARGO_BUILD_TARGET=armv7-unknown-linux-gnueabihf
+            export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER="${pkgsCross.stdenv.cc}/bin/${pkgsCross.stdenv.cc.targetPrefix}cc"
+            export RUSTFLAGS="\
+              -C target-feature=+crt-static,+v7,+hwdiv,+hwdiv-arm \
+              -C link-arg=-static \
+              -L native=${doomLib}/lib \
+              -L native=${pkgsCross.glibc.static}/lib \
+              -l static=doom \
+              -l z \
+              -l m"
+            cargo build --release --locked --offline --bin doom-host
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            install -Dm755 \
+              target/armv7-unknown-linux-gnueabihf/release/doom-host \
+              $out/bin/doom-deck
+            mkdir -p $out/share/licenses
+            cp -a ${doomLib}/share/licenses/doom-deck \
+              $out/share/licenses/doom-deck
+            nuke-refs $out/bin/doom-deck
+            runHook postInstall
+          '';
+
+          meta = {
+            description = "fbDOOM engine with the Rust Deck frontend";
+            license = pkgs.lib.licenses.gpl2Only;
+            platforms = [ system ];
+          };
         };
 
         gba-deck = retroHost {
@@ -765,6 +1056,49 @@
               url = "https://github.com/pinobatch/240p-test-mini/releases/download/v0.23/240pee_mb.gba";
               hash = "sha256-R4RPcUBzigb487wJeA2jqwlVOaJQuHD2FP7tVh2dbzQ=";
             }} 408bb5792cfa3e00
+          touch $out
+        '';
+
+        # DOOM's own frame-hash check. Freedoom stands in for the owner's
+        # private IWAD: it is redistributable, so the sandbox can pin a
+        # hash. Determinism comes from the host's test-mode clock, which is
+        # derived from the presented frame count rather than the machine.
+        doom-host-smoke = pkgs.runCommand "doom-host-smoke" { } ''
+          cp ${freedoomWads}/freedoom1.wad freedoom1.wad
+          chmod 600 freedoom1.wad
+          # 600 frames rather than the emulators' 120: the title screen has
+          # to give way to demo playback before any weapon fires, and the
+          # sound effects are only covered once one does.
+          # Music is off by default on a Deck because the OPL emulation
+          # cannot hold the frame budget; the test turns it on explicitly so
+          # the code path stays covered.
+          RETRO_DECK_TEST_FRAMES=600 RETRO_DECK_VOLUME_PERCENT=0 \
+            RETRO_DECK_DOOM_MUSIC=1 \
+            ${pkgs.qemu-user}/bin/qemu-arm \
+            ${self.packages.${system}.doom-deck}/bin/doom-deck \
+            freedoom1.wad > run.log 2>&1
+          cat run.log
+          grep -q "test frames=600 video=600 " run.log
+          # Pinned together on purpose: if the frame hash ever moves, the
+          # sleep count and synthetic clock say whether the engine's timing
+          # changed or only its rendering did.
+          grep -q "sleeps=109 ms=16909 hash=a8cf511b608229c1" run.log
+          # The engine must have reached actual gameplay setup, not just
+          # printed a banner before dying.
+          grep -q "ST_Init: Init status bar" run.log
+          # The mixer must have parsed real DMX lumps and produced audio,
+          # not quietly emitted silence.
+          grep -q "sound effects ready at 44100 Hz" run.log
+          grep -q "audio=1452640 sfx=87 " run.log
+          # Music has to actually play, which is three separate claims: the
+          # chip-detection handshake accepted the driver, the music module
+          # drove it with register writes and scheduled MIDI callbacks, and
+          # the result carried signal rather than silence. Asserting only the
+          # last of those once passed while nothing played at all, because an
+          # uninitialised chip emitted a little noise.
+          grep -q "OPL music ready, chip at 44100 Hz" run.log
+          grep -q "OPL_Init: Using driver 'Retrodeck'" run.log
+          grep -Eq "music=[0-9]{6,}/[0-9]{4,}/[0-9]{3,} " run.log
           touch $out
         '';
 

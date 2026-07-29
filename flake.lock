@@ -1,5 +1,39 @@
 {
   "nodes": {
+    "chocolate-doom-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1441899526,
+        "narHash": "sha256-lLiKwRTOStoInIKX510xkgbjbRaAJq/OeWJPg3ICYBI=",
+        "owner": "chocolate-doom",
+        "repo": "chocolate-doom",
+        "rev": "2ddd290b8226e1d1f0c52e344e76150261a8c0c3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "chocolate-doom",
+        "repo": "chocolate-doom",
+        "rev": "2ddd290b8226e1d1f0c52e344e76150261a8c0c3",
+        "type": "github"
+      }
+    },
+    "fbdoom-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1764602340,
+        "narHash": "sha256-1ufU1B+wRZi7YIFsoB64Fiop8jVGeZE+UUV15hghQXA=",
+        "owner": "BraiinsForge",
+        "repo": "fbDOOM-fork",
+        "rev": "26ea06ff3656e477019641d45b4c7d9066887503",
+        "type": "github"
+      },
+      "original": {
+        "owner": "BraiinsForge",
+        "repo": "fbDOOM-fork",
+        "rev": "26ea06ff3656e477019641d45b4c7d9066887503",
+        "type": "github"
+      }
+    },
     "fceumm-src": {
       "flake": false,
       "locked": {
@@ -120,6 +154,8 @@
     },
     "root": {
       "inputs": {
+        "chocolate-doom-src": "chocolate-doom-src",
+        "fbdoom-src": "fbdoom-src",
         "fceumm-src": "fceumm-src",
         "fenix": "fenix",
         "fuse-src": "fuse-src",
