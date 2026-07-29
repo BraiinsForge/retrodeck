@@ -313,17 +313,17 @@ impl FbTarget {
         let source = data.cast::<u8>();
         for source_x in 0..layout.width / layout.scale {
             let first_physical_row = 1279 - layout.x - source_x * layout.scale;
-            for duplicate in 0..layout.scale {
-                let row = first_physical_row - duplicate;
-                let mut offset = row * self.row_words + layout.y;
-                for source_y in 0..height {
-                    let color = unsafe {
-                        source
-                            .add(source_y * pitch + source_x * 4)
-                            .cast::<u32>()
-                            .read_unaligned()
-                    };
-                    let pixel = rgb888_to_565(color);
+            for source_y in 0..height {
+                let color = unsafe {
+                    source
+                        .add(source_y * pitch + source_x * 4)
+                        .cast::<u32>()
+                        .read_unaligned()
+                };
+                let pixel = rgb888_to_565(color);
+                for duplicate in 0..layout.scale {
+                    let row = first_physical_row - duplicate;
+                    let mut offset = row * self.row_words + layout.y + source_y * layout.scale;
                     for _ in 0..layout.scale {
                         self.staging[offset] = pixel;
                         offset += 1;
