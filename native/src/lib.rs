@@ -3,6 +3,7 @@ pub mod canvas;
 pub mod chiptune;
 pub mod control_file;
 pub mod controls;
+pub mod doom_input;
 pub mod fbdev;
 pub mod game_audio;
 pub mod game_video;
