@@ -170,11 +170,22 @@ fn write_all(fd: &OwnedFd, mut bytes: &[u8]) -> Result<(), ()> {
     Ok(())
 }
 
+fn pcm_bytes<'a>(samples: &[i16], bytes: &'a mut [u8]) -> &'a [u8] {
+    debug_assert!(bytes.len() >= samples.len() * 2);
+    for (index, &sample) in samples.iter().enumerate() {
+        let [low, high] = sample.to_le_bytes();
+        bytes[index * 2] = low;
+        bytes[index * 2 + 1] = high;
+    }
+    &bytes[..samples.len() * 2]
+}
+
 fn writer_thread(fd: OwnedFd, trigger_pending: bool) {
     let shared = shared();
     let condition = condition();
     let mut started = !trigger_pending;
     let mut output = vec![0_i16; WRITE_CHUNK_FRAMES];
+    let mut bytes = vec![0_u8; WRITE_CHUNK_FRAMES * 2];
     loop {
         let count;
         {
@@ -201,11 +212,8 @@ fn writer_thread(fd: OwnedFd, trigger_pending: bool) {
             }
             started = true;
         }
-        let bytes: Vec<u8> = output[..count]
-            .iter()
-            .flat_map(|sample| sample.to_le_bytes())
-            .collect();
-        if write_all(&fd, &bytes).is_err() {
+        let bytes = pcm_bytes(&output[..count], &mut bytes);
+        if write_all(&fd, bytes).is_err() {
             let mut guard = shared.lock().expect("audio queue lock");
             guard.worker_failed = true;
             guard.size = 0;
@@ -377,6 +385,16 @@ mod tests {
         assert_eq!(output_rate(32768, 32000), 32000);
         assert_eq!(output_rate(44100, 44100), 44100);
         assert_eq!(output_rate(48000, 44100), 44100);
+    }
+
+    #[test]
+    fn encodes_pcm_without_changing_sample_order() {
+        let samples = [-32768_i16, -1, 0, 1, 32767];
+        let mut bytes = [0_u8; 10];
+        assert_eq!(
+            pcm_bytes(&samples, &mut bytes),
+            [0, 128, 255, 255, 0, 0, 1, 0, 255, 127]
+        );
     }
 
     #[test]
