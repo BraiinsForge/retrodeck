@@ -1528,8 +1528,12 @@ Updated on 2026-07-25:
 - The startup-loaded Lisp chiptune renderer plus ABI 22's single mutex-owned
   libvorbisfile decoder matched the authoritative four-block Ogg preview hash
   `E58BD71B6BD7E1CD` through host, ARM/ECL, and the BMC Wayland gameplay layer on
-  Deck `10.0.0.15`; the C++ player remains authoritative while PCM output and
-  the maintained GME backend are still pending
+  Deck `10.0.0.15`; the maintained GME backend then opened the pinned 749-byte
+  NSF, returned exact metadata, advanced real 735-frame PCM blocks, rejected an
+  invalid one-track selection, rewound, and passed Lisp file/track command
+  fixtures. The installed `chiptune-deck` rendered it through Wayland layer-shell
+  muted for eight seconds and returned cleanly after SIGTERM; Deck health stayed
+  `HEALTHY`.
 - The opt-in Lisp 10 Seconds runtime matched authoritative initialization,
   sound/clock/redraw ordering, 8 ms polling, Back/controller/touch priority,
   primary-error-preserving cleanup, and bounded stop reasons through host and
