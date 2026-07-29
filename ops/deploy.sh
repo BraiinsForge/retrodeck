@@ -82,6 +82,7 @@ nes=$(build_flake .#nes-deck)
 gb=$(build_flake .#gb-deck)
 zx=$(build_flake .#zx-deck)
 gba=$(build_flake .#gba-deck)
+doom=$(build_flake .#doom-deck)
 native=$(build_flake .#retrodeck-native)
 fbterm=$(build_flake .#fbterm-deck)
 rlwrap=$(build_flake .#rlwrap-deck)
@@ -113,6 +114,7 @@ cp "$nes/bin/nes-deck" "$payload/nes-deck/nes-deck"
 cp "$gb/bin/gb-deck" "$payload/nes-deck/gb-deck"
 cp "$zx/bin/zx-deck" "$payload/nes-deck/zx-deck"
 cp "$gba/bin/gba-deck" "$payload/nes-deck/gba-deck"
+cp "$doom/bin/doom-deck" "$payload/nes-deck/doom-deck"
 ln -sfn retrodeck-native "$payload/nes-deck/ten-seconds-deck"
 ln -sfn ../retrodeck-native "$payload/nes-deck/menu/deck-menu"
 cp "$native/bin/retrodeck-native" "$payload/nes-deck/retrodeck-native"
@@ -175,7 +177,7 @@ cp deploy/uploader/nes-deck-uploader.init \
   "$payload/etc/init.d/nes-deck-uploader"
 cp ops/lib/install-bmc-scene.py "$payload/install-bmc-scene.py"
 
-for result in "$nes" "$gb" "$zx" "$fbterm" "$rlwrap" "$lua" \
+for result in "$nes" "$gb" "$zx" "$gba" "$doom" "$fbterm" "$rlwrap" "$lua" \
               "$python" "$chibi" "$runtime_licenses" "$ecl"; do
   if [[ -d $result/share/licenses ]]; then
     cp -a "$result/share/licenses/." "$payload/nes-deck/licenses/"
@@ -196,8 +198,21 @@ for system in nes gb gbc zx gba; do
   fi
 done
 
+# DOOM WADs are Deck program data, not console ROMs: the catalog points at
+# them below /mnt/data/nes-deck/games. The activation step merges this
+# directory, so an owner-supplied WAD, default.cfg, and savegame/ already on
+# the Deck all survive an update.
+mkdir -p "$payload/nes-deck/games/doom"
+if [[ -d deploy/doom ]]; then
+  # -p so the owner-private 0600 mode survives onto the Deck, as it does
+  # for the console ROMs.
+  find deploy/doom -maxdepth 1 -type f -name '*.wad' \
+    -exec cp -p {} "$payload/nes-deck/games/doom/" \;
+fi
+
 find "$payload/nes-deck" -type f \( \
   -name 'nes-deck' -o -name 'gb-deck' -o -name 'zx-deck' -o -name 'gba-deck' -o \
+  -name 'doom-deck' -o \
   -name 'ten-seconds-deck' -o \
   -name 'chiptune-deck' -o -name 'retrodeck-native' -o \
   -name 'deck-menu' -o \

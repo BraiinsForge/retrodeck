@@ -59,7 +59,7 @@ trap restore_service_after_failure EXIT
 
 # Validate the complete payload before stopping a running service.
 for executable in \
-  nes-deck gb-deck zx-deck gba-deck ten-seconds-deck chiptune-deck; do
+  nes-deck gb-deck zx-deck gba-deck doom-deck ten-seconds-deck chiptune-deck; do
   [ -x "$stage/nes-deck/$executable" ] || {
     echo "Staged executable is missing: $executable" >&2
     exit 1
@@ -197,6 +197,7 @@ cp -p "$stage/nes-deck/nes-deck" "$base/nes-deck"
 cp -p "$stage/nes-deck/gb-deck" "$base/gb-deck"
 cp -p "$stage/nes-deck/zx-deck" "$base/zx-deck"
 cp -p "$stage/nes-deck/gba-deck" "$base/gba-deck"
+cp -p "$stage/nes-deck/doom-deck" "$base/doom-deck"
 ln -sfn retrodeck-native "$base/ten-seconds-deck"
 ln -sfn retrodeck-native "$base/chiptune-deck"
 cp -p "$stage/nes-deck/retrodeck-native" "$base/retrodeck-native"
@@ -279,10 +280,15 @@ for system in nes gb gbc zx gba; do
   cp -Rp "$stage/roms/$system/." "/mnt/data/roms/$system/"
 done
 cp -Rp "$stage/chiptunes/." /mnt/data/chiptunes/
+# DOOM writes its configuration and savegames here rather than beside the
+# WAD, because the games directory above is replaced wholesale on every
+# activation and would take a player's saves with it.
 mkdir -p /mnt/data/langs/lua /mnt/data/langs/lisp \
-  /mnt/data/langs/python /mnt/data/langs/scheme /mnt/data/chiptunes
+  /mnt/data/langs/python /mnt/data/langs/scheme /mnt/data/chiptunes \
+  /mnt/data/doom
 chmod 0700 /mnt/data/langs/lua /mnt/data/langs/lisp \
-  /mnt/data/langs/python /mnt/data/langs/scheme /mnt/data/chiptunes
+  /mnt/data/langs/python /mnt/data/langs/scheme /mnt/data/chiptunes \
+  /mnt/data/doom
 
 # Install system entry points and service definitions.
 cp -p "$stage/usr/bin/ecl" /usr/bin/ecl
