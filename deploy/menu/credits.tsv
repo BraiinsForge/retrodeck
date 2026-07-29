@@ -2,6 +2,9 @@
 FCEUmm	NES emulation	GPL-2.0-only
 Gambatte	Game Boy and Game Boy Color emulation	GPL-2.0-only
 Fuse	ZX Spectrum emulation	GPL-3.0-only
+fbDOOM	DOOM engine	GPL-2.0-only
+Chocolate Doom	DOOM music and MIDI support	GPL-2.0-or-later
+DOSBox dbopl	OPL2 and OPL3 emulation	GPL-2.0-or-later
 libspectrum	ZX Spectrum media support	GPL-2.0-or-later
 bzip2	ZX Spectrum compression support	bzip2-1.0.6
 Game Music Emu	Chiptune decoding	LGPL-2.1-or-later
