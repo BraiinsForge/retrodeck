@@ -15,6 +15,10 @@ pub const PAD_LEFT: u32 = 1 << 6;
 pub const PAD_RIGHT: u32 = 1 << 7;
 pub const PAD_L: u32 = 1 << 8;
 pub const PAD_R: u32 = 1 << 9;
+/// Only ever set in the distinct state. The console mapping deliberately
+/// folds X into A and Y into B; DOOM needs four separate face buttons.
+pub const PAD_X: u32 = 1 << 10;
+pub const PAD_Y: u32 = 1 << 11;
 
 /// (pad bit, libretro joypad id). L and R are consumed only by the ZX build.
 pub const RETRO_BUTTON_MAP: [(u32, u32); 8] = [
@@ -92,6 +96,7 @@ struct Gamepad {
     y_value: i32,
     raw_buttons: u8,
     state: u32,
+    distinct: u32,
     dropping_events: bool,
 }
 
@@ -121,6 +126,7 @@ impl Gamepad {
             y_value: 0,
             raw_buttons: 0,
             state: 0,
+            distinct: 0,
             dropping_events: false,
         }
     }
@@ -146,6 +152,9 @@ struct Inner {
 struct Shared {
     inner: Mutex<Inner>,
     pad_state: Mutex<[u32; PLAYER_COUNT]>,
+    /// Gamepads only, with X and Y kept apart from A and B. The keyboard
+    /// fallback is deliberately absent: DOOM reads real keys instead.
+    pad_distinct: Mutex<[u32; PLAYER_COUNT]>,
     stopping: AtomicBool,
 }
 
@@ -164,6 +173,7 @@ fn shared() -> &'static Shared {
                 diagnostics: false,
             }),
             pad_state: Mutex::new([0; PLAYER_COUNT]),
+            pad_distinct: Mutex::new([0; PLAYER_COUNT]),
             stopping: AtomicBool::new(false),
         }))
     })
@@ -214,11 +224,30 @@ fn axis_to_pad(value: i32, minimum: i32, maximum: i32, negative: u32, positive: 
     }
 }
 
+/// Reports X and Y as themselves instead of folding them onto A and B.
+fn gamepad_key_to_pad_distinct(code: u16) -> u32 {
+    match code {
+        0x120 => PAD_B,
+        0x121 => PAD_Y,
+        0x122 => PAD_A,
+        0x123 => PAD_X,
+        other => gamepad_key_to_pad(other),
+    }
+}
+
 fn gamepad_state(gamepad: &Gamepad) -> u32 {
+    gamepad_state_mapped(gamepad, gamepad_key_to_pad)
+}
+
+fn gamepad_distinct_state(gamepad: &Gamepad) -> u32 {
+    gamepad_state_mapped(gamepad, gamepad_key_to_pad_distinct)
+}
+
+fn gamepad_state_mapped(gamepad: &Gamepad, key_to_pad: fn(u16) -> u32) -> u32 {
     let mut state = 0;
     for bit in 0..8_u16 {
         if gamepad.raw_buttons & (1 << bit) != 0 {
-            state |= gamepad_key_to_pad(BTN_TRIGGER + bit);
+            state |= key_to_pad(BTN_TRIGGER + bit);
         }
     }
     state |= axis_to_pad(
@@ -252,6 +281,10 @@ fn publish_states(inner: &Inner) {
         }
     }
     *published = next;
+    drop(published);
+
+    let mut distinct = shared().pad_distinct.lock().expect("pad distinct lock");
+    *distinct = [inner.gamepads[0].distinct, inner.gamepads[1].distinct];
 }
 
 fn resynchronize(gamepad: &mut Gamepad) -> bool {
@@ -279,6 +312,7 @@ fn resynchronize(gamepad: &mut Gamepad) -> bool {
         }
     }
     gamepad.state = gamepad_state(gamepad);
+    gamepad.distinct = gamepad_distinct_state(gamepad);
     true
 }
 
@@ -290,6 +324,7 @@ fn close_gamepad(gamepad: &mut Gamepad, remember_physical_path: bool) {
     }
     gamepad.raw_buttons = 0;
     gamepad.state = 0;
+    gamepad.distinct = 0;
     gamepad.dropping_events = false;
 }
 
@@ -356,6 +391,7 @@ fn attach_candidate(gamepad: &mut Gamepad, candidate: Candidate, player: usize) 
     gamepad.y_value = candidate.y_info.value;
     gamepad.raw_buttons = 0;
     gamepad.state = 0;
+    gamepad.distinct = 0;
     gamepad.dropping_events = false;
     resynchronize(gamepad);
     eprintln!(
@@ -499,6 +535,7 @@ fn drain_gamepad(gamepad: &mut Gamepad) -> bool {
             }
         }
         gamepad.state = gamepad_state(gamepad);
+        gamepad.distinct = gamepad_distinct_state(gamepad);
     }
     true
 }
@@ -742,6 +779,16 @@ pub fn shutdown() {
 pub fn joypad_state(port: u32) -> u32 {
     shared()
         .pad_state
+        .lock()
+        .map(|states| states.get(port as usize).copied().unwrap_or(0))
+        .unwrap_or(0)
+}
+
+/// Held gamepad buttons with X and Y reported separately from A and B, and
+/// without the keyboard fallback folded in. Only the DOOM host uses this.
+pub fn joypad_distinct_state(port: u32) -> u32 {
+    shared()
+        .pad_distinct
         .lock()
         .map(|states| states.get(port as usize).copied().unwrap_or(0))
         .unwrap_or(0)
