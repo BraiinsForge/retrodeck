@@ -2469,6 +2469,7 @@ secret!9
                  (:deck . "/mnt/data/nes-deck/ten-seconds-deck")
                  (:doom . "/mnt/data/nes-deck/doom-deck")
                  (:chiptunes . "/mnt/data/nes-deck/chiptune-deck")
+                  (:node-mode . "/mnt/data/nes-deck/menu/node-mode")
                  (:terminal . "/mnt/data/nes-deck/terminal/retro-terminal")
                  (:reboot . "/sbin/reboot"))))
 (assert (string= retrodeck:*dashboard-cover-directory*
@@ -2537,6 +2538,11 @@ secret!9
                   :rom "/mnt/data/nes-deck/terminal/retro-terminal"
                   :color #x5f87af
                   :terminal-mode "shell")
+                 (:id "node-mode"
+                   :title "NODE MODE"
+                   :system :deck
+                   :rom "/mnt/data/nes-deck/menu/node-mode"
+                   :color #xfe6c27)
                  (:id "reboot"
                   :title "REBOOT"
                   :system :deck
@@ -2596,7 +2602,7 @@ secret!9
       (assert
        (equal (mapcar (lambda (game) (getf game :id)) (subseq games 15))
               '("lua-repl" "lisp-repl" "python-repl" "scheme-repl"
-                "chiptunes" "terminal" "reboot")))
+                "chiptunes" "terminal" "node-mode" "reboot")))
       (assert (equal palette retrodeck:*dashboard-palette*)))
     (assert
      (equal (reverse *regular-file-calls*)
@@ -2611,7 +2617,7 @@ secret!9
            manifest-path palette-path :credits-path credits-path)
         (assert palette-loaded-p)
         (assert credits-loaded-p)
-        (assert (= (length (getf state :games)) 22))
+        (assert (= (length (getf state :games)) 23))
         (assert (getf state :reduced-motion))
         (assert (= (length (getf (getf state :credits-crawl) :static-lines))
                    33))
@@ -2776,7 +2782,7 @@ secret!9
           (retrodeck:load-dashboard-bootstrap "/tmp/games.tsv"
                                               "/tmp/palette.tsv")
         (assert (not loaded-p))
-        (assert (= (length games) 8))
+        (assert (= (length games) 9))
         (assert (equal palette original))
         (setf (cdar palette) #xffffff
               (char (getf (second games) :title) 0) #\X)
@@ -4483,7 +4489,7 @@ secret!9
              (assert (eq returned-runtime runtime))
              (assert (equal traces '(((:reap-sound)) ((:reap-sound)))))
              (assert (eq reason :limit))
-             (assert (= (length (getf final :games)) 22))
+             (assert (= (length (getf final :games)) 23))
              (assert (string= (getf (first (getf final :games)) :id)
                               "mario"))
              (assert (= (getf (getf final :settings) :volume) 37))
