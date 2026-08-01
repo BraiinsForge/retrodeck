@@ -152,7 +152,7 @@ cp deploy/menu/games.sexp deploy/menu/games.tsv deploy/menu/credits.tsv \
   deploy/menu/palette.tsv \
   deploy/menu/ASSETS.md \
   deploy/menu/compile-catalog.lisp deploy/menu/deck-menu-launcher \
-  deploy/menu/fetch-covers "$payload/nes-deck/menu/"
+  deploy/menu/fetch-covers deploy/menu/node-mode "$payload/nes-deck/menu/"
 cp assets/settings-cog/gear-knekko-09.png \
   "$payload/nes-deck/menu/settings-icon.png"
 cp deploy/widget/manifest.json \

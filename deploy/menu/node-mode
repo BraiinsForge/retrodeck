@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /mnt/bitcoin-node/runtime/node-mode node

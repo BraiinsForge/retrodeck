@@ -40,6 +40,7 @@
     (:deck . "/mnt/data/nes-deck/ten-seconds-deck")
     (:doom . "/mnt/data/nes-deck/doom-deck")
     (:chiptunes . "/mnt/data/nes-deck/chiptune-deck")
+      (:node-mode . "/mnt/data/nes-deck/menu/node-mode")
     (:terminal . "/mnt/data/nes-deck/terminal/retro-terminal")
     (:reboot . "/sbin/reboot")))
 
@@ -84,6 +85,7 @@
      :rom "/mnt/data/nes-deck/terminal/retro-terminal"
      :color #x5f87af
      :terminal-mode "shell")
+     (:id "node-mode" :title "NODE MODE" :system :deck :rom "/mnt/data/nes-deck/menu/node-mode" :color #xfe6c27)
     (:id "reboot"
      :title "REBOOT"
      :system :deck
@@ -521,7 +523,7 @@ added as another catalog entry without changing any code."
     ((:gb :gbc) :gb)
     (:gba :gba)
     (:zx :zx)
-    (:deck (cond ((dashboard-application-id-p application "chiptunes")
+    (:deck (cond ((dashboard-application-id-p application "node-mode") :node-mode) ((dashboard-application-id-p application "chiptunes")
                   :chiptunes)
                  ((dashboard-wad-application-p application) :doom)
                  (t :deck)))
