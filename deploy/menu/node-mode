@@ -1,2 +1,7 @@
 #!/bin/sh
-exec /mnt/bitcoin-node/runtime/node-mode node
+
+runtime=/mnt/bitcoin-node/runtime
+pidfile=$runtime/node-mode.pid
+rm -f "$pidfile"
+exec /sbin/start-stop-daemon -S -b -m -p "$pidfile" \
+  -x "$runtime/node-mode" -- node
