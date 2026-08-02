@@ -1239,6 +1239,22 @@
     '((104 100 12 20 #xfe6c27) (100 104 20 12 #xfe6c27)
       (108 104 4 12 #x121212) (104 108 12 4 #x121212)))
 
+(let ((*canvas-fill-calls* nil)
+      (*canvas-glyph-calls* nil))
+  (assert (retrodeck::draw-dashboard-compact-logo
+           0 0 200 200
+           '(:id "node-mode" :system :deck :color #xfe6c27)))
+  (assert (equal (nreverse *canvas-fill-calls*)
+                 '((52 28 96 12 #xfe6c27)
+                   (40 40 120 12 #xfe6c27)
+                   (28 52 144 96 #xfe6c27)
+                   (40 148 120 12 #xfe6c27)
+                   (52 160 96 12 #xfe6c27)
+                   (78 42 6 116 #xffffff)
+                   (94 42 6 116 #xffffff))))
+  (assert (equal (nreverse *canvas-glyph-calls*)
+                 '((65 51 66 14 #xffffff)))))
+
 (assert-unary-table #'string= #'retrodeck:ten-seconds-format
                     '((0 "00.00") (123 "01.23") (10000 "99.99")))
 (assert-unary-table
