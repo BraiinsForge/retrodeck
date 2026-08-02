@@ -2,6 +2,14 @@
 
 runtime=/mnt/bitcoin-node/runtime
 volume=/mnt/bitcoin-node
+swapfile=$volume/swapfile
+
+swap_active() {
+  awk -v path="$swapfile" '
+    NR > 1 && $1 == path { found = 1 }
+    END { exit !found }
+  ' /proc/swaps
+}
 
 if [ ! -x "$runtime/node-mode" ]; then
   if [ "$(blkid -o value -s LABEL /dev/sda1 2>/dev/null)" != "bitcoin-node" ]; then
@@ -12,6 +20,9 @@ if [ ! -x "$runtime/node-mode" ]; then
 fi
 
 test -x "$runtime/node-mode" || exit 1
+[ -f "$swapfile" ] && [ ! -L "$swapfile" ] || exit 1
+swap_active || /sbin/swapon "$swapfile" || exit 1
+swap_active || exit 1
 pidfile=$runtime/node-mode.pid
 rm -f "$pidfile"
 exec /sbin/start-stop-daemon -S -b -m -p "$pidfile" \
