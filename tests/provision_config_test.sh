@@ -37,9 +37,9 @@ output=$("$root/ops/provision-deck.sh" --config "$config" \
   --wifi-profiles "$profiles" --check)
 grep -qx 'Provision plan: root@192.168.1.60 -> 10.0.0.13 via root@10.0.0.1' \
   <<<"$output"
-grep -qx 'Wi-Fi intake: 2 personal PSK profiles; 2 open/enterprise profiles ignored' \
+grep -qx 'Wi-Fi intake: 3 personal open/PSK profiles; enterprise profiles ignored: 1' \
   <<<"$output"
-grep -qx 'Wi-Fi preference seed: 2 recent profiles; recovery profile last when present' \
+grep -qx 'Wi-Fi preference seed: 3 recent profiles; recovery profile last when present' \
   <<<"$output"
 grep -qx 'Provision inputs are valid; no remote state was changed.' <<<"$output"
 

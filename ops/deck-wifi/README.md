@@ -7,26 +7,29 @@ grace, then requires two consecutive failures of complete network health before
 asking the selector to investigate. Complete health means association, an IPv4
 address on `wlan0`, and an IPv4 default route through `wlan0`.
 
-Canonical IWD `.psk` files live in `/etc/deck-wifi/profiles` with mode `0600`.
-The root-only `/etc/deck-wifi/preferred` file retains at most eight SSID hex
-identifiers. The watcher records the active profile after complete network
-health, and the profile helper moves each newly entered SSID to the front. It
-contains no passphrases and is updated atomically without touching the radio.
-The selector decodes IWD filenames, ignores profiles containing
-`AutoConnect=false`, and scans without logging SSIDs. Candidates must advertise
-a PSK authentication suite; SAE-only and unclassified BSSes are skipped. The
-selector merges three independent OpenWrt `iwinfo` scans so one missed beacon
+Canonical IWD `.psk` and `.open` files live in `/etc/deck-wifi/profiles` with
+mode `0600`. The root-only `/etc/deck-wifi/preferred` file retains at most eight
+SSID hex identifiers. The watcher records the active profile after complete
+network health, and the profile helper moves each newly entered SSID to the
+front. It contains no passphrases and is updated atomically without touching the
+radio. The selector decodes IWD filenames, ignores profiles containing
+`AutoConnect=false`, and scans without logging SSIDs. It accepts explicit open,
+WPA PSK, WPA2 PSK, WPA/WPA2 mixed, WPA3 SAE, and WPA2/WPA3 transition BSSes;
+enterprise and unclassified BSSes are skipped. The selector merges three
+independent OpenWrt `iwinfo` scans so one missed beacon
 cannot erase a saved network seen by another scan. A raw `iw` scan remains as a
 compatibility fallback, and three bounded retries per round absorb transient
 driver-busy failures. The currently configured SSID is the last profile that
 reached complete network health, so it is retried first. Recent successes and
 networks explicitly entered through the dashboard follow in private preference
 order, then visible alternatives follow in signal order. Every remaining usable
-saved PSK is appended as a directed-association fallback, because a driver or
-busy access point can omit a connectable SSID from every scan. The complete
+saved profile is appended as a directed-association fallback, because a driver
+or busy access point can omit a connectable SSID from every scan. The complete
 candidate set receives a second pass before rollback, and saved profiles are
-still tried when both scan providers fail completely. Both IWD `Passphrase` and
-64-digit `PreSharedKey` profiles are supported. A complete network-health check
+still tried when both scan providers fail completely. Open profiles, IWD
+`Passphrase`, and 64-digit `PreSharedKey` profiles are supported. Passphrase
+fallback uses WPA2/WPA3 transition mode; raw pre-shared keys remain WPA2-only. A
+complete network-health check
 immediately before every commit prevents a scan/reconnect race, and a healthy
 connection is never changed.
 
@@ -55,12 +58,12 @@ configuration are forced to mode `0600`. The procd service starts after the
 OpenWrt network service and keeps the generated file private when netifd
 recreates it.
 
-For a fresh Deck, `ops/provision-deck.sh` copies regular `.psk` files from the
-development machine's `/var/lib/iwd` directory by default. It never imports
-`.open` or `.8021x` profiles. Before and after installation it compares the
-live UCI file hash, `wlan0` address, and full default route, and refuses to
-continue to application deployment if any of them changed.
-The initial private preference history contains up to seven enabled PSK
+For a fresh Deck, `ops/provision-deck.sh` copies regular `.psk` and `.open` files
+from the development machine's `/var/lib/iwd` directory by default. It never
+imports `.8021x` profiles. Before and after installation it compares the live
+UCI file hash, `wlan0` address, and full default route, and refuses to continue
+to application deployment if any of them changed. The initial private
+preference history contains up to seven enabled personal
 profiles ordered by source modification time, followed by `BraiinsRecovery`
 when that profile is present. The active profile moves to the front after the
 watcher observes complete network health. An existing preference history is

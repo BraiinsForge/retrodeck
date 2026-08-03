@@ -63,6 +63,23 @@ never swept into a migration commit.
 - Removal condition: Remove after the Lisp runtime becomes the approved
   authoritative dashboard.
 
+** Treat Deck SSH loss as a transport failure first
+
+- Problem: After a reboot, missing Wi-Fi profiles can remove the WireGuard/SSH
+  path while the Deck and BMC remain healthy, and profile diagnostics can easily
+  leak saved credentials or disturb a running workload.
+- Behavior: Treat ping or SSH failure as transport-only evidence until physical
+  state or another health channel confirms otherwise. Synchronize only regular,
+  non-symlink IWD =.psk= and =.open= files through a private stream without
+  printing contents. Do not reload Wi-Fi or restart services while a node or
+  emulator is running; compare workload PIDs and network health before and after.
+- Scope and location: Tracked project workflow note in this file. No active-image
+  mutation and no credential retention.
+- Verification: A live Node Mode session retained its Core and dashboard PIDs and
+  healthy network while 43 local profiles were atomically merged at mode =0600=.
+- Removal condition: Remove when provisioning owns all profile synchronization
+  and exposes a credential-safe device-health channel independent of Wi-Fi.
+
 * Candidates
 
 None.

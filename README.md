@@ -39,9 +39,9 @@ Decks.
 The fresh-Deck provisioner defaults to the WireGuard server at
 `root@10.0.0.1` and the development machine's IWD profiles in
 `/var/lib/iwd`. Override those with `--wireguard-server` or
-`--wifi-profiles`. It imports only regular `.psk` files; open and enterprise
-profiles are counted and deliberately ignored. Up to seven recently modified
-personal profiles seed the fast-failover order, with `BraiinsRecovery` kept as
+`--wifi-profiles`. It imports regular `.psk` and `.open` files while enterprise
+profiles remain deliberately ignored. Up to seven recently modified personal
+profiles seed the fast-failover order, with `BraiinsRecovery` kept as
 the final insurance entry when present. Verify the fresh Deck's SSH host key
 before running it. The script keeps normal SSH host-key checking enabled.
 

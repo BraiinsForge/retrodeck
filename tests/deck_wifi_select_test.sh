@@ -79,6 +79,27 @@ if [ -n "$config_directory" ]; then
 else
 	config=$DECK_WIFI_CONFIG
 fi
+
+set_property() {
+	property=$1
+	value=$2
+	temporary=$config.tmp.$$
+	awk -F= -v property="$property" -v value="$value" '
+		$1 == property { print property "=" value; found=1; next }
+		{ print }
+		END { if (!found) print property "=" value }
+	' "$config" > "$temporary"
+	mv "$temporary" "$config"
+}
+
+delete_property() {
+	property=$1
+	temporary=$config.tmp.$$
+	awk -F= -v property="$property" '$1 != property { print }' \
+		"$config" > "$temporary"
+	mv "$temporary" "$config"
+}
+
 case $command in
 	get)
 		case $argument in
@@ -92,15 +113,27 @@ case $command in
 		;;
 	set)
 		property_expression=${argument%%=*}
-		property=${property_expression##*.}
-		value=${argument#*=}
-		temporary=$config.tmp.$$
-		awk -F= -v property="$property" -v value="$value" '
-			$1 == property { print property "=" value; found=1; next }
-			{ print }
-			END { if (!found) print property "=" value }
-		' "$config" > "$temporary"
-		mv "$temporary" "$config"
+		set_property "${property_expression##*.}" "${argument#*=}"
+		;;
+	delete)
+		delete_property "${argument##*.}"
+		;;
+	batch)
+		while IFS= read -r line; do
+			case $line in
+				set\ *)
+					expression=${line#set }
+					property_expression=${expression%%=*}
+					value=${expression#*=}
+					value=${value#\'}
+					value=${value%\'}
+					value=$(printf '%s' "$value" | sed "s/'\\\\''/'/g")
+					set_property "${property_expression##*.}" "$value"
+					;;
+				delete\ *) delete_property "${line##*.}" ;;
+				*) exit 1 ;;
+			esac
+		done
 		;;
 	commit) ;;
 	*) exit 1 ;;
@@ -184,16 +217,22 @@ PROFILE
 	done
 	cat > "$scenario/scan" <<'SCAN'
 BSS 00:00:00:00:00:01(on wlan0)
+	capability: ESS Privacy (0x0011)
 	signal: -10.00 dBm
 	SSID: old
+	RSN:
 	Authentication suites: PSK
 BSS 00:00:00:00:00:02(on wlan0)
+	capability: ESS Privacy (0x0011)
 	signal: -20.00 dBm
 	SSID: bad
+	RSN:
 	Authentication suites: PSK
 BSS 00:00:00:00:00:03(on wlan0)
+	capability: ESS Privacy (0x0011)
 	signal: -30.00 dBm
 	SSID: good
+	RSN:
 	Authentication suites: PSK
 SCAN
 	cat > "$scenario/iwinfo-scan" <<'IWINFO_SCAN'
@@ -287,6 +326,90 @@ grep -qx '676f6f64' "$success/preferred" ||
 	fail 'selector did not create exactly one pre-switch backup'
 [ "$(cat "$success/scan-count")" -eq 3 ] ||
 	fail 'selector did not merge three independent scan rounds'
+grep -qx 'encryption=psk2' "$success/wireless" ||
+	fail 'WPA2 PSK scan was not applied as psk2'
+
+open_network=$(make_scenario open-network)
+cat > "$open_network/profiles/cafe.open" <<'OPEN_PROFILE'
+[Settings]
+AutoConnect=true
+OPEN_PROFILE
+cat > "$open_network/iwinfo-scan" <<'OPEN_SCAN'
+Cell 01 - Address: 00:00:00:00:00:10
+          ESSID: "cafe"
+          Signal: -5 dBm  Quality: 65/70
+          Encryption: none
+OPEN_SCAN
+run_selector "$open_network" cafe || fail 'open network selection failed'
+grep -qx 'encryption=none' "$open_network/wireless" ||
+	fail 'open network was not applied without encryption'
+if grep -q '^key=' "$open_network/wireless"; then
+	fail 'open network retained the previous PSK'
+fi
+
+wpa1=$(make_scenario wpa1)
+cat > "$wpa1/profiles/legacy.psk" <<'WPA1_PROFILE'
+[Security]
+Passphrase=legacy-password
+WPA1_PROFILE
+cat > "$wpa1/iwinfo-scan" <<'WPA1_SCAN'
+Cell 01 - Address: 00:00:00:00:00:11
+          ESSID: "legacy"
+          Signal: -5 dBm  Quality: 65/70
+          Encryption: WPA PSK (TKIP)
+WPA1_SCAN
+run_selector "$wpa1" legacy || fail 'WPA PSK selection failed'
+grep -qx 'encryption=psk' "$wpa1/wireless" ||
+	fail 'WPA PSK scan was not applied as psk'
+
+wpa3=$(make_scenario wpa3)
+cat > "$wpa3/profiles/secure3.psk" <<'WPA3_PROFILE'
+[Security]
+Passphrase=secure3'password
+WPA3_PROFILE
+cat > "$wpa3/iwinfo-scan" <<'WPA3_SCAN'
+Cell 01 - Address: 00:00:00:00:00:12
+          ESSID: "secure3"
+          Signal: -5 dBm  Quality: 65/70
+          Encryption: WPA3 SAE (CCMP)
+WPA3_SCAN
+run_selector "$wpa3" secure3 || fail 'WPA3 SAE selection failed'
+grep -qx 'encryption=sae' "$wpa3/wireless" ||
+	fail 'WPA3 SAE scan was not applied as sae'
+grep -qx "key=secure3'password" "$wpa3/wireless" ||
+	fail 'private UCI batch did not preserve a quoted passphrase'
+
+transition=$(make_scenario transition)
+cat > "$transition/profiles/mixed.psk" <<'TRANSITION_PROFILE'
+[Security]
+Passphrase=mixed-password
+TRANSITION_PROFILE
+cat > "$transition/iwinfo-scan" <<'TRANSITION_SCAN'
+Cell 01 - Address: 00:00:00:00:00:13
+          ESSID: "mixed"
+          Signal: -5 dBm  Quality: 65/70
+          Encryption: WPA2/WPA3 PSK/SAE (CCMP)
+TRANSITION_SCAN
+run_selector "$transition" mixed || fail 'WPA2/WPA3 transition selection failed'
+grep -qx 'encryption=sae-mixed' "$transition/wireless" ||
+	fail 'WPA2/WPA3 transition scan was not applied as sae-mixed'
+
+raw_wpa3=$(make_scenario raw-wpa3)
+cat > "$raw_wpa3/profiles/secure3.psk" <<'RAW_WPA3_PROFILE'
+[Security]
+Passphrase=secure3-password
+RAW_WPA3_PROFILE
+cat > "$raw_wpa3/scan" <<'RAW_WPA3_SCAN'
+BSS 00:00:00:00:00:14(on wlan0)
+	capability: ESS Privacy (0x0011)
+	signal: -5.00 dBm
+	SSID: secure3
+	RSN:
+	Authentication suites: SAE
+RAW_WPA3_SCAN
+run_selector "$raw_wpa3" secure3 1 0 || fail 'raw WPA3 scan selection failed'
+grep -qx 'encryption=sae' "$raw_wpa3/wireless" ||
+	fail 'raw WPA3 scan was not applied as sae'
 
 current=$(make_scenario current)
 run_selector "$current" old || fail 'current profile reconnect failed'

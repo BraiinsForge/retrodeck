@@ -70,7 +70,7 @@ secure_files() {
 	chmod 0700 "$deck_wifi_root" "$PROFILE_DIR" "$BACKUP_DIR" 2>/dev/null || true
 	chmod 0600 "$WIRELESS_CONFIG" "$RUNTIME_CONFIG" "$STATUS_FILE" \
 		"$PREFERRED_FILE" 2>/dev/null || true
-	for profile in "$PROFILE_DIR"/*.psk; do
+	for profile in "$PROFILE_DIR"/*.psk "$PROFILE_DIR"/*.open; do
 		[ -f "$profile" ] || continue
 		chmod 0600 "$profile" 2>/dev/null || true
 	done
@@ -200,9 +200,25 @@ find_sta_section() {
 	return 1
 }
 
-profile_hex() {
+profile_stem() {
 	profile_name=${1##*/}
-	profile_name=${profile_name%.psk}
+	case "$profile_name" in
+		*.psk) printf '%s\n' "${profile_name%.psk}" ;;
+		*.open) printf '%s\n' "${profile_name%.open}" ;;
+		*) return 1 ;;
+	esac
+}
+
+profile_kind() {
+	case "${1##*/}" in
+		*.psk) printf '%s\n' psk ;;
+		*.open) printf '%s\n' open ;;
+		*) return 1 ;;
+	esac
+}
+
+profile_hex() {
+	profile_name=$(profile_stem "$1") || return 1
 	case "$profile_name" in
 		=*) printf '%s\n' "${profile_name#=}" | tr 'A-F' 'a-f' ;;
 		*) printf '%s' "$profile_name" | xxd -p | tr -d '\n'; printf '\n' ;;
@@ -210,16 +226,26 @@ profile_hex() {
 }
 
 profile_enabled() {
-	[ "$(awk -F= '$1 == "AutoConnect" { value=$2 } END { print value }' "$1")" != false ]
+	profile=$1
+	value=$(awk -F= '$1 == "AutoConnect" { value=$2 } END { print value }' \
+		< "$profile" 2>/dev/null) || return 1
+	[ "$value" != false ]
 }
 
 find_enabled_profile() {
 	wanted_hex=$1
+	wanted_encryption=$2
 	SELECTED_PROFILE=
-	for profile in "$PROFILE_DIR"/*.psk; do
+	for profile in "$PROFILE_DIR"/*.psk "$PROFILE_DIR"/*.open; do
 		[ -f "$profile" ] || continue
+		case "$wanted_encryption:$(profile_kind "$profile")" in
+			none:open|psk:psk|psk2:psk|psk-mixed:psk|sae:psk|sae-mixed:psk) ;;
+			*) continue ;;
+		esac
 		profile_enabled "$profile" || continue
-		[ "$(profile_hex "$profile")" = "$wanted_hex" ] || continue
+		candidate_hex=$(profile_hex "$profile") || continue
+		valid_profile_hex "$candidate_hex" || continue
+		[ "$candidate_hex" = "$wanted_hex" ] || continue
 		SELECTED_PROFILE=$profile
 		return 0
 	done
@@ -228,10 +254,15 @@ find_enabled_profile() {
 
 load_profile_key() {
 	profile=$1
+	SELECTED_KEY=
+	SELECTED_RAW_PSK=false
+	if [ "$(profile_kind "$profile")" = open ]; then
+		return 0
+	fi
 	SELECTED_KEY=$(awk -F= '
 		$1 == "Passphrase" { sub(/^[^=]*=/, ""); print; found=1; exit }
 		END { if (!found) exit 1 }
-	' "$profile" 2>/dev/null) || SELECTED_KEY=
+	' < "$profile" 2>/dev/null) || SELECTED_KEY=
 	if [ -n "$SELECTED_KEY" ]; then
 		key_length=${#SELECTED_KEY}
 		[ "$key_length" -ge 8 ] && [ "$key_length" -le 63 ] || return 1
@@ -240,29 +271,29 @@ load_profile_key() {
 	SELECTED_KEY=$(awk -F= '
 		$1 == "PreSharedKey" { sub(/^[^=]*=/, ""); print; found=1; exit }
 		END { if (!found) exit 1 }
-	' "$profile" 2>/dev/null) || SELECTED_KEY=
+	' < "$profile" 2>/dev/null) || SELECTED_KEY=
 	[ "${#SELECTED_KEY}" -eq 64 ] || return 1
 	case "$SELECTED_KEY" in
 		*[!0-9A-Fa-f]*) return 1 ;;
 	esac
+	SELECTED_RAW_PSK=true
 	return 0
 }
 
 profile_ssid() {
-	profile_name=${1##*/}
-	profile_name=${profile_name%.psk}
+	profile_name=$(profile_stem "$1") || return 1
 	case "$profile_name" in
-		=*) printf '%s' "${profile_name#=}" | xxd -r -p ;;
+		=*)
+			encoded=${profile_name#=}
+			valid_profile_hex "$(printf '%s' "$encoded" | tr 'A-F' 'a-f')" || return 1
+			printf '%s' "$encoded" | xxd -r -p
+			;;
 		*) printf '%s' "$profile_name" ;;
 	esac
 }
 
 cleanup() {
-	rm -f "${SCAN_IW:-}" "${SCAN_RAW:-}" "${SCAN_HEX:-}" \
-		"${SCAN_ALL:-}" "${SCAN_SORTED:-}" "${CANDIDATES:-}" \
-		"${CURRENT_CANDIDATE:-}" "${PREFERRED_CANDIDATES:-}" \
-		"${PREFERRED_TEMP:-}" \
-		2>/dev/null || true
+	[ -n "${SCAN_DIR:-}" ] && rm -rf "$SCAN_DIR" 2>/dev/null || true
 	[ -n "${UCI_WORK:-}" ] && rm -rf "$UCI_WORK" 2>/dev/null || true
 	[ -n "${RESTORE_WORK:-}" ] && rm -f "$RESTORE_WORK" 2>/dev/null || true
 	rmdir "$LOCK_DIR" 2>/dev/null || true
@@ -270,21 +301,32 @@ cleanup() {
 
 parse_iwinfo_scan() {
 	awk '
+		function classify(line, lower, has_psk, has_sae, has_wpa, has_wpa2) {
+			lower=tolower(line)
+			if (index(lower, "none")) return "none"
+			has_psk=index(lower, "psk") > 0
+			has_sae=index(lower, "sae") > 0
+			has_wpa=lower ~ /(^|[^a-z0-9])wpa([^0-9]|$)/
+			has_wpa2=index(lower, "wpa2") > 0
+			if (has_sae && has_psk) return "sae-mixed"
+			if (has_sae) return "sae"
+			if (has_psk && has_wpa && has_wpa2) return "psk-mixed"
+			if (has_psk && has_wpa2) return "psk2"
+			if (has_psk && has_wpa) return "psk"
+			return "unsupported"
+		}
 		function emit() {
-			if (length(ssid) > 0) printf "%s\t%d\t%s\n", signal, psk, ssid
+			if (length(ssid) > 0) printf "%s\t%s\t%s\n", signal, encryption, ssid
 		}
 		/^Cell / {
 			emit()
 			signal=-1000
 			ssid=""
-			psk=0
+			encryption="unsupported"
 			next
 		}
 		/^[[:space:]]*Signal:/ { signal=$2; next }
-		/^[[:space:]]*Encryption:/ {
-			if (index($0, "PSK")) psk=1
-			next
-		}
+		/^[[:space:]]*Encryption:/ { encryption=classify($0); next }
 		/^[[:space:]]*ESSID: "/ {
 			ssid=$0
 			sub(/^[[:space:]]*ESSID: "/, "", ssid)
@@ -297,19 +339,41 @@ parse_iwinfo_scan() {
 
 parse_iw_scan() {
 	awk '
+		function security() {
+			if (sae && psk) return "sae-mixed"
+			if (sae) return "sae"
+			if (psk && wpa && rsn) return "psk-mixed"
+			if (psk && rsn) return "psk2"
+			if (psk && wpa) return "psk"
+			if (capability_seen && !privacy && !wpa && !rsn) return "none"
+			return "unsupported"
+		}
 		function emit() {
-			if (length(ssid) > 0) printf "%s\t%d\t%s\n", signal, psk, ssid
+			if (length(ssid) > 0) printf "%s\t%s\t%s\n", signal, security(), ssid
 		}
 		/^BSS / {
 			emit()
 			signal=-1000
 			ssid=""
+			capability_seen=0
+			privacy=0
+			wpa=0
+			rsn=0
 			psk=0
+			sae=0
 			next
 		}
 		/^[[:space:]]*signal:/ { signal=$2; next }
+		/^[[:space:]]*capability:/ {
+			capability_seen=1
+			if (index($0, "Privacy")) privacy=1
+			next
+		}
+		/^[[:space:]]*WPA:/ { wpa=1; next }
+		/^[[:space:]]*RSN:/ { rsn=1; next }
 		/Authentication suites:/ {
 			if (index($0, "PSK")) psk=1
+			if (index($0, "SAE")) sae=1
 			next
 		}
 		/^[[:space:]]*SSID:/ {
@@ -340,10 +404,10 @@ scan_once() {
 	fi
 	[ -s "$SCAN_RAW" ] || return 1
 
-	while IFS="$TAB" read -r signal advertises_psk ssid; do
+	while IFS="$TAB" read -r signal encryption ssid; do
 		ssid_hex=$(printf '%s' "$ssid" | xxd -p | tr -d '\n' | tr 'A-F' 'a-f')
-		[ -n "$ssid_hex" ] || continue
-		printf '%s\t%s\t%s\n' "$signal" "$advertises_psk" "$ssid_hex"
+		valid_profile_hex "$ssid_hex" || continue
+		printf '%s\t%s\t%s\n' "$signal" "$encryption" "$ssid_hex"
 	done < "$SCAN_RAW" > "$SCAN_HEX"
 	sort -rn -k1,1 "$SCAN_HEX" > "$SCAN_SORTED"
 	[ -s "$SCAN_SORTED" ]
@@ -360,40 +424,52 @@ candidate_already_added() {
 build_candidate_list() {
 	: > "$CANDIDATES"
 	: > "$CURRENT_CANDIDATE"
-	while IFS="$TAB" read -r _signal advertises_psk candidate_hex; do
-		[ "$advertises_psk" = 1 ] || continue
-		find_enabled_profile "$candidate_hex" || continue
+	while IFS="$TAB" read -r _signal encryption candidate_hex; do
+		case "$encryption" in
+			none|psk|psk2|psk-mixed|sae|sae-mixed) ;;
+			*) continue ;;
+		esac
+		find_enabled_profile "$candidate_hex" "$encryption" || continue
 		load_profile_key "$SELECTED_PROFILE" || continue
 		if candidate_already_added "$candidate_hex"; then
 			continue
 		fi
 		if [ -n "$current_hex" ] && [ "$candidate_hex" = "$current_hex" ]; then
-			printf '%s\t%s\n' "$candidate_hex" "$SELECTED_PROFILE" \
-				>> "$CURRENT_CANDIDATE"
+			printf '%s\t%s\t%s\n' "$candidate_hex" "$SELECTED_PROFILE" \
+				"$encryption" >> "$CURRENT_CANDIDATE"
 		else
-			printf '%s\t%s\n' "$candidate_hex" "$SELECTED_PROFILE" \
-				>> "$CANDIDATES"
+			printf '%s\t%s\t%s\n' "$candidate_hex" "$SELECTED_PROFILE" \
+				"$encryption" >> "$CANDIDATES"
 		fi
 	done < "$SCAN_SORTED"
 
 	# A scan is only a hint. Drivers and busy access points can omit an SSID
 	# from every result even though a directed association succeeds. Keep
-	# scan-ranked candidates first, then append every other usable saved PSK.
-	for profile in "$PROFILE_DIR"/*.psk; do
+	# scan-ranked candidates first, then append every other usable saved profile.
+	# A passphrase profile uses SAE/WPA2 transition mode as the safe directed
+	# fallback; a raw 64-digit PSK cannot be used for SAE and remains WPA2-only.
+	for profile in "$PROFILE_DIR"/*.psk "$PROFILE_DIR"/*.open; do
 		[ -f "$profile" ] || continue
 		profile_enabled "$profile" || continue
 		load_profile_key "$profile" || continue
-		candidate_hex=$(profile_hex "$profile")
-		[ -n "$candidate_hex" ] || continue
+		candidate_hex=$(profile_hex "$profile") || continue
+		valid_profile_hex "$candidate_hex" || continue
 		if candidate_already_added "$candidate_hex"; then
 			continue
 		fi
-		if [ -n "$current_hex" ] && [ "$candidate_hex" = "$current_hex" ]; then
-			printf '%s\t%s\n' "$candidate_hex" "$profile" \
-				>> "$CURRENT_CANDIDATE"
+		if [ "$(profile_kind "$profile")" = open ]; then
+			encryption=none
+		elif [ "$SELECTED_RAW_PSK" = true ]; then
+			encryption=psk2
 		else
-			printf '%s\t%s\n' "$candidate_hex" "$profile" \
-				>> "$CANDIDATES"
+			encryption=sae-mixed
+		fi
+		if [ -n "$current_hex" ] && [ "$candidate_hex" = "$current_hex" ]; then
+			printf '%s\t%s\t%s\n' "$candidate_hex" "$profile" \
+				"$encryption" >> "$CURRENT_CANDIDATE"
+		else
+			printf '%s\t%s\t%s\n' "$candidate_hex" "$profile" \
+				"$encryption" >> "$CANDIDATES"
 		fi
 	done
 
@@ -420,9 +496,26 @@ build_candidate_list() {
 	mv "$SCAN_RAW" "$CANDIDATES"
 }
 
+append_uci_set() {
+	path=$1
+	value=$2
+	batch=$3
+	{
+		printf 'set %s=' "$path"
+		printf "'"
+		printf '%s' "$value" | sed "s/'/'\\\\''/g"
+		printf "'\n"
+	} >> "$batch"
+}
+
 apply_profile() {
 	profile=$1
-	selected_ssid=$(profile_ssid "$profile")
+	encryption=$2
+	case "$encryption" in
+		none|psk|psk2|psk-mixed|sae|sae-mixed) ;;
+		*) return 1 ;;
+	esac
+	selected_ssid=$(profile_ssid "$profile") || return 1
 	load_profile_key "$profile" || return 1
 	[ -n "$selected_ssid" ] || return 1
 
@@ -432,10 +525,23 @@ apply_profile() {
 	chmod 0700 "$UCI_WORK" || return 1
 	cp "$backup" "$UCI_WORK/wireless" || return 1
 	chmod 0600 "$UCI_WORK/wireless" || return 1
-	uci -c "$UCI_WORK" -q set "wireless.${STA_SECTION}.ssid=$selected_ssid" || return 1
-	uci -c "$UCI_WORK" -q set "wireless.${STA_SECTION}.key=$SELECTED_KEY" || return 1
-	uci -c "$UCI_WORK" -q set "wireless.${STA_SECTION}.encryption=psk2" || return 1
-	uci -c "$UCI_WORK" -q set "wireless.${STA_SECTION}.disabled=0" || return 1
+	UCI_BATCH=$UCI_WORK/batch
+	: > "$UCI_BATCH" || return 1
+	chmod 0600 "$UCI_BATCH" || return 1
+	append_uci_set "wireless.${STA_SECTION}.ssid" "$selected_ssid" \
+		"$UCI_BATCH" || return 1
+	if [ "$encryption" = none ]; then
+		printf 'delete wireless.%s.key\n' "$STA_SECTION" >> "$UCI_BATCH" || return 1
+	else
+		append_uci_set "wireless.${STA_SECTION}.key" "$SELECTED_KEY" \
+			"$UCI_BATCH" || return 1
+	fi
+	append_uci_set "wireless.${STA_SECTION}.encryption" "$encryption" \
+		"$UCI_BATCH" || return 1
+	append_uci_set "wireless.${STA_SECTION}.disabled" 0 "$UCI_BATCH" || return 1
+	uci -c "$UCI_WORK" -q batch < "$UCI_BATCH" >/dev/null 2>&1 || return 1
+	rm -f "$UCI_BATCH"
+	UCI_BATCH=
 	uci -c "$UCI_WORK" -q commit wireless || return 1
 	chmod 0600 "$UCI_WORK/wireless"
 	mv "$UCI_WORK/wireless" "$WIRELESS_CONFIG" || return 1
@@ -490,14 +596,20 @@ find_sta_section || {
 	exit 1
 }
 
-SCAN_IW=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-scan-iw.$$
-SCAN_RAW=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-scan-raw.$$
-SCAN_HEX=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-scan-hex.$$
-SCAN_ALL=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-scan-all.$$
-SCAN_SORTED=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-scan-sorted.$$
-CANDIDATES=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-candidates.$$
-CURRENT_CANDIDATE=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-current.$$
-PREFERRED_CANDIDATES=${DECK_WIFI_TMP_DIR:-/tmp}/deck-wifi-preferred.$$
+TMP_ROOT=${DECK_WIFI_TMP_DIR:-/tmp}
+SCAN_DIR=$(mktemp -d "$TMP_ROOT/deck-wifi-select.XXXXXX") || {
+	write_status "WIFI TEMP DIRECTORY FAILED" || true
+	exit 1
+}
+chmod 0700 "$SCAN_DIR" || exit 1
+SCAN_IW=$SCAN_DIR/scan-iw
+SCAN_RAW=$SCAN_DIR/scan-raw
+SCAN_HEX=$SCAN_DIR/scan-hex
+SCAN_ALL=$SCAN_DIR/scan-all
+SCAN_SORTED=$SCAN_DIR/scan-sorted
+CANDIDATES=$SCAN_DIR/candidates
+CURRENT_CANDIDATE=$SCAN_DIR/current
+PREFERRED_CANDIDATES=$SCAN_DIR/preferred
 
 current_ssid=$(uci -q get "wireless.${STA_SECTION}.ssid" 2>/dev/null)
 if [ -n "$current_ssid" ]; then
@@ -577,7 +689,7 @@ candidate_pass=0
 while [ "$candidate_pass" -lt "$CANDIDATE_PASSES" ]; do
 	candidate_pass=$((candidate_pass + 1))
 	attempt=0
-	while IFS="$TAB" read -r _candidate_hex candidate_profile; do
+	while IFS="$TAB" read -r _candidate_hex candidate_profile candidate_encryption; do
 		attempt=$((attempt + 1))
 		if network_ready; then
 			mark_recovered
@@ -586,15 +698,15 @@ while [ "$candidate_pass" -lt "$CANDIDATE_PASSES" ]; do
 		write_status \
 			"WIFI PASS $candidate_pass OF $CANDIDATE_PASSES NETWORK $attempt OF $candidate_count" || true
 		logger -t deck-wifi \
-			"trying known PSK profile $attempt of $candidate_count on pass $candidate_pass of $CANDIDATE_PASSES"
-		if ! apply_profile "$candidate_profile"; then
+			"trying known Wi-Fi profile $attempt of $candidate_count on pass $candidate_pass of $CANDIDATE_PASSES"
+		if ! apply_profile "$candidate_profile" "$candidate_encryption"; then
 			logger -t deck-wifi \
-				"could not apply known PSK profile $attempt on pass $candidate_pass"
+				"could not apply known Wi-Fi profile $attempt on pass $candidate_pass"
 			continue
 		fi
 		if wait_for_network "$SWITCH_TIMEOUT"; then
 			logger -t deck-wifi \
-				"known PSK profile $attempt reached complete network health on pass $candidate_pass"
+				"known Wi-Fi profile $attempt reached complete network health on pass $candidate_pass"
 			mark_recovered
 			exit 0
 		fi
@@ -605,14 +717,14 @@ while [ "$candidate_pass" -lt "$CANDIDATE_PASSES" ]; do
 		has_ipv4 && ipv4=yes
 		has_default_route && default_route=yes
 		logger -t deck-wifi \
-			"known PSK profile $attempt failed pass $candidate_pass health: associated=$associated ipv4=$ipv4 default-route=$default_route"
+			"known Wi-Fi profile $attempt failed pass $candidate_pass health: associated=$associated ipv4=$ipv4 default-route=$default_route"
 	done < "$CANDIDATES"
 	[ "$candidate_pass" -ge "$CANDIDATE_PASSES" ] ||
 		sleep "$CANDIDATE_PASS_INTERVAL"
 done
 
 write_status "RESTORING PREVIOUS WIFI" || true
-logger -t deck-wifi 'all saved PSK profiles failed; restoring previous wireless config'
+logger -t deck-wifi 'all saved Wi-Fi profiles failed; restoring previous wireless config'
 if ! restore_wireless_config; then
 	write_status "WIFI RESTORE FAILED" || true
 	logger -t deck-wifi 'failed to restore previous wireless config'

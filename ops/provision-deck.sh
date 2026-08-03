@@ -98,14 +98,14 @@ profile_rank=$work/profile-rank
 : >"$profile_rank"
 recovery_hex=42726169696e735265636f76657279
 shopt -s nullglob
-for profile in "$wifi_profiles"/*.psk; do
+for profile in "$wifi_profiles"/*.psk "$wifi_profiles"/*.open; do
   [[ -f $profile && ! -L $profile ]] || {
     echo "Refusing unsafe Wi-Fi profile: $profile" >&2
     exit 1
   }
   install -m 0600 -- "$profile" "$profile_stage/${profile##*/}"
   profile_name=${profile##*/}
-  profile_name=${profile_name%.psk}
+  profile_name=${profile_name%.*}
   case $profile_name in
     =*) profile_hex=$(tr 'A-F' 'a-f' <<<"${profile_name#=}") ;;
     *) profile_hex=$(printf '%s' "$profile_name" | xxd -p | tr -d '\n' |
@@ -126,7 +126,7 @@ for profile in "$wifi_profiles"/*.psk; do
 done
 shopt -u nullglob
 [[ $profile_count -gt 0 ]] || {
-  echo "No personal PSK profiles found in $wifi_profiles" >&2
+  echo "No compatible personal Wi-Fi profiles found in $wifi_profiles" >&2
   exit 1
 }
 
@@ -139,13 +139,13 @@ sort -rn -k1,1 "$profile_rank" |
   ' >"$preferred_stage"
 preferred_count=$(wc -l <"$preferred_stage")
 [[ $preferred_count -gt 0 ]] || {
-  echo "No enabled personal PSK profiles are available for preference seeding" >&2
+  echo "No enabled personal Wi-Fi profiles are available for preference seeding" >&2
   exit 1
 }
 chmod 0600 "$preferred_stage"
 
 ignored_count=$(find "$wifi_profiles" -maxdepth 1 -type f \
-  \( -name '*.8021x' -o -name '*.open' \) -print | wc -l)
+  -name '*.8021x' -print | wc -l)
 
 install -m 0700 "$wireguard_dir/bin/wireguard-go" \
   "$payload/wireguard/bin/wireguard-go"
@@ -168,10 +168,10 @@ install -m 0700 "$repo_root/ops/deck-wifi/deck-wifi-watch" \
   "$payload/wifi/deck-wifi-watch"
 install -m 0700 "$repo_root/ops/deck-wifi/deck-wifi.init" \
   "$payload/wifi/deck-wifi.init"
-cp -p "$profile_stage/"*.psk "$payload/wifi/profiles/"
+cp -p "$profile_stage/"* "$payload/wifi/profiles/"
 
 echo "Provision plan: $target -> $wireguard_address via $wireguard_server"
-echo "Wi-Fi intake: $profile_count personal PSK profiles; $ignored_count open/enterprise profiles ignored"
+echo "Wi-Fi intake: $profile_count personal open/PSK profiles; enterprise profiles ignored: $ignored_count"
 echo "Wi-Fi preference seed: $preferred_count recent profiles; recovery profile last when present"
 if [[ $check_only -eq 1 ]]; then
   echo "Provision inputs are valid; no remote state was changed."
@@ -256,14 +256,20 @@ cp -p "$stage/wifi/deck-wifi-profile-add" \
 cp -p "$stage/wifi/deck-wifi-select" /usr/sbin/deck-wifi-select
 cp -p "$stage/wifi/deck-wifi-watch" /usr/sbin/deck-wifi-watch
 cp -p "$stage/wifi/deck-wifi.init" /etc/init.d/deck-wifi
-cp -p "$stage/wifi/profiles/"*.psk /etc/deck-wifi/profiles/
+for profile in "$stage/wifi/profiles/"*.psk "$stage/wifi/profiles/"*.open; do
+  [ -f "$profile" ] || continue
+  cp -p "$profile" /etc/deck-wifi/profiles/
+done
 if [ ! -s /etc/deck-wifi/preferred ]; then
   cp -p "$stage/wifi/preferred" /etc/deck-wifi/preferred
 fi
 chmod 0700 /usr/sbin/deck-wifi-profile-add \
   /usr/sbin/deck-wifi-select /usr/sbin/deck-wifi-watch \
   /etc/init.d/deck-wifi
-chmod 0600 /etc/deck-wifi/profiles/*.psk
+for profile in /etc/deck-wifi/profiles/*.psk /etc/deck-wifi/profiles/*.open; do
+  [ -f "$profile" ] || continue
+  chmod 0600 "$profile"
+done
 chmod 0600 /etc/deck-wifi/preferred
 /mnt/data/nes-deck/wireguard/bin/wg pubkey \
   </etc/wireguard/wg0.key

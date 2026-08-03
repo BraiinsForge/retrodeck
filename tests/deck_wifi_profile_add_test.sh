@@ -33,9 +33,11 @@ grep -qx '6e657431' "$FIXTURE/preferred" ||
 
 printf '%s\n' '[Security]' 'Passphrase=old-plain' >"$FIXTURE/net1.psk"
 printf '%s\n' '[Security]' 'Passphrase=old-hex' >"$FIXTURE/=6E657431.psk"
+: >"$FIXTURE/net1.open"
 run_add net1 'replacement!9' >/dev/null
 [ ! -e "$FIXTURE/net1.psk" ] || fail 'plain duplicate is removed'
 [ ! -e "$FIXTURE/=6E657431.psk" ] || fail 'mixed-case hex duplicate is removed'
+[ ! -e "$FIXTURE/net1.open" ] || fail 'open duplicate is removed'
 grep -qx 'Passphrase=replacement!9' "$FIXTURE/=6e657431.psk" ||
 	fail 'same SSID is replaced'
 

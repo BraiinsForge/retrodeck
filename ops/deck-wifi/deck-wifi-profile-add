@@ -41,7 +41,11 @@ printable_ascii() {
 
 profile_hex() {
 	name=${1##*/}
-	name=${name%.psk}
+	case $name in
+		*.psk) name=${name%.psk} ;;
+		*.open) name=${name%.open} ;;
+		*) return 1 ;;
+	esac
 	case $name in
 		=*) printf '%s\n' "${name#=}" | tr 'A-F' 'a-f' ;;
 		*) printf '%s' "$name" | xxd -p | tr -d '\n' | tr 'A-F' 'a-f'; printf '\n' ;;
@@ -81,7 +85,7 @@ TEMP_PROFILE=
 # The canonical file is committed first. Remove every other spelling of the
 # same SSID only after that atomic rename, so replacement never creates a
 # moment with no usable profile.
-for profile in "$PROFILE_DIR"/*.psk; do
+for profile in "$PROFILE_DIR"/*.psk "$PROFILE_DIR"/*.open; do
 	[ -f "$profile" ] || continue
 	[ "$profile" = "$destination" ] && continue
 	[ "$(profile_hex "$profile")" = "$ssid_hex" ] || continue
