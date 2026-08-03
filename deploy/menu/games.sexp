@@ -82,6 +82,31 @@
    :system :gba
    :rom "/mnt/data/roms/gba/slime-morimori.gba"
    :color "#875FD7")
+  (:id "kirby-nightmare-in-dream-land"
+   :title "KIRBY: NIGHTMARE IN DREAM LAND"
+   :system :gba
+   :rom "/mnt/data/roms/gba/kirby-nightmare-in-dream-land.gba"
+   :color "#D787AF")
+  (:id "zelda-link-past-four-swords"
+   :title "ZELDA: A LINK TO THE PAST & FOUR SWORDS"
+   :system :gba
+   :rom "/mnt/data/roms/gba/legend-of-zelda-a-link-to-the-past-and-four-swords.gba"
+   :color "#87AFD7")
+  (:id "mario-and-luigi-superstar-saga"
+   :title "MARIO & LUIGI: SUPERSTAR SAGA"
+   :system :gba
+   :rom "/mnt/data/roms/gba/mario-and-luigi-superstar-saga.gba"
+   :color "#D7875F")
+  (:id "metroid-zero-mission"
+   :title "METROID: ZERO MISSION"
+   :system :gba
+   :rom "/mnt/data/roms/gba/metroid-zero-mission.gba"
+   :color "#8787D7")
+  (:id "super-mario-advance-4"
+   :title "SUPER MARIO ADVANCE 4: SUPER MARIO BROS. 3"
+   :system :gba
+   :rom "/mnt/data/roms/gba/super-mario-advance-4-super-mario-bros-3.gba"
+   :color "#D7AF87")
   (:id "elite"
    :title "ELITE"
    :system :zx

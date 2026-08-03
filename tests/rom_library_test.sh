@@ -5,7 +5,7 @@ set -eu
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 
-for pattern in '*.nes' '*.NES' '*.gb' '*.GB' '*.gbc' '*.GBC' \
+for pattern in '*.nes' '*.NES' '*.gb' '*.GB' '*.gbc' '*.GBC' '*.gba' '*.GBA' \
                '*.tap' '*.TAP' '*.ch8' '*.CH8' '*.zip' '*.ZIP'; do
 	for intake in "$repo_root"/$pattern; do
 		[ -e "$intake" ] || continue
@@ -21,8 +21,8 @@ trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
 awk '{print $2}' "$repo_root/roms/SHA256SUMS" | sort > "$temporary/expected"
 find "$repo_root/roms" -mindepth 2 -maxdepth 2 -type f \
-	\( -name '*.nes' -o -name '*.gb' -o -name '*.gbc' -o -name '*.tap' \
-	   -o -name '*.ch8' \) \
+	\( -name '*.nes' -o -name '*.gb' -o -name '*.gbc' -o -name '*.gba' \
+	   -o -name '*.tap' -o -name '*.ch8' \) \
 	-printf '%P\n' | sort > "$temporary/actual"
 if ! cmp -s "$temporary/expected" "$temporary/actual"; then
 	echo "roms/SHA256SUMS and the filed ROM tree differ" >&2

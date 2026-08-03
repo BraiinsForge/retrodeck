@@ -8,6 +8,7 @@ roms/
   nes/
   gb/
   gbc/
+  gba/
   zx/
 ```
 
