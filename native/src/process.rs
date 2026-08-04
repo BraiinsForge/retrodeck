@@ -126,20 +126,6 @@ enum StopRequest {
     Shutdown,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum TouchBackend {
-    Wayland,
-    Evdev,
-}
-
-fn child_touch_backend(uses_wayland: bool, evdev_open: bool) -> TouchBackend {
-    if uses_wayland && !evdev_open {
-        TouchBackend::Wayland
-    } else {
-        TouchBackend::Evdev
-    }
-}
-
 struct TouchHold {
     active_since: Option<Instant>,
 }
@@ -182,7 +168,6 @@ struct ChildInteraction {
     next_console_frame: Instant,
     last_touch_attempt: Option<Instant>,
     last_touch_error: String,
-    opened_touch: bool,
     hold: TouchHold,
 }
 
@@ -195,43 +180,30 @@ impl ChildInteraction {
                 input::close_touch();
             }
         }
-        let mut interaction = Self {
+        Self {
             uses_wayland,
             touch_supervision,
             mirror_console: uses_wayland && mirror_console,
             next_console_frame: Instant::now(),
             last_touch_attempt: None,
             last_touch_error: String::new(),
-            opened_touch: false,
             hold: TouchHold::new(),
-        };
-        if touch_supervision {
-            interaction.open_touch_if_due();
         }
-        interaction
     }
 
     fn step(&mut self, timeout: Duration) -> StopRequest {
-        if self.touch_supervision {
-            self.open_touch_if_due();
-            match child_touch_backend(self.uses_wayland, input::touch_open()) {
-                // A gameplay layer deliberately has no input region so touch
-                // falls through to the dashboard widget. Once BMC cycles that
-                // widget away, Wayland stops delivering those reports. Keep the
-                // supervisor on Goodix directly whenever it is available.
-                TouchBackend::Evdev => {
-                    if self.uses_wayland {
-                        if let Err(error) = wayland::dispatch(0) {
-                            eprintln!("retrodeck: {error}");
-                        }
-                        while wayland::next_touch().is_some() {}
-                    }
-                    self.poll_evdev(timeout);
-                }
-                TouchBackend::Wayland => self.poll_wayland(timeout),
+        if self.uses_wayland {
+            if let Err(error) = wayland::dispatch(duration_ms(timeout)) {
+                eprintln!("retrodeck: {error}");
+                self.hold.reset();
             }
-        } else if self.uses_wayland {
-            self.poll_wayland(timeout);
+            while let Some(report) = wayland::next_touch() {
+                if self.touch_supervision {
+                    self.hold.update(report.down, report.x, report.y);
+                }
+            }
+        } else if self.touch_supervision {
+            self.poll_evdev(timeout);
         } else {
             thread::sleep(timeout);
         }
@@ -255,41 +227,20 @@ impl ChildInteraction {
         }
     }
 
-    fn poll_wayland(&mut self, timeout: Duration) {
-        if let Err(error) = wayland::dispatch(duration_ms(timeout)) {
-            eprintln!("retrodeck: {error}");
-            self.hold.reset();
-        }
-        while let Some(report) = wayland::next_touch() {
-            if self.touch_supervision {
-                self.hold.update(report.down, report.x, report.y);
-            }
-        }
-    }
-
-    fn open_touch_if_due(&mut self) {
+    fn poll_evdev(&mut self, timeout: Duration) {
         let now = Instant::now();
         let reconnect_due = self
             .last_touch_attempt
             .is_none_or(|last| now.duration_since(last) >= TOUCH_RECONNECT);
         if !input::touch_open() && reconnect_due {
             self.last_touch_attempt = Some(now);
-            match input::open_touch() {
-                Ok(()) => {
-                    self.opened_touch = true;
-                    self.last_touch_error.clear();
-                }
-                Err(error) if error != self.last_touch_error => {
-                    eprintln!("retrodeck: {error}");
-                    self.last_touch_error = error;
-                }
-                Err(_) => {}
+            if let Err(error) = input::open_touch()
+                && error != self.last_touch_error
+            {
+                eprintln!("retrodeck: {error}");
+                self.last_touch_error = error;
             }
         }
-    }
-
-    fn poll_evdev(&mut self, timeout: Duration) {
-        self.open_touch_if_due();
         if input::touch_open() {
             if let Err(error) = input::dispatch_touch(duration_ms(timeout)) {
                 eprintln!("retrodeck: {error}");
@@ -306,14 +257,6 @@ impl ChildInteraction {
             }
         } else {
             thread::sleep(timeout);
-        }
-    }
-}
-
-impl Drop for ChildInteraction {
-    fn drop(&mut self) {
-        if self.opened_touch {
-            input::close_touch();
         }
     }
 }
@@ -844,13 +787,6 @@ mod tests {
             .rsplit_once(") ")
             .and_then(|(_, fields)| fields.chars().next())
             != Some('Z')
-    }
-
-    #[test]
-    fn gameplay_supervision_prefers_evdev_over_wayland_touch() {
-        assert_eq!(child_touch_backend(true, false), TouchBackend::Wayland);
-        assert_eq!(child_touch_backend(true, true), TouchBackend::Evdev);
-        assert_eq!(child_touch_backend(false, false), TouchBackend::Evdev);
     }
 
     #[test]
