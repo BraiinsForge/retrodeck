@@ -1,0 +1,4 @@
+upstream=https://github.com/Cackbone/tamalib-rs
+revision=4488817322f8d4f54e7adc8556b55e544b48f8dc
+license=MIT
+local_changes=remove unused inventory dependency; normalize trailing whitespace

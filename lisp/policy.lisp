@@ -39,6 +39,7 @@
     (:zx . "/mnt/data/nes-deck/zx-deck")
     (:deck . "/mnt/data/nes-deck/ten-seconds-deck")
     (:doom . "/mnt/data/nes-deck/doom-deck")
+    (:tamagotchi . "/mnt/data/nes-deck/tamagotchi-deck")
     (:chiptunes . "/mnt/data/nes-deck/chiptune-deck")
     (:node-mode . "/mnt/data/nes-deck/menu/node-mode")
     (:terminal . "/mnt/data/nes-deck/terminal/retro-terminal")
@@ -529,6 +530,8 @@ added as another catalog entry without changing any code."
     (:zx :zx)
     (:deck (cond ((dashboard-application-id-p application "node-mode")
                  :node-mode)
+                ((dashboard-application-id-p application "tamagotchi")
+                 :tamagotchi)
                 ((dashboard-application-id-p application "chiptunes")
                   :chiptunes)
                  ((dashboard-wad-application-p application) :doom)
@@ -565,15 +568,16 @@ added as another catalog entry without changing any code."
               (route (dashboard-application-route application))
               (arguments
                 (if (or (not (eq system :deck))
-                        (member route '(:chiptunes :doom) :test #'eq))
+                        (member route '(:chiptunes :doom :tamagotchi) :test #'eq))
                     (list (getf application :rom))
                     nil))
               (environment
                 (list (cons "RETRO_DECK_VOLUME_PERCENT"
                             (format nil "~D" volume-percent)))))
-         ;; DOOM is a Deck entry but plays like a console: it gets the exit
-         ;; cross and the two-second hold instead of 10 Seconds' own BACK.
-         (when (or (not (eq system :deck)) (eq route :doom))
+         ;; Console-style Deck applications get the exit cross and the
+         ;; two-second hold instead of 10 Seconds' own BACK action.
+         (when (or (not (eq system :deck))
+                   (member route '(:doom :tamagotchi) :test #'eq))
            (setf environment
                  (append environment
                          (list (cons "RETRO_DECK_EXIT_HINT" "1")))))
@@ -600,7 +604,8 @@ added as another catalog entry without changing any code."
                :label (getf application :id)
                :touch-supervision (or wayland
                                       (not (eq system :deck))
-                                      (eq route :doom))
+                                      (not (null (member route '(:doom :tamagotchi)
+                                                                 :test #'eq))))
                :mirror-console nil))))))
 
 (defun reboot-confirmation-active-p (deadline now)

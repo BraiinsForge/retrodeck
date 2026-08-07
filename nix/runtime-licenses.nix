@@ -39,6 +39,7 @@ pkgs.runCommand "retro-deck-runtime-licenses" {
     printf '\n===== %s/%s =====\n\n' "$crate" "$file" >> "$rust_notices"
     cat "${nativeCargoDeps}/$crate/$file" >> "$rust_notices"
   }
+  append_rust_notice aho-corasick-1.1.5 LICENSE-MIT
   append_rust_notice arrayref-0.3.9 LICENSE
   append_rust_notice arrayvec-0.7.8 LICENSE-MIT
   append_rust_notice base64-0.22.1 LICENSE-APACHE
@@ -73,6 +74,12 @@ pkgs.runCommand "retro-deck-runtime-licenses" {
   append_rust_notice quick-xml-0.39.4 LICENSE-MIT.md
   append_rust_notice quote-1.0.47 LICENSE-MIT
   append_rust_notice radium-0.7.0 LICENSE.txt
+  append_rust_notice regex-1.13.1 LICENSE-APACHE
+  append_rust_notice regex-1.13.1 LICENSE-MIT
+  append_rust_notice regex-automata-0.4.18 LICENSE-APACHE
+  append_rust_notice regex-automata-0.4.18 LICENSE-MIT
+  append_rust_notice regex-syntax-0.8.11 LICENSE-APACHE
+  append_rust_notice regex-syntax-0.8.11 LICENSE-MIT
   append_rust_notice rustix-1.1.4 LICENSE-MIT
   append_rust_notice sha2-0.10.9 LICENSE-APACHE
   append_rust_notice sha2-0.10.9 LICENSE-MIT
@@ -111,6 +118,8 @@ pkgs.runCommand "retro-deck-runtime-licenses" {
   tar -xOf ${gme.src} game-music-emu-${gme.version}/license.txt \
     > "$licenses/game-music-emu-LICENSE"
   install -m444 ${nixpkgsSource}/COPYING "$licenses/Nixpkgs-COPYING"
+  install -m444 ${../native/vendor/tamalib-rs/LICENSE} \
+    "$licenses/tamalib-rs-MIT"
   install -m444 ${../assets/settings-cog/UPSTREAM.txt} \
     "$licenses/knekko-CC0-NOTICE.txt"
   install -m444 ${../deploy/menu/ASSETS.md} \

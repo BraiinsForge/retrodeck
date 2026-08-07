@@ -126,4 +126,9 @@
    :title "DOOM"
    :system :deck
    :rom "/mnt/data/nes-deck/games/doom/doom.wad"
-   :color "#D75F5F")))
+   :color "#D75F5F")
+  (:id "tamagotchi"
+   :title "TAMAGOTCHI P1"
+   :system :deck
+   :rom "/mnt/data/nes-deck/games/tamagotchi/tama.b"
+   :color "#AFAF87")))

@@ -83,6 +83,7 @@ gb=$(build_flake .#gb-deck)
 zx=$(build_flake .#zx-deck)
 gba=$(build_flake .#gba-deck)
 doom=$(build_flake .#doom-deck)
+tamagotchi=$(build_flake .#tamagotchi-deck)
 native=$(build_flake .#retrodeck-native)
 fbterm=$(build_flake .#fbterm-deck)
 rlwrap=$(build_flake .#rlwrap-deck)
@@ -115,6 +116,7 @@ cp "$gb/bin/gb-deck" "$payload/nes-deck/gb-deck"
 cp "$zx/bin/zx-deck" "$payload/nes-deck/zx-deck"
 cp "$gba/bin/gba-deck" "$payload/nes-deck/gba-deck"
 cp "$doom/bin/doom-deck" "$payload/nes-deck/doom-deck"
+cp "$tamagotchi/bin/tamagotchi-deck" "$payload/nes-deck/tamagotchi-deck"
 ln -sfn retrodeck-native "$payload/nes-deck/ten-seconds-deck"
 ln -sfn ../retrodeck-native "$payload/nes-deck/menu/deck-menu"
 cp "$native/bin/retrodeck-native" "$payload/nes-deck/retrodeck-native"
@@ -202,7 +204,11 @@ done
 # them below /mnt/data/nes-deck/games. The activation step merges this
 # directory, so an owner-supplied WAD, default.cfg, and savegame/ already on
 # the Deck all survive an update.
-mkdir -p "$payload/nes-deck/games/doom" "$payload/nes-deck/covers"
+mkdir -p "$payload/nes-deck/games/doom" \
+  "$payload/nes-deck/games/tamagotchi" "$payload/nes-deck/covers"
+if [[ -f deploy/tamagotchi/tama.b && ! -L deploy/tamagotchi/tama.b ]]; then
+  cp -p deploy/tamagotchi/tama.b "$payload/nes-deck/games/tamagotchi/tama.b"
+fi
 if [[ -d deploy/doom ]]; then
   # -p so the owner-private 0600 mode survives onto the Deck, as it does
   # for the console ROMs.
@@ -234,7 +240,7 @@ fi
 
 find "$payload/nes-deck" -type f \( \
   -name 'nes-deck' -o -name 'gb-deck' -o -name 'zx-deck' -o -name 'gba-deck' -o \
-  -name 'doom-deck' -o \
+  -name 'doom-deck' -o -name 'tamagotchi-deck' -o \
   -name 'ten-seconds-deck' -o \
   -name 'chiptune-deck' -o -name 'retrodeck-native' -o \
   -name 'deck-menu' -o \

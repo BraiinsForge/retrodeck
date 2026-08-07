@@ -77,6 +77,7 @@
           ./native/Cargo.toml
           ./native/doom
           ./native/src
+          ./native/vendor/tamalib-rs
           ./protocol/deck-widget-v1.xml
         ];
       };
@@ -577,6 +578,57 @@ PATCH
 
           meta = {
             description = "Rust mechanism host for the RetroDeck Lisp orchestrator";
+            platforms = [ system ];
+          };
+        };
+
+        tamagotchi-deck = pkgs.stdenvNoCC.mkDerivation {
+          pname = "tamagotchi-deck";
+          version = "0.1.0";
+          src = nativeSources;
+          cargoDeps = nativeCargoDeps;
+          cargoRoot = "native";
+          nativeBuildInputs = [
+            rustToolchain
+            pkgs.rustPlatform.cargoSetupHook
+            pkgsCross.stdenv.cc
+            pkgs.nukeReferences
+          ];
+          buildInputs = [
+            pkgsCross.glibc.static
+            staticCross.libvorbis
+            staticCross.zlib
+            gmeStaticCross
+          ];
+          allowedReferences = [ ];
+
+          buildPhase = ''
+            runHook preBuild
+            cd native
+            export CARGO_HOME=$TMPDIR/cargo
+            export CARGO_BUILD_TARGET=armv7-unknown-linux-gnueabihf
+            export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER="${pkgsCross.stdenv.cc}/bin/${pkgsCross.stdenv.cc.targetPrefix}cc"
+            export RUSTFLAGS="\
+              -C target-feature=+crt-static,+v7,+hwdiv,+hwdiv-arm \
+              -C link-arg=-static \
+              -L native=${gmeStaticCross}/lib \
+              -L native=${pkgsCross.glibc.static}/lib \
+              -l m"
+            cargo build --release --locked --offline --bin tamagotchi-host
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            install -Dm755 target/armv7-unknown-linux-gnueabihf/release/tamagotchi-host \
+              $out/bin/tamagotchi-deck
+            nuke-refs $out/bin/tamagotchi-deck
+            runHook postInstall
+          '';
+
+          meta = {
+            description = "Tamagotchi P1 host for the Braiins Forge Deck";
+            license = pkgs.lib.licenses.mit;
             platforms = [ system ];
           };
         };

@@ -19,6 +19,7 @@ pub mod protocol;
 mod raster;
 pub mod regular_file;
 pub mod state_file;
+pub mod tamagotchi;
 #[cfg(test)]
 mod test_support;
 pub mod wayland;

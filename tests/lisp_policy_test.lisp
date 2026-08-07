@@ -2480,6 +2480,7 @@ secret!9
                  (:zx . "/mnt/data/nes-deck/zx-deck")
                  (:deck . "/mnt/data/nes-deck/ten-seconds-deck")
                  (:doom . "/mnt/data/nes-deck/doom-deck")
+                 (:tamagotchi . "/mnt/data/nes-deck/tamagotchi-deck")
                  (:chiptunes . "/mnt/data/nes-deck/chiptune-deck")
                   (:node-mode . "/mnt/data/nes-deck/menu/node-mode")
                  (:terminal . "/mnt/data/nes-deck/terminal/retro-terminal")
@@ -2606,13 +2607,16 @@ secret!9
         (retrodeck:load-dashboard-bootstrap manifest-path palette-path)
       (assert loaded-p)
       (assert
-       (equal (mapcar (lambda (game) (getf game :id)) (subseq games 0 15))
+       (equal (mapcar (lambda (game) (getf game :id)) (subseq games 0 21))
               '("mario" "micro-mages" "kirbys-adventure" "metroid" "tetris"
                 "pokemon-red" "final-fantasy-legend-iii" "kirbys-dream-land"
                 "donkey-kong-country" "super-mario-bros-deluxe"
-                "slime-morimori" "elite" "knight-lore" "ten-seconds" "doom")))
+                "slime-morimori" "kirby-nightmare-in-dream-land"
+                "zelda-link-past-four-swords" "mario-and-luigi-superstar-saga"
+                "metroid-zero-mission" "super-mario-advance-4" "elite"
+                "knight-lore" "ten-seconds" "doom" "tamagotchi")))
       (assert
-       (equal (mapcar (lambda (game) (getf game :id)) (subseq games 15))
+       (equal (mapcar (lambda (game) (getf game :id)) (subseq games 21))
               '("lua-repl" "lisp-repl" "python-repl" "scheme-repl"
                 "chiptunes" "terminal" "node-mode" "reboot")))
       (assert (equal palette retrodeck:*dashboard-palette*)))
@@ -2629,7 +2633,7 @@ secret!9
            manifest-path palette-path :credits-path credits-path)
         (assert palette-loaded-p)
         (assert credits-loaded-p)
-        (assert (= (length (getf state :games)) 23))
+        (assert (= (length (getf state :games)) 29))
         (assert (getf state :reduced-motion))
         (assert (= (length (getf (getf state :credits-crawl) :static-lines))
                    33))
@@ -2880,6 +2884,22 @@ secret!9
                    :touch-supervision t
                    :mirror-console nil))))
 
+(let ((plan
+       (retrodeck:dashboard-launch-plan
+        '(:id "tamagotchi" :title "TAMAGOTCHI P1" :system :deck
+          :rom "/mnt/data/nes-deck/games/tamagotchi/tama.b" :color #xafaf87)
+        42 :wayland t)))
+  (assert (equal plan
+                 '(:executable "/mnt/data/nes-deck/tamagotchi-deck"
+                   :arguments ("/mnt/data/nes-deck/games/tamagotchi/tama.b")
+                   :environment
+                   (("RETRO_DECK_VOLUME_PERCENT" . "42")
+                    ("RETRO_DECK_EXIT_HINT" . "1")
+                    ("RETRO_DECK_PRESENTATION" . "widget"))
+                   :label "tamagotchi"
+                   :touch-supervision t
+                   :mirror-console nil))))
+
 ;; The framebuffer path keeps the hold-to-exit supervision too, which is
 ;; what distinguishes the DOOM route from every other Deck entry.
 (let ((plan
@@ -2908,6 +2928,10 @@ secret!9
              '(:id "doom-upper" :system :deck
                :rom "/mnt/data/nes-deck/games/doom/DOOM.WAD"))
             :doom))
+(assert (eq (retrodeck::dashboard-application-route
+             '(:id "tamagotchi" :system :deck
+               :rom "/mnt/data/nes-deck/games/tamagotchi/tama.b"))
+            :tamagotchi))
 (assert (eq (retrodeck::dashboard-application-route
              '(:id "ten-seconds" :system :deck
                :rom "/mnt/data/nes-deck/games/ten-seconds"))
@@ -4501,7 +4525,7 @@ secret!9
              (assert (eq returned-runtime runtime))
              (assert (equal traces '(((:reap-sound)) ((:reap-sound)))))
              (assert (eq reason :limit))
-             (assert (= (length (getf final :games)) 23))
+             (assert (= (length (getf final :games)) 29))
              (assert (string= (getf (first (getf final :games)) :id)
                               "mario"))
              (assert (= (getf (getf final :settings) :volume) 37))

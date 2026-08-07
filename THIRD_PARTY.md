@@ -15,6 +15,8 @@ Source identity is reproducible from these files:
 
 - `flake.lock` pins the emulator cores and Nixpkgs.
 - `flake.nix` names every native runtime and its linked libraries.
+- `native/vendor/tamalib-rs/UPSTREAM` pins the MIT-licensed Tamagotchi P1
+  emulator library used by `tamagotchi-deck`.
 - `nix/ecl-arm-static.nix` pins the independent ECL build environment.
 - `chiptunes/README.md` and `deploy/menu/ASSETS.md` record the included CC0
   music and settings icons.

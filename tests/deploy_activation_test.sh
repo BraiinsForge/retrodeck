@@ -110,10 +110,12 @@ grep -Fq 'cp -Rp "$stage/nes-deck/covers/." "$base/covers/"' "$activation" ||
 if grep -Fq 'rm -rf "$base/covers"' "$activation"; then
   fail 'activation deletes the persistent cover cache'
 fi
-grep -Fq 'nes-deck gb-deck zx-deck gba-deck doom-deck ten-seconds-deck' \
-  "$activation" || fail 'activation does not validate the staged DOOM host'
+grep -Fq 'nes-deck gb-deck zx-deck gba-deck doom-deck tamagotchi-deck ten-seconds-deck' \
+  "$activation" || fail 'activation does not validate the staged Deck hosts'
 grep -Fq 'cp -p "$stage/nes-deck/doom-deck" "$base/doom-deck"' "$activation" ||
   fail 'activation does not install the DOOM host'
+grep -Fq 'cp -p "$stage/nes-deck/tamagotchi-deck" "$base/tamagotchi-deck"' \
+  "$activation" || fail 'activation does not install the Tamagotchi host'
 # DOOM's saves live outside the games directory because activation replaces
 # that directory wholesale on every deployment.
 grep -Fq '/mnt/data/doom' "$activation" ||
