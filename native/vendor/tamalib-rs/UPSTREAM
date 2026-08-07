@@ -1,4 +1,4 @@
-upstream=https://github.com/Cackbone/tamalib-rs
-revision=4488817322f8d4f54e7adc8556b55e544b48f8dc
+upstream=https://github.com/BraiinsForge/tamalib-rs
+revision=3a5ca151f68a1d6c00b9195215ce4e552ce6996e
 license=MIT
-local_changes=remove unused inventory dependency; normalize trailing whitespace
+local_changes=prune unused examples, macro crate, and nested lockfile

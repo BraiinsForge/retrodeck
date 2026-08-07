@@ -3,7 +3,7 @@
 use crate::canvas;
 use std::cell::RefCell;
 use std::rc::Rc;
-use tamalib::{Button, Screen, ICONS_COUNT, SCREEN_HEIGHT, SCREEN_WIDTH};
+use tamalib::{Button, Screen, Tamagotchi, ICONS_COUNT, SCREEN_HEIGHT, SCREEN_WIDTH};
 
 const LCD_SCALE: u32 = 16;
 const LCD_WIDTH: u32 = SCREEN_WIDTH as u32 * LCD_SCALE;
@@ -83,6 +83,14 @@ pub fn make_screen() -> (Rc<RefCell<dyn Screen>>, Rc<RefCell<ScreenState>>) {
         state: state.clone(),
     }));
     (screen, state)
+}
+
+/// Host touch ownership is transient, so no button remains held after restore.
+pub fn release_all_buttons(tama: &mut Tamagotchi) {
+    for button in [Button::TAP, Button::LEFT, Button::MIDDLE, Button::RIGHT] {
+        tama.io.set_button(button, false);
+    }
+    tama.process_events();
 }
 
 pub fn valid_firmware(bytes: &[u8]) -> bool {
@@ -172,6 +180,44 @@ fn draw_text(text: &str, x: i32, y: i32, scale: u32, color: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tamalib::{Buzzer, Clock, LogLevel, Logger};
+
+    struct FixtureBuzzer;
+
+    impl Buzzer for FixtureBuzzer {
+        fn set_frequency(&mut self, _: usize) {}
+
+        fn play(&mut self, _: bool) {}
+    }
+
+    struct FixtureClock;
+
+    impl Clock for FixtureClock {
+        fn now(&self) -> u64 {
+            0
+        }
+    }
+
+    struct FixtureLogger;
+
+    impl Logger for FixtureLogger {
+        fn log(&self, _: LogLevel, _: &str) {}
+
+        fn log_enabled(&self, _: LogLevel) -> bool {
+            false
+        }
+    }
+
+    fn fixture_tamagotchi() -> Tamagotchi {
+        let (screen, _) = make_screen();
+        Tamagotchi::new(
+            vec![0; P1_FIRMWARE_BYTES],
+            screen,
+            Box::new(FixtureBuzzer),
+            Box::new(FixtureClock),
+            Box::new(FixtureLogger),
+        )
+    }
 
     #[test]
     fn accepts_only_the_complete_p1_firmware_size() {
@@ -179,6 +225,23 @@ mod tests {
         assert!(!valid_firmware(&vec![0; P1_FIRMWARE_BYTES - 2]));
         assert!(valid_firmware(&vec![0; P1_FIRMWARE_BYTES]));
         assert!(!valid_firmware(&vec![0; P1_FIRMWARE_BYTES + 2]));
+    }
+
+    #[test]
+    fn releases_a_button_restored_from_an_unclean_exit() {
+        let mut held = fixture_tamagotchi();
+        held.io.set_button(Button::LEFT, true);
+        held.process_events();
+        let held_state = held.save_state().unwrap();
+
+        release_all_buttons(&mut held);
+        let released_state = held.save_state().unwrap();
+        assert_ne!(held_state, released_state);
+
+        let mut restored = fixture_tamagotchi();
+        restored.load_state(&held_state).unwrap();
+        release_all_buttons(&mut restored);
+        assert_eq!(restored.save_state().unwrap(), released_state);
     }
 
     #[test]

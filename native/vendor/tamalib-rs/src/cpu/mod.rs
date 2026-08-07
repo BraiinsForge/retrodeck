@@ -17,11 +17,13 @@ use std::collections::VecDeque;
 //use tamalib_macros::register_instructions;
 
 pub use clock::Clock;
+pub(crate) use clock::{OSC1_FREQUENCY, OSC3_FREQUENCY, TICK_FREQUENCY, TIMER_PERIODS};
 pub use inputs::InputPin;
 pub use instructions::{InstructionWithArgs};
 
 
 pub const MEM_SIZE: usize = 4096;
+pub(crate) const CPU_OSC3_CTRL_ADDR: usize = IORegister::CpuOsc3Ctrl as usize;
 // pub const MEM_RAM_ADDR: usize = 0x000;
 pub const MEM_RAM_SIZE: usize = 0x300;
 pub const MEM_DISPLAY1_ADDR: usize = 0xE00;
@@ -66,7 +68,7 @@ pub struct Cpu {
 
 // #[register_instructions]
 impl Cpu {
-    pub fn new(program: Vec<u16>, freq: usize, iobus: Rc<IOBus>, system_clock: Box<dyn Clock>, logger: Rc<RefCell<Box<dyn Logger>>>, breakpoints: VecDeque<usize>) -> Self {
+    pub fn new(program: Vec<u16>, freq: u64, iobus: Rc<IOBus>, system_clock: Box<dyn Clock>, logger: Rc<RefCell<Box<dyn Logger>>>, breakpoints: VecDeque<usize>) -> Self {
         let mut cpu = Self {
             pc: 0,
             next_pc: 0,
@@ -555,10 +557,10 @@ impl Cpu {
         }
         // Prog timer
         if self.clock.prog_timer.enabled
-            && ((self.clock.tick_counter - self.clock.prog_timer.ts) >= ProgTimer::PERIOD)
+            && ((self.clock.tick_counter.wrapping_sub(self.clock.prog_timer.ts)) >= ProgTimer::PERIOD)
         {
             loop {
-                self.clock.prog_timer.ts += ProgTimer::PERIOD;
+                self.clock.prog_timer.ts = self.clock.prog_timer.ts.wrapping_add(ProgTimer::PERIOD);
                 self.clock.prog_timer.data -= 1;
 
                 if self.clock.prog_timer.data == 0 {
@@ -566,19 +568,19 @@ impl Cpu {
                     self.generate_interrupt(InterruptId::ProgTimer, 0);
                 }
 
-                if (self.clock.tick_counter - self.clock.prog_timer.ts) < ProgTimer::PERIOD {
+                if (self.clock.tick_counter.wrapping_sub(self.clock.prog_timer.ts)) < ProgTimer::PERIOD {
                     break;
                 }
             }
         }
     }
 
-    pub fn wait_for_cycles(&mut self, since: usize, cycles: u8) -> usize {
-        self.clock.scaled_cycle_accumulator += cycles as usize * clock::TICK_FREQUENCY;
+    pub fn wait_for_cycles(&mut self, since: u64, cycles: u8) -> u64 {
+        self.clock.scaled_cycle_accumulator += cycles as u64 * clock::TICK_FREQUENCY;
         let ticks_pending = self.clock.scaled_cycle_accumulator / self.clock.cpu_freq;
 
         if ticks_pending > 0 {
-            self.clock.tick_counter += ticks_pending;
+            self.clock.tick_counter = self.clock.tick_counter.wrapping_add(ticks_pending);
             self.clock.scaled_cycle_accumulator -= ticks_pending * self.clock.cpu_freq;
         }
 
@@ -587,9 +589,9 @@ impl Cpu {
             return self.clock.system_clock.now();
         }
 
-        let nanos = ((cycles as usize) * self.clock.ts_freq)
-            / (self.clock.cpu_freq * self.clock.speed_ratio as usize);
-        let deadline = since + nanos;
+        let nanos = ((cycles as u64) * self.clock.ts_freq)
+            / (self.clock.cpu_freq * self.clock.speed_ratio as u64);
+        let deadline = since.saturating_add(nanos);
 
         loop {
             if self.clock.system_clock.now() >= deadline {

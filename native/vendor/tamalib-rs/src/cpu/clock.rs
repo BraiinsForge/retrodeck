@@ -1,12 +1,23 @@
-pub const TICK_FREQUENCY: usize = 32768; // Hz
+pub const TICK_FREQUENCY: u64 = 32768; // Hz
 
 // Oscillator frequencies
-pub const OSC1_FREQUENCY: usize = TICK_FREQUENCY; // Hz
-pub const OSC3_FREQUENCY: usize = 1000000; // Hz
+pub const OSC1_FREQUENCY: u64 = TICK_FREQUENCY; // Hz
+pub const OSC3_FREQUENCY: u64 = 1000000; // Hz
 
+pub const TIMER_PERIODS: [u64; 8] = [
+    TICK_FREQUENCY / 2,
+    TICK_FREQUENCY / 4,
+    TICK_FREQUENCY / 8,
+    TICK_FREQUENCY / 16,
+    TICK_FREQUENCY / 32,
+    TICK_FREQUENCY / 64,
+    TICK_FREQUENCY / 128,
+    TICK_FREQUENCY / 256,
+];
 
+/// Monotonic timestamp source in microseconds.
 pub trait Clock {
-    fn now(&self) -> usize;
+    fn now(&self) -> u64;
 }
 
 #[repr(usize)]
@@ -18,37 +29,41 @@ pub enum TimerType {
     Timer32Hz = 4,
     Timer64Hz = 5,
     Timer128Hz = 6,
-    Timer256Hz = 7
+    Timer256Hz = 7,
 }
 
 /// Clock timer
 pub struct Timer {
-    // Timestamp in ticks
-    pub ts: usize,
-    pub period: usize
+    // Timestamp in emulated ticks
+    pub ts: u64,
+    pub period: u64,
 }
 
 impl Timer {
-    pub fn new(period: usize) -> Self {
+    pub fn new(period: u64) -> Self {
         Self { ts: 0, period }
     }
 }
 
-
 /// Programmable timer
 pub struct ProgTimer {
     pub enabled: bool,
-    // Timestamp in ticks
-    pub ts: usize,
+    // Timestamp in emulated ticks
+    pub ts: u64,
     pub reload: u8,
     pub data: u8,
 }
 
 impl ProgTimer {
-    pub const PERIOD: usize = TICK_FREQUENCY / 256;
+    pub const PERIOD: u64 = TICK_FREQUENCY / 256;
 
     pub fn new() -> Self {
-        Self { enabled: false, ts: 0, reload: 0, data: 0 }
+        Self {
+            enabled: false,
+            ts: 0,
+            reload: 0,
+            data: 0,
+        }
     }
 }
 
@@ -56,36 +71,27 @@ pub struct CpuClock {
     pub timers: [Timer; 8],
     pub prog_timer: ProgTimer,
 
-
-    pub tick_counter: usize,
-    pub ts_freq: usize,
+    pub tick_counter: u64,
+    /// Host timestamp units per second.
+    pub ts_freq: u64,
     pub speed_ratio: u8,
-    pub ref_ts: usize, // timestamp
+    /// Host monotonic timestamp in microseconds.
+    pub ref_ts: u64,
 
     pub cpu_halted: bool,
-    pub cpu_freq: usize, // hz
-    pub scaled_cycle_accumulator: usize,
+    pub cpu_freq: u64, // hz
+    pub scaled_cycle_accumulator: u64,
 
     pub system_clock: Box<dyn Clock>,
 
-    pub previous_cycles: u8
+    pub previous_cycles: u8,
 }
 
-
 impl CpuClock {
-    pub fn new(cpu_freq: usize, ts_freq: usize, system_clock: Box<dyn Clock>) -> Self {
+    pub fn new(cpu_freq: u64, ts_freq: u64, system_clock: Box<dyn Clock>) -> Self {
         let now = system_clock.now();
         Self {
-            timers: [
-                Timer::new(TICK_FREQUENCY / 2), // 2hz
-                Timer::new(TICK_FREQUENCY / 4), // 4hz
-                Timer::new(TICK_FREQUENCY / 8), // 8hz
-                Timer::new(TICK_FREQUENCY / 16), // 16hz
-                Timer::new(TICK_FREQUENCY / 32), // 32hz
-                Timer::new(TICK_FREQUENCY / 64), // 64hz
-                Timer::new(TICK_FREQUENCY / 128), // 128hz
-                Timer::new(TICK_FREQUENCY / 256) // 256hz
-            ],
+            timers: TIMER_PERIODS.map(Timer::new),
             prog_timer: ProgTimer::new(),
             tick_counter: 0,
             ts_freq,
@@ -102,10 +108,10 @@ impl CpuClock {
     pub fn wait_timer(&mut self, timer_type: TimerType) -> bool {
         let timer = &mut self.timers[timer_type as usize];
 
-        if (self.tick_counter - timer.ts) >= timer.period {
+        if self.tick_counter.wrapping_sub(timer.ts) >= timer.period {
             loop {
-                timer.ts += timer.period;
-                if (self.tick_counter - timer.ts) < timer.period {
+                timer.ts = timer.ts.wrapping_add(timer.period);
+                if self.tick_counter.wrapping_sub(timer.ts) < timer.period {
                     break;
                 }
             }

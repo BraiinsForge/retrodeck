@@ -18,7 +18,7 @@
 
 A simple, headless emulator library for the Tamagotchi P1 virtual pet, written in Rust.
 
-Thanks to the already existing [tamalib project](https://github.com/jcrona/tamalib/) that helped me a lot on the CPU implementation.
+This fork is based on [Cackbone/tamalib-rs](https://github.com/Cackbone/tamalib-rs) and the [tamalib project](https://github.com/jcrona/tamalib/), which informed the CPU implementation.
 
 
 [![Crates.io](https://img.shields.io/crates/v/tamalib)](https://crates.io/crates/tamalib)
@@ -32,6 +32,7 @@ Thanks to the already existing [tamalib project](https://github.com/jcrona/tamal
 - **Button Input**: Simulate button presses (TAP, LEFT, MIDDLE, RIGHT).
 - **Event-driven IO**: Uses an event bus for IO interactions.
 - **Customizable Logging**: Plug in your own logger for debugging or tracing.
+- **Versioned save states**: Save and restore emulation state with ROM identity and corruption checks.
 
 ---
 
@@ -41,7 +42,7 @@ Thanks to the already existing [tamalib project](https://github.com/jcrona/tamal
 
 ```toml
 [dependencies]
-tamalib = "0.1.0"
+tamalib = "0.2.0"
 ```
 
 ### Example Usage
@@ -68,7 +69,7 @@ impl Buzzer for DummyBuzzer {
 
 struct DummyClock;
 impl Clock for DummyClock {
-    fn now(&self) -> usize { 0 }
+    fn now(&self) -> u64 { 0 }
 }
 
 struct DummyLogger;
@@ -91,6 +92,19 @@ fn main() {
     tama.run_step();
 }
 ```
+
+---
+
+## Save states
+
+`Tamagotchi::save_state()` writes a versioned binary state and
+`Tamagotchi::load_state()` restores it only when the loaded ROM matches. Save
+states flush pending input/output events, rebase host monotonic timestamps on
+restore, and refresh the screen and buzzer callbacks immediately. The trailing
+checksum detects accidental corruption; it is not an authenticity mechanism.
+
+`Clock::now()` returns a monotonic microsecond timestamp as `u64`. This avoids
+32-bit timestamp exhaustion on long-running targets.
 
 ---
 
@@ -123,5 +137,6 @@ See [LICENSE](LICENSE).
 
 ## Links
 
-- [GitHub](https://github.com/Cackbone/tamalib-rs)
+- [Fork GitHub](https://github.com/BraiinsForge/tamalib-rs)
+- [Upstream GitHub](https://github.com/Cackbone/tamalib-rs)
 - [Crates.io](https://crates.io/crates/tamalib)

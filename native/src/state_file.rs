@@ -6,6 +6,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 const MAXIMUM_BYTES: usize = 64;
+pub const MAXIMUM_BOUNDED_BYTES: usize = 16 * 1024;
 const TEMPORARY_ATTEMPTS: u32 = 16;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -22,8 +23,22 @@ fn validate_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_maximum_bytes(maximum_bytes: usize) -> Result<(), String> {
+    if maximum_bytes > MAXIMUM_BOUNDED_BYTES {
+        return Err(format!(
+            "state limit exceeds {MAXIMUM_BOUNDED_BYTES} bytes"
+        ));
+    }
+    Ok(())
+}
+
 pub fn read(path: &Path) -> Result<StateRead, String> {
+    read_bounded(path, MAXIMUM_BYTES)
+}
+
+pub fn read_bounded(path: &Path, maximum_bytes: usize) -> Result<StateRead, String> {
     validate_path(path)?;
+    validate_maximum_bytes(maximum_bytes)?;
     let mut file = match OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
@@ -38,18 +53,18 @@ pub fn read(path: &Path) -> Result<StateRead, String> {
     let metadata = file
         .metadata()
         .map_err(|error| format!("cannot inspect state {}: {error}", path.display()))?;
-    if !metadata.is_file() || metadata.len() > MAXIMUM_BYTES as u64 {
+    if !metadata.is_file() || metadata.len() > maximum_bytes as u64 {
         return Err(format!(
-            "state must be a regular file no larger than {MAXIMUM_BYTES} bytes: {}",
+            "state must be a regular file no larger than {maximum_bytes} bytes: {}",
             path.display()
         ));
     }
     let mut bytes = Vec::new();
     Read::by_ref(&mut file)
-        .take((MAXIMUM_BYTES + 1) as u64)
+        .take((maximum_bytes + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(|error| format!("cannot read state {}: {error}", path.display()))?;
-    if bytes.len() > MAXIMUM_BYTES {
+    if bytes.len() > maximum_bytes {
         return Err(format!("state is too large: {}", path.display()));
     }
     Ok(StateRead::Value(bytes))
@@ -79,9 +94,18 @@ fn close(file: File, path: &Path) -> Result<(), String> {
 }
 
 pub fn write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    write_bounded(path, bytes, MAXIMUM_BYTES)
+}
+
+pub fn write_bounded(
+    path: &Path,
+    bytes: &[u8],
+    maximum_bytes: usize,
+) -> Result<(), String> {
     validate_path(path)?;
-    if bytes.len() > MAXIMUM_BYTES {
-        return Err(format!("state exceeds {MAXIMUM_BYTES} bytes"));
+    validate_maximum_bytes(maximum_bytes)?;
+    if bytes.len() > maximum_bytes {
+        return Err(format!("state exceeds {maximum_bytes} bytes"));
     }
     let mut opened = None;
     for attempt in 0..TEMPORARY_ATTEMPTS {
@@ -154,6 +178,18 @@ mod tests {
         assert!(read(&path).is_err());
         assert!(read(Path::new("relative.state")).is_err());
         assert!(read(&directory).is_err());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn reads_and_writes_larger_bounded_state() {
+        let directory = fixture_directory("state-file-bounded");
+        let path = directory.join("tamagotchi.state");
+        let bytes = vec![b'T'; 8 * 1024];
+        write_bounded(&path, &bytes, 8 * 1024).unwrap();
+        assert_eq!(read_bounded(&path, 8 * 1024).unwrap(), StateRead::Value(bytes));
+        assert!(read(&path).is_err());
+        assert!(write_bounded(&path, b"", MAXIMUM_BOUNDED_BYTES + 1).is_err());
         std::fs::remove_dir_all(directory).unwrap();
     }
 

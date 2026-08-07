@@ -1,24 +1,29 @@
 //! Tamagotchi P1 Deck host using the normal BMC widget surface.
 
-use retrodeck_native::{canvas, game_audio, process, tamagotchi, wayland};
+use retrodeck_native::{canvas, game_audio, process, state_file, tamagotchi, wayland};
 use std::cell::RefCell;
 use std::ffi::OsString;
+use std::path::Path;
 use std::process::ExitCode;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 use tamalib::{Buzzer, Clock, LogLevel, Logger, Tamagotchi};
 
 const EMULATION_WINDOW: Duration = Duration::from_millis(4);
+const STATE_SAVE_INTERVAL: Duration = Duration::from_secs(30);
+const STATE_MAXIMUM_BYTES: usize = 16 * 1024;
+const STATE_PATH: &str = "/mnt/data/nes-deck/state/tamagotchi.state";
 const TONE_SAMPLE_RATE: u32 = 48_000;
 const MAXIMUM_TONE_FRAMES: usize = TONE_SAMPLE_RATE as usize / 10;
 const TONE_AMPLITUDE: i16 = 6_553;
 const NANOS_PER_SECOND: u128 = 1_000_000_000;
+const TICKS_PER_SECOND: u64 = 32_768;
 
 struct HostClock(Instant);
 
 impl Clock for HostClock {
-    fn now(&self) -> usize {
-        self.0.elapsed().as_micros().min(usize::MAX as u128) as usize
+    fn now(&self) -> u64 {
+        self.0.elapsed().as_micros().try_into().unwrap_or(u64::MAX)
     }
 }
 
@@ -164,6 +169,82 @@ fn firmware_argument(arguments: &[OsString]) -> Result<Vec<u8>, String> {
     Ok(firmware)
 }
 
+fn benchmark(arguments: &[OsString]) -> Result<(), String> {
+    let [firmware_path, seconds] = arguments else {
+        return Err(
+            "usage: tamagotchi-deck --benchmark /mnt/data/nes-deck/games/tamagotchi/tama.b SECONDS"
+                .to_owned(),
+        );
+    };
+    let seconds = seconds
+        .to_str()
+        .ok_or_else(|| "benchmark duration must be UTF-8 seconds".to_owned())?
+        .parse::<u64>()
+        .map_err(|_| "benchmark duration must be an integer number of seconds".to_owned())?;
+    if !(1..=60).contains(&seconds) {
+        return Err("benchmark duration must be between 1 and 60 seconds".to_owned());
+    }
+    let firmware = firmware_argument(std::slice::from_ref(firmware_path))?;
+    let (screen, _) = tamagotchi::make_screen();
+    let buzzer_state = Rc::new(RefCell::new(ToneState {
+        frequency: 1_000,
+        playing: false,
+    }));
+    let mut tama = Tamagotchi::builder()
+        .rom(firmware)
+        .screen(screen)
+        .buzzer(Box::new(HostBuzzer { state: buzzer_state }))
+        .system_clock(Box::new(HostClock(Instant::now())))
+        .logger(Box::new(HostLogger))
+        .build();
+    let started = Instant::now();
+    let initial_ticks = tama.emulated_ticks();
+    while started.elapsed() < Duration::from_secs(seconds) {
+        tama.run_step();
+    }
+    report_speed(&tama, started, initial_ticks);
+    Ok(())
+}
+
+fn restore_state(tama: &mut Tamagotchi, path: &Path) -> Result<(), String> {
+    match state_file::read_bounded(path, STATE_MAXIMUM_BYTES)? {
+        state_file::StateRead::Missing => Ok(()),
+        state_file::StateRead::Value(bytes) => match tama.load_state(&bytes) {
+            Ok(()) => {
+                eprintln!("tamagotchi-deck: restored {}", path.display());
+                Ok(())
+            }
+            Err(error) => {
+                eprintln!(
+                    "tamagotchi-deck: ignoring invalid state {}: {error}",
+                    path.display()
+                );
+                Ok(())
+            }
+        },
+    }
+}
+
+fn save_state(tama: &mut Tamagotchi, path: &Path) -> Result<(), String> {
+    let bytes = tama
+        .save_state()
+        .map_err(|error| format!("cannot save Tamagotchi state: {error}"))?;
+    state_file::write_bounded(path, &bytes, STATE_MAXIMUM_BYTES)
+}
+
+fn report_speed(tama: &Tamagotchi, started: Instant, initial_ticks: u64) {
+    let elapsed = started.elapsed().as_secs_f64();
+    if elapsed == 0.0 {
+        return;
+    }
+    let emulated_ticks = tama.emulated_ticks().wrapping_sub(initial_ticks);
+    let emulated_seconds = emulated_ticks as f64 / TICKS_PER_SECOND as f64;
+    eprintln!(
+        "tamagotchi-deck: emulated {emulated_seconds:.3}s in {elapsed:.3}s ({:.1}% realtime)",
+        emulated_seconds / elapsed * 100.0
+    );
+}
+
 fn open_audio() {
     let volume = game_audio::volume_percent().unwrap_or_else(|error| {
         eprintln!("tamagotchi-deck: {error}");
@@ -203,6 +284,11 @@ fn run(arguments: &[OsString]) -> Result<(), String> {
         .system_clock(Box::new(HostClock(Instant::now())))
         .logger(Box::new(HostLogger))
         .build();
+    let state_path = Path::new(STATE_PATH);
+    restore_state(&mut tama, state_path)?;
+    tamagotchi::release_all_buttons(&mut tama);
+    let started = Instant::now();
+    let initial_ticks = tama.emulated_ticks();
     wayland::open_game_widget()?;
     open_audio();
     let mut mixer = ToneMixer::new(buzzer_state);
@@ -213,11 +299,12 @@ fn run(arguments: &[OsString]) -> Result<(), String> {
         button: None,
     };
     let mut redraw = true;
-    let result = (|| -> Result<(), String> {
+    let mut next_state_save = Instant::now() + STATE_SAVE_INTERVAL;
+    let mut result = (|| -> Result<(), String> {
         loop {
             run_emulation_window(&mut tama);
             mixer.write_until(Instant::now());
-            wayland::dispatch(2)?;
+            wayland::dispatch(0)?;
             while let Some(touch) = wayland::next_touch() {
                 input.update(touch.down, touch.x, touch.y, &mut tama);
                 redraw = true;
@@ -226,6 +313,13 @@ fn run(arguments: &[OsString]) -> Result<(), String> {
             if redraw {
                 present(&state.borrow())?;
                 redraw = false;
+            }
+            let now = Instant::now();
+            if now >= next_state_save {
+                if let Err(error) = save_state(&mut tama, state_path) {
+                    eprintln!("tamagotchi-deck: {error}");
+                }
+                next_state_save = now + STATE_SAVE_INTERVAL;
             }
             if input.return_requested()
                 || process::shutdown_requested()
@@ -236,6 +330,13 @@ fn run(arguments: &[OsString]) -> Result<(), String> {
         }
     })();
     input.release(&mut tama);
+    if let Err(error) = save_state(&mut tama, state_path) {
+        eprintln!("tamagotchi-deck: {error}");
+        if result.is_ok() {
+            result = Err(error);
+        }
+    }
+    report_speed(&tama, started, initial_ticks);
     game_audio::close();
     wayland::close();
     result
@@ -243,7 +344,11 @@ fn run(arguments: &[OsString]) -> Result<(), String> {
 
 fn main() -> ExitCode {
     let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
-    match run(&arguments) {
+    let result = match arguments.first().and_then(|argument| argument.to_str()) {
+        Some("--benchmark") => benchmark(&arguments[1..]),
+        _ => run(&arguments),
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("tamagotchi-deck: {error}");
