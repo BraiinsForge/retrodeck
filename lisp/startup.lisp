@@ -60,7 +60,6 @@
            #:wayland-next-touch
            #:wayland-open-widget
            #:wayland-open-widget-at
-           #:wayland-open-gameplay-at
            #:wayland-present-canvas
            #:wayland-present-solid
            #:wayland-shutdown-p
@@ -118,7 +117,6 @@
                 #:wayland-next-touch
                 #:wayland-open-widget
                 #:wayland-open-widget-at
-                #:wayland-open-gameplay-at
                 #:wayland-present-canvas
                 #:wayland-present-solid
                 #:wayland-shutdown-p
@@ -745,10 +743,6 @@
 (defun open-wayland-widget-at (display)
   (check-type display string)
   (= (wayland-open-widget-at (coerce display 'base-string)) 1))
-
-(defun open-wayland-gameplay-at (display)
-  (check-type display string)
-  (= (wayland-open-gameplay-at (coerce display 'base-string)) 1))
 
 (defun close-wayland ()
   (wayland-close)

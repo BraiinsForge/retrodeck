@@ -3,7 +3,7 @@ use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::mem::MaybeUninit;
-use std::os::fd::{AsRawFd, IntoRawFd};
+use std::os::fd::{AsRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
@@ -331,6 +331,13 @@ pub fn run_helper(executable: &Path, input: &[u8]) -> HelperResult {
     }
 }
 
+fn widget_handoff_requested(environment: &[(OsString, OsString)]) -> bool {
+    environment.iter().any(|(name, value)| {
+        name.as_os_str() == OsStr::new("RETRO_DECK_PRESENTATION")
+            && value.as_os_str() == OsStr::new("widget")
+    })
+}
+
 pub fn run_child(
     executable: &Path,
     arguments: &[OsString],
@@ -340,12 +347,32 @@ pub fn run_child(
     mirror_console: bool,
 ) -> ChildResult {
     let mut interaction = ChildInteraction::new(touch_supervision, mirror_console);
+    let widget_handoff = if widget_handoff_requested(environment) {
+        if !interaction.uses_wayland {
+            return ChildResult {
+                error: Some("BMC widget launch requires an open dashboard widget".to_owned()),
+                ..ChildResult::default()
+            };
+        }
+        match wayland::connect_child_widget() {
+            Ok(handoff) => Some(handoff),
+            Err(error) => {
+                return ChildResult {
+                    error: Some(error),
+                    ..ChildResult::default()
+                };
+            }
+        }
+    } else {
+        None
+    };
     let tty = TtySnapshot::capture();
     eprintln!("retrodeck: launching {label}");
     let result = spawn_and_supervise(
         executable,
         arguments,
         environment,
+        widget_handoff,
         label,
         |timeout| interaction.step(timeout),
         POLL_INTERVAL,
@@ -365,6 +392,7 @@ fn spawn_and_supervise<F>(
     executable: &Path,
     arguments: &[OsString],
     environment: &[(OsString, OsString)],
+    widget_handoff: Option<OwnedFd>,
     label: &str,
     mut step: F,
     poll_interval: Duration,
@@ -375,9 +403,17 @@ where
 {
     let mut command = Command::new(executable);
     command.args(arguments).envs(environment.iter().cloned());
-    // signal(2) and setpgid(2) are async-signal-safe; the hook only reports errno.
+    let handoff_fd = widget_handoff.as_ref().map(AsRawFd::as_raw_fd);
+    if handoff_fd.is_some() {
+        command.env(
+            wayland::WIDGET_HANDOFF_FD_ENV,
+            wayland::WIDGET_HANDOFF_FD.to_string(),
+        );
+    }
+    // signal(2), setpgid(2), fcntl(2), and dup2(2) are async-signal-safe;
+    // the hook only reports errno.
     unsafe {
-        command.pre_exec(reset_child_process);
+        command.pre_exec(move || reset_child_process(handoff_fd));
     }
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -388,6 +424,7 @@ where
             };
         }
     };
+    drop(widget_handoff);
     let mut result = ChildResult {
         started: true,
         ..ChildResult::default()
@@ -452,7 +489,7 @@ where
     result
 }
 
-fn reset_child_process() -> io::Result<()> {
+fn reset_child_process(widget_handoff: Option<RawFd>) -> io::Result<()> {
     for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGPIPE] {
         if unsafe { libc::signal(signal, libc::SIG_DFL) } == libc::SIG_ERR {
             return Err(io::Error::last_os_error());
@@ -460,6 +497,25 @@ fn reset_child_process() -> io::Result<()> {
     }
     if unsafe { libc::setpgid(0, 0) } != 0 {
         return Err(io::Error::last_os_error());
+    }
+    if let Some(source) = widget_handoff {
+        if source != wayland::WIDGET_HANDOFF_FD
+            && unsafe { libc::dup2(source, wayland::WIDGET_HANDOFF_FD) } == -1
+        {
+            return Err(io::Error::last_os_error());
+        }
+        let flags = unsafe { libc::fcntl(wayland::WIDGET_HANDOFF_FD, libc::F_GETFD) };
+        if flags == -1
+            || unsafe {
+                libc::fcntl(
+                    wayland::WIDGET_HANDOFF_FD,
+                    libc::F_SETFD,
+                    flags & !libc::FD_CLOEXEC,
+                )
+            } == -1
+        {
+            return Err(io::Error::last_os_error());
+        }
     }
     Ok(())
 }
@@ -515,6 +571,7 @@ mod tests {
     use HelperPhase::{Complete, Input, Start};
     use std::env;
     use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::net::UnixStream;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -654,6 +711,7 @@ mod tests {
             executable,
             arguments,
             environment,
+            None,
             "fixture",
             |timeout| {
                 if request == StopRequest::None {
@@ -694,6 +752,27 @@ mod tests {
     }
 
     #[test]
+    fn hands_the_registered_widget_connection_to_the_child() {
+        let (handoff, _peer) = UnixStream::pair().unwrap();
+        let handoff: OwnedFd = handoff.into();
+        let child = helper_script(
+            "[ \"$RETRO_DECK_WIDGET_FD\" = \"9\" ] && [ -S /proc/self/fd/9 ]",
+        );
+        let result = spawn_and_supervise(
+            &child,
+            &[],
+            &[],
+            Some(handoff),
+            "widget-handoff",
+            |_| StopRequest::None,
+            Duration::from_millis(1),
+            Duration::from_millis(1),
+        );
+        assert_eq!(result.exit_code, Some(0));
+        std::fs::remove_file(child).unwrap();
+    }
+
+    #[test]
     fn classifies_clean_nonzero_signal_and_exec_failure() {
         assert_eq!(run_fixture("clean", StopRequest::None).exit_code, Some(0));
         assert_eq!(run_fixture("exit-7", StopRequest::None).exit_code, Some(7));
@@ -703,6 +782,7 @@ mod tests {
             Path::new("/no/such/retrodeck-terminal"),
             &[],
             &[],
+            None,
             "terminal",
             |_| StopRequest::None,
             Duration::from_millis(1),
@@ -733,6 +813,7 @@ mod tests {
             &executable,
             &arguments,
             &environment,
+            None,
             "fixture",
             |timeout| {
                 if path.exists() {

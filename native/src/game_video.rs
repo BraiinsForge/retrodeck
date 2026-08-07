@@ -1,10 +1,10 @@
 //! Emulator video: integer nearest-neighbour scaling into the rotated Deck
-//! framebuffer, the Wayland gameplay layer, or a headless test target.
+//! framebuffer, the normal BMC widget surface, or a headless test target.
 
 use std::ffi::c_void;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 const LOGICAL_WIDTH: usize = 1280;
 const LOGICAL_HEIGHT: usize = 480;
@@ -47,15 +47,6 @@ pub fn compute_scaled_layout(source_width: usize, source_height: usize) -> Optio
             height,
             scale,
         })
-}
-
-fn compute_game_size(source_width: usize, source_height: usize) -> (u32, u32) {
-    let usable_width = LOGICAL_WIDTH - 2 * SAFE_INSET;
-    let usable_height = LOGICAL_HEIGHT - 2 * SAFE_INSET;
-    let scale = (usable_width / source_width)
-        .min(usable_height / source_height)
-        .max(1);
-    ((source_width * scale) as u32, (source_height * scale) as u32)
 }
 
 const FBIOGET_VSCREENINFO: libc::c_ulong = 0x4600;
@@ -138,14 +129,16 @@ unsafe impl Send for FbTarget {}
 
 enum Target {
     Fb(FbTarget),
-    WaylandLazy { display: PathBuf },
-    Wayland { converted: Vec<u32> },
+    WidgetLazy,
+    Widget { converted: Vec<u32> },
     Headless { frame: Vec<u16>, hash: u64 },
 }
 
 struct Video {
     target: Target,
     last_source: (usize, usize),
+    exit_hint: bool,
+    exit_hold_started: Option<Instant>,
 }
 
 static VIDEO: Mutex<Option<Video>> = Mutex::new(None);
@@ -364,25 +357,22 @@ fn convert_to_xrgb(
 }
 
 pub fn open(headless: bool) -> Result<(), String> {
+    let exit_hint = std::env::var_os("RETRO_DECK_EXIT_HINT").is_some();
     let target = if headless {
         Target::Headless {
             frame: Vec::new(),
             hash: 0xcbf2_9ce4_8422_2325,
         }
+    } else if std::env::var("RETRO_DECK_PRESENTATION").is_ok_and(|value| value == "widget") {
+        Target::WidgetLazy
     } else {
-        let presentation = std::env::var("RETRO_DECK_PRESENTATION").unwrap_or_default();
-        let display = std::env::var("WAYLAND_DISPLAY").unwrap_or_default();
-        if presentation == "layer-shell" && !display.is_empty() {
-            Target::WaylandLazy {
-                display: PathBuf::from(display),
-            }
-        } else {
-            Target::Fb(open_fb()?)
-        }
+        Target::Fb(open_fb()?)
     };
     *VIDEO.lock().expect("video lock") = Some(Video {
         target,
         last_source: (0, 0),
+        exit_hint,
+        exit_hold_started: None,
     });
     Ok(())
 }
@@ -433,19 +423,18 @@ pub fn present(
             }
             Ok(())
         }
-        Target::WaylandLazy { display } => {
-            let (surface_width, surface_height) = compute_game_size(width, height);
-            crate::wayland::open_game_surface_at(display, surface_width, surface_height)?;
-            video.target = Target::Wayland {
+        Target::WidgetLazy => {
+            crate::wayland::open_game_widget()?;
+            video.target = Target::Widget {
                 converted: Vec::new(),
             };
-            let Target::Wayland { converted } = &mut video.target else {
+            let Target::Widget { converted } = &mut video.target else {
                 unreachable!();
             };
             convert_to_xrgb(data, width, height, pitch, rgb565, converted);
             crate::wayland::present_game_xrgb(converted, width, height)
         }
-        Target::Wayland { converted } => {
+        Target::Widget { converted } => {
             convert_to_xrgb(data, width, height, pitch, rgb565, converted);
             crate::wayland::present_game_xrgb(converted, width, height)
         }
@@ -464,6 +453,63 @@ pub fn present(
     }
 }
 
+fn update_exit_hold(
+    started: &mut Option<Instant>,
+    down: bool,
+    x: i32,
+    y: i32,
+    now: Instant,
+) -> bool {
+    let inside = down
+        && x >= 0
+        && x < LOGICAL_WIDTH as i32
+        && y >= 0
+        && y < LOGICAL_HEIGHT as i32;
+    if !inside {
+        *started = None;
+        return false;
+    }
+    let began = started.get_or_insert(now);
+    now.duration_since(*began) >= Duration::from_secs(2)
+}
+
+/// Check the BMC widget surface for the console/DOOM return hold.
+///
+/// The game owns the normal widget surface, so its parent dashboard cannot
+/// receive this touch stream after BMC switches the render surface.
+pub fn exit_requested() -> bool {
+    let mut guard = VIDEO.lock().expect("video lock");
+    let Some(video) = guard.as_mut() else {
+        return false;
+    };
+    if !video.exit_hint || !matches!(&video.target, Target::Widget { .. }) {
+        return false;
+    }
+    if let Err(error) = crate::wayland::dispatch(0) {
+        eprintln!("retrodeck: game widget input unavailable: {error}");
+        video.exit_hold_started = None;
+        return false;
+    }
+    if crate::wayland::shutdown_requested() {
+        return true;
+    }
+    let now = Instant::now();
+    let mut complete = false;
+    while let Some(report) = crate::wayland::next_touch() {
+        complete |= update_exit_hold(
+            &mut video.exit_hold_started,
+            report.down,
+            report.x,
+            report.y,
+            now,
+        );
+    }
+    complete
+        || video
+            .exit_hold_started
+            .is_some_and(|started| now.duration_since(started) >= Duration::from_secs(2))
+}
+
 pub fn frame_hash() -> u64 {
     let guard = VIDEO.lock().expect("video lock");
     match guard.as_ref().map(|video| &video.target) {
@@ -475,7 +521,7 @@ pub fn frame_hash() -> u64 {
 pub fn close() {
     let target = VIDEO.lock().expect("video lock").take();
     if let Some(video) = target
-        && matches!(video.target, Target::Wayland { .. })
+        && matches!(video.target, Target::Widget { .. })
     {
         crate::wayland::close();
     }
@@ -590,8 +636,30 @@ mod tests {
     }
 
     #[test]
-    fn clamps_oversized_game_surfaces_to_scale_one() {
-        assert_eq!(compute_game_size(256, 224), (512, 448));
-        assert_eq!(compute_game_size(2000, 1000), (2000, 1000));
+    fn keeps_a_widget_touch_hold_until_two_seconds() {
+        let now = Instant::now();
+        let mut started = None;
+        assert!(!update_exit_hold(&mut started, true, 20, 20, now));
+        assert!(!update_exit_hold(
+            &mut started,
+            true,
+            20,
+            20,
+            now + Duration::from_millis(1999),
+        ));
+        assert!(update_exit_hold(
+            &mut started,
+            true,
+            20,
+            20,
+            now + Duration::from_secs(2),
+        ));
+        assert!(!update_exit_hold(
+            &mut started,
+            false,
+            20,
+            20,
+            now + Duration::from_secs(2),
+        ));
     }
 }

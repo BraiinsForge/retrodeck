@@ -31,9 +31,6 @@ pkgs.runCommand "retro-deck-runtime-licenses" {
 
   tar -xOf ${wayland.src} wayland-${wayland.version}/COPYING \
     > "$licenses/Wayland-COPYING"
-  install -m444 ${../protocol/wlr-layer-shell-LICENSE} \
-    "$licenses/wlr-layer-shell-LICENSE"
-
   rust_notices="$licenses/Rust-crates-NOTICES.txt"
   printf '%s\n' 'Rust dependency notices for retrodeck-native' > "$rust_notices"
   append_rust_notice() {

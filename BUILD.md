@@ -147,10 +147,12 @@ labels, rendering, rewind policy, and eventual track sequencing. The
 exact-display primitive connects an
 absolute socket path directly or a relative name below absolute
 `XDG_RUNTIME_DIR` through `wayland-client`; the existing environment-based open
-remains unchanged for explicit mode. The gameplay open mirrors the original
-wlr-layer-shell pair: one anchored exclusive black background and one centered
-1248x448 non-exclusive game layer, both input-transparent. Canvas colors take
-the original RGB565 quantization path before XRGB presentation. Lisp snapshots
+remains unchanged for explicit mode. A widget-presented child receives a
+Wayland connection opened by the registered dashboard process, so BMC keeps the
+normal `deck_widget_v1` identity after the child takes ownership of rendering
+and touch. Gameplay fills that 1280x480 widget black and centers its exact
+integer-scaled frame inside the 16-pixel safe area. Canvas colors take the
+original RGB565 quantization path before XRGB presentation. Lisp snapshots
 the policy-named
 `WAYLAND_DISPLAY`, owns Wayland-first selection and fbdev fallback, and tracks
 adoption and cleanup ownership. The bounded state-file mechanism distinguishes
@@ -298,14 +300,14 @@ guessing.
 On BMC compositor installations, Retro Deck is a fullscreen scene widget.
 The menu submits event-driven XRGB8888 shared-memory buffers through the Deck
 widget protocol, so the compositor can move it during scene swipes. A launched
-game maps a fullscreen black layer surface plus a centered game layer surface.
-The emulator keeps its native frame clock and submits frames independently of
-the widget callback limit. The client expands gameplay frames to their
-integer-scaled layer size with nearest-neighbor sampling, then the compositor
-maps the resulting buffer 1:1. BMC's Smithay renderer defaults to linear
-minification and magnification, which can still soften pixel boundaries during
-the rotated composition pass. Apply the tracked local patch before building a
-BMC image for Retro Deck:
+game receives a Wayland connection opened by that registered process, then
+creates its own normal Deck widget surface through the inherited descriptor.
+BMC therefore keeps the scene identity and directs touch to the game. The
+emulator keeps its native frame clock and fills the 1280x480 widget black before
+placing the integer-scaled game frame in its 16-pixel safe area. BMC's Smithay
+renderer defaults to linear minification and magnification, which can still
+soften pixel boundaries during the rotated composition pass. Apply the tracked
+local patch before building a BMC image for Retro Deck:
 
 ```sh
 ops/bmc/apply-local-patches.sh /root/bmc-main
@@ -314,7 +316,8 @@ nix build --no-link /root/bmc-main#deck-packages.core.pkg
 
 The patch selects nearest-neighbor filtering for both directions. The script
 is idempotent and refuses a source tree whose patch context does not match.
-When the game exits, both layer surfaces disappear and scene swiping resumes.
+When the game exits, the dashboard resumes its normal widget surface and scene
+swiping continues.
 
 `ops/deploy.sh` installs the widget under `/mnt/data/bmc-widgets/retro-deck`.
 If `bmc-compositor` is present, deployment stops it, adds one idempotent Retro
@@ -362,7 +365,7 @@ retrodeck/
 │   ├── check-deck.sh           read-only installed health report
 │   └── deploy.sh               local build, staging, and transfer
 ├── patches/                    pinned upstream fixes
-├── protocol/                   Deck widget and layer-shell client protocols
+├── protocol/                   Deck widget client protocol
 ├── roms/                       private canonical ROM library and checksums
 ├── terminal/                   vendored fbterm source and provenance
 ├── tests/                      host regression suite

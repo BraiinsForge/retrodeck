@@ -672,6 +672,9 @@ pub fn run_host(configuration: &'static CoreConfig, arguments: &[String]) -> u8 
             PRESENT_SKIP.store(true, Ordering::Relaxed);
         }
         unsafe { retro_run() };
+        if retrodeck_native::game_video::exit_requested() {
+            break;
+        }
         frames += 1;
         if let Some(limit) = test_frames
             && frames >= limit

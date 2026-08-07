@@ -49,8 +49,7 @@
          "Short chiptune PCM unexpectedly queued")
   (check (= (retrodeck.native:chiptune-audio-close) 1)
          "Chiptune audio close failed")
-  (dolist (open (list #'retrodeck.native:wayland-open-widget-at
-                      #'retrodeck.native:wayland-open-gameplay-at))
+  (dolist (open (list #'retrodeck.native:wayland-open-widget-at))
     (dolist (display (list "retrodeck-no-wayland-smoke"
                            "/tmp/retrodeck-no-wayland-smoke"
                            (coerce (list #\x (code-char 0)) 'base-string)))
@@ -62,7 +61,7 @@
                 (dashboard-runtime-wayland-requested-p runtime)
                 (not (getf runtime :wayland)))
            "Automatic presentation environment snapshot diverged"))
-  (let ((runtime (make-ten-seconds-runtime :presentation "layer-shell")))
+  (let ((runtime (make-ten-seconds-runtime :presentation "widget")))
     (check (and (null (getf runtime :volume)) (getf runtime :dirty)
                 (getf runtime :wayland) (not (getf runtime :auto-presentation))
                 (string= (getf runtime :wayland-display) "retrodeck-smoke")
@@ -70,8 +69,8 @@
                 (zerop (ten-seconds-runtime-volume)))
            "10 Seconds candidate runtime construction diverged"))
   (dolist (fixture '((nil "retrodeck-smoke")
-                     ("widget" "retrodeck-smoke")
-                     ("layer-shell" "")))
+                     ("legacy" "retrodeck-smoke")
+                     ("widget" "")))
     (check (not (getf (make-ten-seconds-runtime
                        :presentation (first fixture)
                        :wayland-display (second fixture)) :wayland))

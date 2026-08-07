@@ -134,7 +134,7 @@
 (defun ten-seconds-wayland-requested-p (presentation display)
   (check-type presentation (or null string))
   (check-type display (or null string))
-  (and (stringp presentation) (string= presentation "layer-shell")
+  (and (stringp presentation) (string= presentation "widget")
        (stringp display) (plusp (length display))))
 
 (defun make-ten-seconds-runtime
@@ -170,7 +170,7 @@
 (defun ten-seconds-runtime-present (runtime)
   (when (and (getf runtime :wayland)
              (not (getf runtime :presentation-owned-p)))
-    (unless (open-wayland-gameplay-at (getf runtime :wayland-display))
+    (unless (open-wayland-widget)
       (return-from ten-seconds-runtime-present nil))
     (setf (getf runtime :presentation-owned-p) t))
   (dashboard-runtime-present runtime))

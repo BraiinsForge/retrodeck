@@ -405,10 +405,6 @@ impl Ecl {
                 native_wayland_open_widget_at as EclOneArgumentFunction,
             ),
             (
-                "WAYLAND-OPEN-GAMEPLAY-AT",
-                native_wayland_open_gameplay_at as EclOneArgumentFunction,
-            ),
-            (
                 "NETWORK-STATUS",
                 native_network_status as EclOneArgumentFunction,
             ),
@@ -1151,14 +1147,6 @@ unsafe extern "C" fn native_wayland_open_widget_at(display: ClObject) -> ClObjec
     let result = (|| {
         let display = decode_path(display, "Wayland display")?;
         wayland::open_widget_at(&display)
-    })();
-    native_status(result)
-}
-
-unsafe extern "C" fn native_wayland_open_gameplay_at(display: ClObject) -> ClObject {
-    let result = (|| {
-        let display = decode_path(display, "Wayland display")?;
-        wayland::open_gameplay_at(&display)
     })();
     native_status(result)
 }

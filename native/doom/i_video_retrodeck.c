@@ -17,7 +17,7 @@
 //	DOOM graphics for Retro Deck. DOOM keeps drawing into its own 320x200
 //	paletted buffer; this backend expands that through the current palette
 //	and hands one XRGB8888 frame to the Rust host, which owns scaling,
-//	rotation, the exit cross, and both the layer-shell and framebuffer
+//	rotation, the exit cross, and both the normal BMC widget and framebuffer
 //	presentation paths. None of the display geometry lives here.
 //
 

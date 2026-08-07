@@ -22,8 +22,7 @@ require_notice() {
 for name in \
   Nixpkgs-COPYING Rust-crates-NOTICES.txt Wayland-COPYING \
   game-music-emu-LICENSE glibc-COPYING.LIB libffi-LICENSE libpng-LICENSE \
-  libogg-COPYING libvorbis-COPYING \
-  wlr-layer-shell-LICENSE zlib-LICENSE; do
+  libogg-COPYING libvorbis-COPYING zlib-LICENSE; do
   require_notice "$runtime/share/licenses/runtime/$name"
 done
 

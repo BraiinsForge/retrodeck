@@ -9,7 +9,7 @@ use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::fs::OpenOptions;
 use std::io::ErrorKind;
-use std::os::fd::{AsFd, OwnedFd};
+use std::os::fd::{AsFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -19,18 +19,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use wayland_client::backend::WaylandError;
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_region, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
+    wl_buffer, wl_compositor, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
     wl_touch,
 };
 use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum, delegate_noop};
-use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 const BUFFER_COUNT: usize = 3;
 const CONFIGURE_TIMEOUT: Duration = Duration::from_secs(2);
 const GAME_INSET: usize = 16;
-const GAME_SOURCE_WIDTH: usize = 624;
-const GAME_SOURCE_HEIGHT: usize = 224;
 const O_CLOEXEC: i32 = 0o2000000;
+pub const WIDGET_HANDOFF_FD: RawFd = 9;
+pub const WIDGET_HANDOFF_FD_ENV: &str = "RETRO_DECK_WIDGET_FD";
 static SHM_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 struct Mapping {
@@ -120,14 +119,8 @@ struct State {
     touch: Option<wl_touch::WlTouch>,
     manager: Option<deck_widget_manager_v1::DeckWidgetManagerV1>,
     widget_surface: Option<deck_widget_surface_v1::DeckWidgetSurfaceV1>,
-    layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
-    layer_surface: Option<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
-    background_layer: Option<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1>,
     surface: Option<wl_surface::WlSurface>,
-    background_surface: Option<wl_surface::WlSurface>,
-    background: Option<(Mapping, wl_buffer::WlBuffer)>,
     configured: bool,
-    background_configured: bool,
     width: u32,
     height: u32,
     visible: bool,
@@ -181,12 +174,7 @@ fn connect_to_display(display: &Path) -> Result<Connection, String> {
         .map_err(|error| format!("cannot connect to the Wayland display: {error}"))
 }
 
-fn connect(display: Option<&Path>) -> Result<(EventQueue<State>, State), String> {
-    let connection = match display {
-        Some(display) => connect_to_display(display),
-        None => Connection::connect_to_env()
-            .map_err(|error| format!("cannot connect to the Wayland display: {error}")),
-    }?;
+fn initialize_connection(connection: Connection) -> Result<(EventQueue<State>, State), String> {
     let mut queue = connection.new_event_queue::<State>();
     let qh = queue.handle();
     connection.display().get_registry(&qh, ());
@@ -203,9 +191,60 @@ fn connect(display: Option<&Path>) -> Result<(EventQueue<State>, State), String>
     Ok((queue, state))
 }
 
+fn connect(display: Option<&Path>) -> Result<(EventQueue<State>, State), String> {
+    let connection = match display {
+        Some(display) => connect_to_display(display),
+        None => Connection::connect_to_env()
+            .map_err(|error| format!("cannot connect to the Wayland display: {error}")),
+    }?;
+    initialize_connection(connection)
+}
+
+fn connect_from_fd(wayland_fd: OwnedFd) -> Result<(EventQueue<State>, State), String> {
+    let stream = unsafe { UnixStream::from_raw_fd(wayland_fd.into_raw_fd()) };
+    let connection = Connection::from_socket(stream)
+        .map_err(|error| format!("cannot connect to the inherited Wayland display: {error}"))?;
+    initialize_connection(connection)
+}
+
+fn take_widget_handoff() -> Result<Option<OwnedFd>, String> {
+    let Some(value) = std::env::var_os(WIDGET_HANDOFF_FD_ENV) else {
+        return Ok(None);
+    };
+    let descriptor = value
+        .to_str()
+        .and_then(|value| value.parse::<RawFd>().ok())
+        .filter(|descriptor| *descriptor == WIDGET_HANDOFF_FD)
+        .ok_or_else(|| "inherited BMC widget descriptor is invalid".to_owned())?;
+    Ok(Some(unsafe { OwnedFd::from_raw_fd(descriptor) }))
+}
+
+/// Open a connection from the registered widget process for a child renderer.
+/// BMC retains the process credentials of this connection after it is passed on.
+pub fn connect_child_widget() -> Result<OwnedFd, String> {
+    let display = std::env::var_os("WAYLAND_DISPLAY")
+        .filter(|display| !display.is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| "WAYLAND_DISPLAY is unavailable for BMC widget handoff".to_owned())?;
+    let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
+    let socket_path = display_socket_path(&display, runtime_dir.as_deref())?;
+    let stream = UnixStream::connect(socket_path)
+        .map_err(|error| format!("cannot open BMC widget handoff: {error}"))?;
+    Ok(unsafe { OwnedFd::from_raw_fd(stream.into_raw_fd()) })
+}
+
 impl Widget {
     fn open(display: Option<&Path>) -> Result<Self, String> {
-        let (queue, mut state) = connect(display)?;
+        let (queue, state) = connect(display)?;
+        Self::finish_open(queue, state)
+    }
+
+    fn open_from_fd(wayland_fd: OwnedFd) -> Result<Self, String> {
+        let (queue, state) = connect_from_fd(wayland_fd)?;
+        Self::finish_open(queue, state)
+    }
+
+    fn finish_open(queue: EventQueue<State>, mut state: State) -> Result<Self, String> {
         let qh = queue.handle();
         let compositor = state.compositor.clone().unwrap();
         let manager = state
@@ -217,73 +256,13 @@ impl Widget {
         state.surface = Some(surface.clone());
         surface.commit();
         let mut widget = Self { queue, state };
-        widget.wait_until_configured(false)?;
+        widget.wait_until_configured()?;
         Ok(widget)
     }
 
-    fn open_gameplay(display: Option<&Path>, width: u32, height: u32) -> Result<Self, String> {
-        let (queue, mut state) = connect(display)?;
-        let qh = queue.handle();
-        let compositor = state.compositor.clone().unwrap();
-        let layer_shell = state
-            .layer_shell
-            .clone()
-            .ok_or_else(|| "Wayland layer-shell protocol is unavailable".to_owned())?;
-        let empty = compositor.create_region(&qh, ());
-        let background_surface = compositor.create_surface(&qh, ());
-        background_surface.set_input_region(Some(&empty));
-        let background_layer = layer_shell.get_layer_surface(
-            &background_surface,
-            None,
-            zwlr_layer_shell_v1::Layer::Overlay,
-            "retro-deck-game-background".to_owned(),
-            &qh,
-            true,
-        );
-        background_layer.set_anchor(
-            zwlr_layer_surface_v1::Anchor::Top
-                | zwlr_layer_surface_v1::Anchor::Bottom
-                | zwlr_layer_surface_v1::Anchor::Left
-                | zwlr_layer_surface_v1::Anchor::Right,
-        );
-        background_layer.set_size(0, 0);
-        background_layer.set_exclusive_zone(-1);
-        background_layer
-            .set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::None);
-        background_surface.commit();
-
-        let surface = compositor.create_surface(&qh, ());
-        surface.set_input_region(Some(&empty));
-        empty.destroy();
-        let layer_surface = layer_shell.get_layer_surface(
-            &surface,
-            None,
-            zwlr_layer_shell_v1::Layer::Overlay,
-            "retro-deck-game".to_owned(),
-            &qh,
-            false,
-        );
-        layer_surface.set_size(width, height);
-        layer_surface
-            .set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::None);
-        state.width = width;
-        state.height = height;
-        state.background_layer = Some(background_layer);
-        state.background_surface = Some(background_surface);
-        state.layer_surface = Some(layer_surface);
-        state.surface = Some(surface.clone());
-        surface.commit();
-        let mut widget = Self { queue, state };
-        widget.wait_until_configured(true)?;
-        widget.create_black_background()?;
-        Ok(widget)
-    }
-
-    fn wait_until_configured(&mut self, background: bool) -> Result<(), String> {
+    fn wait_until_configured(&mut self) -> Result<(), String> {
         let deadline = Instant::now() + CONFIGURE_TIMEOUT;
-        while (!self.state.configured || background && !self.state.background_configured)
-            && !self.state.shutdown
-        {
+        while !self.state.configured && !self.state.shutdown {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() || self.dispatch(duration_ms(remaining))? == 0 {
                 return Err("timed out awaiting Wayland surface configure".to_owned());
@@ -485,31 +464,6 @@ impl Widget {
         }
     }
 
-    fn create_black_background(&mut self) -> Result<(), String> {
-        let shm = self
-            .state
-            .shm
-            .clone()
-            .expect("checked while opening widget");
-        let qh = self.queue.handle();
-        let (mut mapping, buffer) =
-            create_buffer(&shm, &qh, canvas::WIDTH, canvas::HEIGHT, usize::MAX)?;
-        fill_gameplay_background(
-            mapping.pixels(),
-            std::env::var_os("RETRO_DECK_EXIT_HINT").is_some(),
-        );
-        let surface = self
-            .state
-            .background_surface
-            .clone()
-            .expect("created while opening gameplay");
-        surface.attach(Some(&buffer), 0, 0);
-        surface.damage(0, 0, i32::MAX, i32::MAX);
-        surface.commit();
-        self.state.background = Some((mapping, buffer));
-        self.flush("cannot flush Wayland background")
-    }
-
     fn ensure_slots(&mut self) -> Result<(), String> {
         let width = self.state.width;
         let height = self.state.height;
@@ -561,17 +515,13 @@ impl Widget {
     }
 
     fn present_rgba(&mut self, rgba: &[u8]) -> Result<(), String> {
-        if rgba.len() != canvas::WIDTH as usize * canvas::HEIGHT as usize * 4 {
+        if self.state.width != canvas::WIDTH
+            || self.state.height != canvas::HEIGHT
+            || rgba.len() != canvas::WIDTH as usize * canvas::HEIGHT as usize * 4
+        {
             return Err("Wayland surface does not match the native canvas".to_owned());
         }
-        if self.state.background_surface.is_some() {
-            let width = self.state.width as usize;
-            self.present_frame(|pixels| copy_gameplay_rgba_to_xrgb(rgba, pixels, width))
-        } else if self.state.width == canvas::WIDTH && self.state.height == canvas::HEIGHT {
-            self.present_frame(|pixels| copy_rgba_to_xrgb(rgba, pixels))
-        } else {
-            Err("Wayland surface does not match the native canvas".to_owned())
-        }
+        self.present_frame(|pixels| copy_rgba_to_xrgb(rgba, pixels))
     }
 
     fn present_rgb565(&mut self, rgb565: &[u16]) -> Result<(), String> {
@@ -624,17 +574,13 @@ pub fn open_widget_at(display: &Path) -> Result<(), String> {
     open_widget_for(Some(display))
 }
 
-pub fn open_gameplay_at(display: &Path) -> Result<(), String> {
-    open_game_surface_at(
-        display,
-        (GAME_SOURCE_WIDTH * 2) as u32,
-        (GAME_SOURCE_HEIGHT * 2) as u32,
-    )
-}
-
-pub fn open_game_surface_at(display: &Path, width: u32, height: u32) -> Result<(), String> {
+/// Open the game's normal BMC widget surface through the descriptor handed
+/// down by the registered dashboard process.
+pub fn open_game_widget() -> Result<(), String> {
     close();
-    let widget = Widget::open_gameplay(Some(display), width, height)?;
+    let handoff = take_widget_handoff()?
+        .ok_or_else(|| "BMC widget handoff is unavailable for gameplay".to_owned())?;
+    let widget = Widget::open_from_fd(handoff)?;
     WIDGET.with(|current| *current.borrow_mut() = Some(widget));
     Ok(())
 }
@@ -648,6 +594,10 @@ pub fn present_game_xrgb(
         let width = widget.state.width as usize;
         let height = widget.state.height as usize;
         widget.present_frame(|pixels| {
+            fill_gameplay_background(
+                pixels,
+                std::env::var_os("RETRO_DECK_EXIT_HINT").is_some(),
+            );
             scale_game_frame(frame, source_width, source_height, pixels, width, height);
         })
     })
@@ -665,47 +615,42 @@ fn scale_game_frame(
         || frame.len() < source_width * source_height
         || source_width == 0
         || source_height == 0
+        || target_width <= GAME_INSET * 2
+        || target_height <= GAME_INSET * 2
     {
         return;
     }
-    if target_width == source_width && target_height == source_height {
-        pixels[..frame.len()].copy_from_slice(frame);
+    let scale = ((target_width - GAME_INSET * 2) / source_width)
+        .min((target_height - GAME_INSET * 2) / source_height)
+        .max(1);
+    let width = source_width * scale;
+    let height = source_height * scale;
+    if width > target_width || height > target_height {
         return;
     }
-    let scale_x = target_width / source_width;
-    let scale_y = target_height / source_height;
-    if scale_x >= 1
-        && scale_x == scale_y
-        && source_width * scale_x == target_width
-        && source_height * scale_y == target_height
-    {
-        // Fill one expanded row, then duplicate it for the remaining rows.
-        for source_y in 0..source_height {
-            let first_row = source_y * scale_y * target_width;
-            for source_x in 0..source_width {
-                let value = frame[source_y * source_width + source_x];
-                let start = first_row + source_x * scale_x;
-                pixels[start..start + scale_x].fill(value);
-            }
-            for duplicate in 1..scale_y {
-                let row = first_row + duplicate * target_width;
-                let (head, tail) = pixels.split_at_mut(row);
-                tail[..target_width]
-                    .copy_from_slice(&head[first_row..first_row + target_width]);
-            }
+    let offset_x = (target_width - width) / 2;
+    let offset_y = (target_height - height) / 2;
+    for source_y in 0..source_height {
+        let first_row = (offset_y + source_y * scale) * target_width + offset_x;
+        for source_x in 0..source_width {
+            let value = frame[source_y * source_width + source_x];
+            let start = first_row + source_x * scale;
+            pixels[start..start + scale].fill(value);
         }
-        return;
-    }
-    for (index, pixel) in pixels[..target_width * target_height].iter_mut().enumerate() {
-        let source_x = (index % target_width) * source_width / target_width;
-        let source_y = (index / target_width) * source_height / target_height;
-        *pixel = frame[source_y * source_width + source_x];
+        for duplicate in 1..scale {
+            let row = first_row + duplicate * target_width;
+            let (head, tail) = pixels.split_at_mut(row);
+            tail[..width].copy_from_slice(&head[first_row..first_row + width]);
+        }
     }
 }
 
 fn open_widget_for(display: Option<&Path>) -> Result<(), String> {
     close();
-    let widget = Widget::open(display)?;
+    let widget = match take_widget_handoff()? {
+        Some(handoff) => Widget::open_from_fd(handoff)?,
+        None => Widget::open(display)?,
+    };
     WIDGET.with(|current| *current.borrow_mut() = Some(widget));
     Ok(())
 }
@@ -851,35 +796,6 @@ fn copy_rgba_to_xrgb(rgba: &[u8], pixels: &mut [u32]) {
     }
 }
 
-fn copy_gameplay_rgba_to_xrgb(rgba: &[u8], pixels: &mut [u32], width: usize) {
-    if width == 0 {
-        return;
-    }
-    let height = pixels.len() / width;
-    if width == GAME_SOURCE_WIDTH * 2 && height == GAME_SOURCE_HEIGHT * 2 {
-        // The safe-area crop maps one source pixel onto a 2x2 block; convert
-        // each source pixel once. Per-pixel division here cost ~176 ms per
-        // frame on the Deck before hardware division was enabled.
-        for y in 0..height {
-            let source_row = (GAME_INSET + (y & !1)) * canvas::WIDTH as usize;
-            let row = &mut pixels[y * width..(y + 1) * width];
-            for x in (0..width).step_by(2) {
-                let offset = (source_row + GAME_INSET + x) * 4;
-                let value = rgba_to_xrgb(&rgba[offset..]);
-                row[x] = value;
-                row[x + 1] = value;
-            }
-        }
-        return;
-    }
-    for (index, pixel) in pixels.iter_mut().enumerate() {
-        let source_x = GAME_INSET + 2 * ((index % width) * GAME_SOURCE_WIDTH / width);
-        let source_y = GAME_INSET + 2 * ((index / width) * GAME_SOURCE_HEIGHT / height);
-        let offset = (source_y * canvas::WIDTH as usize + source_x) * 4;
-        *pixel = rgba_to_xrgb(&rgba[offset..]);
-    }
-}
-
 fn copy_rgb565_to_xrgb(rgb565: &[u16], pixels: &mut [u32]) {
     debug_assert_eq!(rgb565.len(), pixels.len());
     for (destination, source) in pixels.iter_mut().zip(rgb565) {
@@ -919,9 +835,6 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                 "deck_widget_manager_v1" if state.manager.is_none() => {
                     state.manager = Some(registry.bind(name, 1, qh, ()));
                 }
-                "zwlr_layer_shell_v1" if state.layer_shell.is_none() => {
-                    state.layer_shell = Some(registry.bind(name, version.min(4), qh, ()));
-                }
                 _ => {}
             }
         }
@@ -929,12 +842,10 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
 }
 
 delegate_noop!(State: ignore wl_compositor::WlCompositor);
-delegate_noop!(State: ignore wl_region::WlRegion);
 delegate_noop!(State: ignore wl_surface::WlSurface);
 delegate_noop!(State: ignore wl_shm::WlShm);
 delegate_noop!(State: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(State: ignore deck_widget_manager_v1::DeckWidgetManagerV1);
-delegate_noop!(State: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
 
 impl Dispatch<wl_buffer::WlBuffer, usize> for State {
     fn event(
@@ -1020,40 +931,6 @@ impl Dispatch<wl_touch::WlTouch, ()> for State {
                     released: true,
                 });
             }
-            _ => {}
-        }
-    }
-}
-
-impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, bool> for State {
-    fn event(
-        state: &mut Self,
-        layer: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
-        event: zwlr_layer_surface_v1::Event,
-        background: &bool,
-        _: &Connection,
-        _: &QueueHandle<Self>,
-    ) {
-        match event {
-            zwlr_layer_surface_v1::Event::Configure {
-                serial,
-                width,
-                height,
-            } => {
-                layer.ack_configure(serial);
-                if *background {
-                    state.background_configured = true;
-                } else {
-                    if width > 0 {
-                        state.width = width;
-                    }
-                    if height > 0 {
-                        state.height = height;
-                    }
-                    state.configured = true;
-                }
-            }
-            zwlr_layer_surface_v1::Event::Closed => state.shutdown = true,
             _ => {}
         }
     }

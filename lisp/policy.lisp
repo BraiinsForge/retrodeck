@@ -588,7 +588,7 @@ added as another catalog entry without changing any code."
            (setf environment
                  (append environment
                          (list (cons "RETRO_DECK_PRESENTATION"
-                                     "layer-shell")))))
+                                     "widget")))))
          (when (and volume-state (plusp (length volume-state)))
            (setf environment
                  (append environment

@@ -219,7 +219,11 @@ pub extern "C" fn retrodeck_doom_poll_events(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn retrodeck_doom_quit_requested() -> c_int {
-    c_int::from(QUIT.load(Ordering::Relaxed) || retrodeck_native::process::shutdown_requested())
+    c_int::from(
+        QUIT.load(Ordering::Relaxed)
+            || retrodeck_native::process::shutdown_requested()
+            || retrodeck_native::game_video::exit_requested(),
+    )
 }
 
 #[unsafe(no_mangle)]

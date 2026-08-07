@@ -252,10 +252,6 @@
     (incf *wayland-open-count*)
     (setf *wayland-open-display* display *wayland-open-kind* :widget)
     *wayland-open-status*)
-  (wayland-open-gameplay-at (display)
-    (incf *wayland-open-count*)
-    (setf *wayland-open-display* display *wayland-open-kind* :gameplay)
-    *wayland-open-status*)
   (wayland-close () (incf *wayland-close-count*) 0)
   (wayland-present-canvas ()
     (incf *wayland-canvas-count*)
@@ -528,7 +524,7 @@
 (defun exercise-ten-seconds-runtime
     (controls touches times &key wayland (active 0) (play 1))
   (let* ((runtime (retrodeck:make-ten-seconds-runtime
-                   :presentation (and wayland "layer-shell")
+                   :presentation (and wayland "widget")
                    :wayland-display (and wayland "wayland-test")
                    :clock (lambda () (or (pop times) 999))))
          (*active-status* active) (*active-count* 0)
@@ -551,7 +547,7 @@
             (assert-runtime-observations :active-count 1 :gamepads-scan 1 :controls-scan 0
              :controls nil :touches nil :input-poll '(0 8) :evdev-open 1
              :fbdev-close (if wayland 0 1) :wayland-close (if wayland 1 0)
-             :wayland-kind (and wayland :gameplay)
+             :wayland-kind (and wayland :widget)
              :menu-sound-until most-positive-fixnum)
             (values state trace
                     (list :owned owned :play *play-arguments*
@@ -1301,14 +1297,14 @@
              (equal (car (last *canvas-glyph-calls*))
                     '(46 38 66 4 #xffedc2))))
 
-(dolist (fixture '((nil nil nil) ("layer-shell" nil nil)
-                   (nil "wayland-1" nil) ("widget" "wayland-1" nil)
-                   ("layer-shell" "" nil) ("layer-shell" "wayland-1" t)))
+(dolist (fixture '((nil nil nil) ("widget" nil nil)
+                   ("legacy" "wayland-1" nil) (nil "wayland-1" nil)
+                   ("widget" "wayland-1" t) ("widget" "" nil)))
   (destructuring-bind (presentation display expected) fixture
     (assert (eq (retrodeck::ten-seconds-wayland-requested-p
                  presentation display) expected))))
 (let ((runtime (retrodeck:make-ten-seconds-runtime
-                :presentation "layer-shell" :wayland-display "wayland-1")))
+                :presentation "widget" :wayland-display "wayland-1")))
   (assert (and (getf runtime :wayland) (null (getf runtime :volume))
                (getf runtime :dirty) (not (getf runtime :auto-presentation))
                (eq (getf runtime :clock) #'retrodeck:monotonic-nanoseconds))))
@@ -1369,12 +1365,12 @@
                  (zerop *evdev-controls-scan-count*)))))
 
 (with-ten-seconds-runtime-fixture
-    (runtime (:presentation "layer-shell" :wayland-display "wayland-test")
+    (runtime (:presentation "widget" :wayland-display "wayland-test")
              (:wayland-open-status 0))
   (assert-signals error
     (retrodeck:ten-seconds-candidate-rehearse
      (retrodeck:ten-seconds-initial-state) runtime :iteration-limit 1))
-  (assert-runtime-observations :wayland-open 1 :wayland-kind :gameplay :fbdev-open 0
+  (assert-runtime-observations :wayland-open 1 :wayland-kind :widget :fbdev-open 0
    :wayland-close 0 :evdev-close 1 :controls-close 1 :initialized nil))
 
 (with-ten-seconds-runtime-fixture
@@ -2827,7 +2823,7 @@ secret!9
                    :environment
                    (("RETRO_DECK_VOLUME_PERCENT" . "42")
                     ("RETRO_DECK_EXIT_HINT" . "1")
-                    ("RETRO_DECK_PRESENTATION" . "layer-shell")
+                    ("RETRO_DECK_PRESENTATION" . "widget")
                     ("RETRO_DECK_VOLUME_STATE" .
                      "/mnt/data/nes-deck/state/menu-volume.state"))
                    :label "mario"
@@ -2859,7 +2855,7 @@ secret!9
                    :arguments nil
                    :environment
                    (("RETRO_DECK_VOLUME_PERCENT" . "17")
-                    ("RETRO_DECK_PRESENTATION" . "layer-shell"))
+                    ("RETRO_DECK_PRESENTATION" . "widget"))
                    :label "ten-seconds"
                    :touch-supervision t
                    :mirror-console nil))))
@@ -2879,7 +2875,7 @@ secret!9
                    (("RETRO_DECK_VOLUME_PERCENT" . "42")
                     ("RETRO_DECK_EXIT_HINT" . "1")
                     ("RETRO_DECK_DOOM_STATE" . "/mnt/data/doom")
-                    ("RETRO_DECK_PRESENTATION" . "layer-shell"))
+                    ("RETRO_DECK_PRESENTATION" . "widget"))
                    :label "doom"
                    :touch-supervision t
                    :mirror-console nil))))
@@ -3069,7 +3065,7 @@ secret!9
                    ("/tmp/alpha.nes")
                    (("RETRO_DECK_VOLUME_PERCENT" . "42")
                     ("RETRO_DECK_EXIT_HINT" . "1")
-                    ("RETRO_DECK_PRESENTATION" . "layer-shell")
+                    ("RETRO_DECK_PRESENTATION" . "widget")
                     ("RETRO_DECK_VOLUME_STATE" . "/tmp/volume.state"))
                    "alpha" 1)))
   (setf *child-result* '(1 0 -1 15 nil 1))
@@ -3800,7 +3796,7 @@ secret!9
                              '(:close-controls) (list :launch plan))))
         (assert (equal (cdr (assoc "RETRO_DECK_PRESENTATION"
                                    (getf plan :environment) :test #'string=))
-                       "layer-shell"))
+                       "widget"))
         (assert-signals error
                         (retrodeck:dashboard-reduce
                          launching
