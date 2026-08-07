@@ -103,21 +103,14 @@ pub fn button_at(x: i32, y: i32) -> Option<DeckButton> {
 
 pub fn render(state: &ScreenState) {
     canvas::clear(0x000000);
+    draw_exit_cross();
     draw_text("TAMAGOTCHI P1", 484, 28, 3, TEXT);
-    draw_text("HOLD 2S TO RETURN", 500, 66, 2, 0xafafaf);
 
     canvas::fill_rect(
         LCD_X - 20,
         LCD_Y - 20,
         LCD_WIDTH + 40,
         LCD_HEIGHT + 40,
-        BORDER,
-    );
-    canvas::fill_rect(
-        LCD_X - 12,
-        LCD_Y - 12,
-        LCD_WIDTH + 24,
-        LCD_HEIGHT + 24,
         LCD_FOREGROUND,
     );
     canvas::fill_rect(LCD_X, LCD_Y, LCD_WIDTH, LCD_HEIGHT, LCD_BACKGROUND);
@@ -146,18 +139,27 @@ pub fn render(state: &ScreenState) {
         );
     }
 
-    for (index, label) in ["LEFT", "MIDDLE", "RIGHT"].iter().enumerate() {
+    for (index, icon) in [b'<', b'O', b'>'].iter().enumerate() {
         let x = index as i32 * (canvas::WIDTH / 3) as i32 + 16;
-        canvas::fill_rect(x, BUTTON_Y, canvas::WIDTH / 3 - 32, BUTTON_HEIGHT, 0x303030);
-        canvas::fill_rect(x, BUTTON_Y, canvas::WIDTH / 3 - 32, 3, BORDER);
-        let text_width = label.len() as i32 * 18;
-        draw_text(
-            label,
-            x + ((canvas::WIDTH / 3 - 32) as i32 - text_width) / 2,
-            BUTTON_Y + 24,
-            3,
+        let width = canvas::WIDTH / 3 - 32;
+        let scale = 6;
+        canvas::fill_rect(x, BUTTON_Y, width, BUTTON_HEIGHT, 0x303030);
+        canvas::fill_rect(x, BUTTON_Y, width, 3, BORDER);
+        canvas::draw_glyph(
+            x + (width as i32 - 5 * scale as i32) / 2,
+            BUTTON_Y + (BUTTON_HEIGHT as i32 - 7 * scale as i32) / 2,
+            *icon,
+            scale,
             TEXT,
         );
+    }
+}
+
+fn draw_exit_cross() {
+    for step in 0..9 {
+        let offset = step * 4;
+        canvas::fill_rect(20 + offset, 20 + offset, 4, 4, 0xffffff);
+        canvas::fill_rect(20 + (8 - step) * 4, 20 + offset, 4, 4, 0xffffff);
     }
 }
 
@@ -188,5 +190,25 @@ mod tests {
         assert_eq!(button_at(1279, BUTTON_Y + 20), Some(DeckButton::Right));
         assert_eq!(button_at(300, BUTTON_Y - 1), None);
         assert_eq!(button_at(-1, BUTTON_Y), None);
+    }
+
+    #[test]
+    fn uses_the_standard_exit_cross_and_symbol_buttons() {
+        let (_, state) = make_screen();
+        render(&state.borrow());
+        canvas::with_pixels(|data| {
+            let pixel = |x: usize, y: usize| {
+                let offset = (y * canvas::WIDTH as usize + x) * 4;
+                &data[offset..offset + 4]
+            };
+            assert_eq!(pixel(20, 20), &[0xff, 0xff, 0xff, 0xff]);
+            assert_eq!(pixel(52, 20), &[0xff, 0xff, 0xff, 0xff]);
+            assert_eq!(pixel(40, 20), &[0x00, 0x00, 0x00, 0xff]);
+            assert_eq!(pixel(500, 66), &[0x00, 0x00, 0x00, 0xff]);
+            assert_eq!(pixel(364, 72), &[0x1d, 0x2c, 0x14, 0xff]);
+            assert_eq!(pixel(216, 399), &[0xee, 0xee, 0xee, 0xff]);
+            assert_eq!(pixel(630, 399), &[0xee, 0xee, 0xee, 0xff]);
+            assert_eq!(pixel(1056, 399), &[0xee, 0xee, 0xee, 0xff]);
+        });
     }
 }
