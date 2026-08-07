@@ -59,7 +59,7 @@ fi
   exit 1
 }
 
-for command in nix ssh tar gzip sha256sum; do
+for command in nix python3 ssh tar gzip sha256sum; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Missing required command: $command" >&2
     exit 1
@@ -129,7 +129,7 @@ cp -a "$uploader_libraries/share/common-lisp/source" \
   "$payload/nes-deck/uploader/lisp-libraries"
 chmod -R u+w "$payload/nes-deck/uploader/lisp-libraries"
 printf '%s\n' "$uploader_password" |
-  nix shell nixpkgs#python3 -c python3 ops/lib/set-uploader-password.py \
+  python3 ops/lib/set-uploader-password.py \
     "$payload/nes-deck/uploader/password.conf"
 cp "$lua/bin/lua" "$payload/nes-deck/langs/lua"
 cp "$python/bin/python" "$payload/nes-deck/langs/python"
@@ -222,7 +222,7 @@ if [[ -d deploy/doom ]]; then
       echo "No catalog entry for $wad; skipping its cover" >&2
       continue
     fi
-    if nix shell nixpkgs#python3 -c python3 ops/lib/extract-doom-cover.py \
+    if python3 ops/lib/extract-doom-cover.py \
       "$wad" "$payload/nes-deck/covers/$id.png"; then
       chmod 0600 "$payload/nes-deck/covers/$id.png"
     else
