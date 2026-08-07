@@ -80,6 +80,23 @@ never swept into a migration commit.
 - Removal condition: Remove when provisioning owns all profile synchronization
   and exposes a credential-safe device-health channel independent of Wi-Fi.
 
+** Recover from deployment time caps without reusing a stage
+
+- Problem: The complete Deck payload can exceed the shell tool's 600-second
+  cap, interrupting a client during upload or activation even though the Deck
+  may have accepted part of the update.
+- Behavior: After a capped deployment, do not invoke its remote activation
+  stage manually. Check service health and installed artifact hashes first.
+  Use a fresh staged deployment after cached builds, then restore only the
+  specifically observed service if activation was interrupted.
+- Scope and location: Tracked project workflow note in this file. No
+  active-image mutation or device-local persistent override.
+- Verification: Two capped deployments reached upload and activation on Deck
+  .7; the installed Tamagotchi hash matched the local Nix output, and starting
+  the interrupted uploader service restored a healthy Deck.
+- Removal condition: Remove when deployment is split into bounded resumable
+  phases or the command runtime cap is raised.
+
 * Candidates
 
 None.
