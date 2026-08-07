@@ -100,7 +100,9 @@ fn main() {
 `Tamagotchi::save_state()` writes a versioned binary state and
 `Tamagotchi::load_state()` restores it only when the loaded ROM matches. Save
 states flush pending input/output events, rebase host monotonic timestamps on
-restore, and refresh the screen and buzzer callbacks immediately. The trailing
+restore, and refresh the screen and buzzer callbacks immediately. `run_step()`
+never waits: frontends batch a bounded amount of emulated time, then use their
+operating system event wait. The trailing
 checksum detects accidental corruption; it is not an authenticity mechanism.
 
 `Clock::now()` returns a monotonic microsecond timestamp as `u64`. This avoids

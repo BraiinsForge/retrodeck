@@ -137,6 +137,19 @@ impl Tamagotchi {
         }
     }
 
+    /// Returns the host clock timestamp in microseconds.
+    pub fn current_timestamp(&self) -> u64 {
+        self.cpu.clock.system_clock.now()
+    }
+
+    /// Returns the emulated timestamp after the last executed CPU cycle.
+    ///
+    /// Frontends can execute ahead by a small bounded interval, then use an
+    /// operating-system wait instead of spinning per instruction.
+    pub fn emulated_timestamp(&self) -> u64 {
+        self.cpu.clock.ref_ts
+    }
+
     /// Returns the wrapping 32,768 Hz emulated clock tick count.
     pub fn emulated_ticks(&self) -> u64 {
         self.cpu.clock.tick_counter
@@ -303,6 +316,15 @@ mod tests {
     fn constructs_a_tamagotchi() {
         let (tama, _, _) = make_tamagotchi(test_rom(), 0);
         assert_eq!(tama.cpu.pc, 0x100);
+    }
+
+    #[test]
+    fn normal_speed_does_not_wait_on_each_instruction() {
+        let (mut tama, _, _) = make_tamagotchi(test_rom(), 500);
+        for _ in 0..64 {
+            tama.run_step();
+        }
+        assert!(tama.emulated_timestamp() > 500);
     }
 
     #[test]

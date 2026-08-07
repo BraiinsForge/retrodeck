@@ -593,12 +593,6 @@ impl Cpu {
             / (self.clock.cpu_freq * self.clock.speed_ratio as u64);
         let deadline = since.saturating_add(nanos);
 
-        loop {
-            if self.clock.system_clock.now() >= deadline {
-                break;
-            }
-        }
-
         deadline
     }
 

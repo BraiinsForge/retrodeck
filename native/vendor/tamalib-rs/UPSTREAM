@@ -1,4 +1,4 @@
 upstream=https://github.com/BraiinsForge/tamalib-rs
-revision=3a5ca151f68a1d6c00b9195215ce4e552ce6996e
+revision=032a2b1070f17ee320ba06160681ea00ba7c1167
 license=MIT
 local_changes=prune unused examples, macro crate, and nested lockfile

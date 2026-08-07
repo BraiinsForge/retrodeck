@@ -200,7 +200,10 @@ fn benchmark(arguments: &[OsString]) -> Result<(), String> {
     let started = Instant::now();
     let initial_ticks = tama.emulated_ticks();
     while started.elapsed() < Duration::from_secs(seconds) {
-        tama.run_step();
+        let wait_ms = run_emulation_window(&mut tama);
+        if wait_ms > 0 {
+            std::thread::sleep(Duration::from_millis(u64::from(wait_ms)));
+        }
     }
     report_speed(&tama, started, initial_ticks);
     Ok(())
@@ -260,11 +263,21 @@ fn present(screen: &tamagotchi::ScreenState) -> Result<(), String> {
     canvas::with_pixels(wayland::present_rgba)
 }
 
-fn run_emulation_window(tama: &mut Tamagotchi) {
-    let deadline = Instant::now() + EMULATION_WINDOW;
-    while Instant::now() < deadline {
+fn run_emulation_window(tama: &mut Tamagotchi) -> u32 {
+    let target = tama
+        .current_timestamp()
+        .saturating_add(EMULATION_WINDOW.as_micros() as u64);
+    while tama.emulated_timestamp() < target {
+        let before = tama.emulated_timestamp();
         tama.run_step();
+        if tama.emulated_timestamp() == before {
+            return EMULATION_WINDOW.as_millis() as u32;
+        }
     }
+    let remaining = tama
+        .emulated_timestamp()
+        .saturating_sub(tama.current_timestamp());
+    ((remaining.saturating_add(999)) / 1_000).min(u64::from(u32::MAX)) as u32
 }
 
 fn run(arguments: &[OsString]) -> Result<(), String> {
@@ -302,9 +315,9 @@ fn run(arguments: &[OsString]) -> Result<(), String> {
     let mut next_state_save = Instant::now() + STATE_SAVE_INTERVAL;
     let mut result = (|| -> Result<(), String> {
         loop {
-            run_emulation_window(&mut tama);
+            let wait_ms = run_emulation_window(&mut tama);
             mixer.write_until(Instant::now());
-            wayland::dispatch(0)?;
+            wayland::dispatch(wait_ms)?;
             while let Some(touch) = wayland::next_touch() {
                 input.update(touch.down, touch.x, touch.y, &mut tama);
                 redraw = true;
