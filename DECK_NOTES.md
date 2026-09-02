@@ -23,8 +23,8 @@ details when they are needed for archaeology.
   widget and Retro Deck can coexist without an avoidable global OOM kill.
 - `/mnt/data` is the persistent application volume. Deployment refuses to
   activate when that mount is absent.
-- Tracked ROMs install under `/mnt/data/roms/<system>/`. The systems are `nes`,
-  `gb`, `gbc`, and `zx`.
+- Locally staged ROMs install under `/mnt/data/roms/<system>/`. The systems are
+  `nes`, `gb`, `gbc`, `gba`, and `zx`.
 - Language working directories live under `/mnt/data/langs/`. Chiptunes live
   under `/mnt/data/chiptunes`.
 - Runtime state, logs, covers, licenses, and launchers live under
@@ -60,9 +60,9 @@ details when they are needed for archaeology.
 - `deploy/menu/games.sexp` is the editable catalog. The compiler produces
   `games.tsv` and `palette.tsv`; checked-in copies are tested byte for byte as
   fallbacks.
-- Console entries point only below `/mnt/data/roms/<system>/`. Deck-native
-  routing identifiers stay below `/mnt/data/nes-deck/games/` and do not need a
-  fictional file extension.
+- Owner-maintained console entries point only below `/mnt/data/roms/<system>/`.
+  Deck-native routing identifiers stay below `/mnt/data/nes-deck/games/` and do
+  not need a fictional file extension.
 - Terminal, Lua, Common Lisp, Python, Scheme, chiptunes, and reboot are native
   built-in entries added by the dashboard. They are not ROMs.
 - The dashboard palette uses full RGB semantic roles. A malformed persistent

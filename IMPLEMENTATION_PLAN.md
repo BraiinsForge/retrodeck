@@ -70,9 +70,9 @@ built-in HLE BIOS with a log line when the file is absent.
       moves
 - [x] Uploader: accept `.gba`, raise the per-file size cap (GBA ROMs
       reach 32 MB)
-- [x] Smoke: freely-licensed homebrew ROM in `roms/gba/` +
-      pinned-frame-hash entry in `libretro-host-smoke` (HLE BIOS in
-      the sandbox); `verify-arm-builds` + deploy manifest gain gba-deck
+- [x] Smoke: hash-pinned freely licensed homebrew input with the HLE BIOS
+      in `libretro-host-smoke`; `verify-arm-builds` and the deploy manifest
+      include gba-deck
 - [x] Deck test with the owner's BIOS + Slime MoriMori (Japanese dump)
 - [x] Docs: BUILD.md + DECK_NOTES.md (BIOS drop instructions)
 

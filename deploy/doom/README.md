@@ -1,69 +1,10 @@
 # DOOM game data
 
-`doom.wad` is the IWAD the DECK section's **DOOM** entry loads. The deployer
-copies every `*.wad` in this directory to
-`/mnt/data/nes-deck/games/doom/` and the catalog points at it there.
+`doom-deck` can load an owner-supplied IWAD named `doom.wad` from this
+directory. Deployment copies local `*.wad` files to
+`/mnt/data/nes-deck/games/doom/` when a matching catalog entry exists.
 
-## Ownership and licensing
+IWADs are commercial game data and are deliberately untracked. The free
+fbDOOM engine is documented in [THIRD_PARTY.md](../../THIRD_PARTY.md).
 
-The tracked `doom.wad` is owner-supplied commercial game data, like the
-console ROMs under `roms/`. It is private to this repository, is not
-redistributable, and is not relicensed by this project. Only the fbDOOM
-engine is free software; see [THIRD_PARTY.md](../../THIRD_PARTY.md).
-
-Verify the tracked copy:
-
-```sh
-cd deploy/doom && sha256sum -c SHA256SUMS
-```
-
-## Cover art
-
-The carousel cover is rendered at deployment time from the IWAD's own
-`TITLEPIC` graphic by `ops/lib/extract-doom-cover.py`, aspect-corrected from
-DOOM's 320x200 to 320x240 and written to `covers/<catalog id>.png`. Nothing
-is tracked here, because shipping a DOOM logo would mean redistributing id
-Software's artwork; the picture comes from the owner's own WAD instead.
-
-Libretro has no box art for a Deck entry, so `fetch-covers` never touches
-these files, and activation merges them into the cover cache rather than
-replacing it. An IWAD with no catalog entry is skipped with a warning, and a
-WAD whose graphics cannot be decoded only loses its cover: deployment
-continues.
-
-## Adding another IWAD
-
-Drop it here and add a catalog entry in `deploy/menu/games.sexp` with
-`:system :deck` and a `:rom` path below `/mnt/data/nes-deck/games/doom/`
-ending in `.wad`. Routing is by extension, so no code changes are needed:
-
-```lisp
-(:id "doom2"
- :title "DOOM II"
- :system :deck
- :rom "/mnt/data/nes-deck/games/doom/doom2.wad"
- :color "#D75F5F")
-```
-
-Regenerate `deploy/menu/games.tsv` afterwards, as
-[deploy/menu/README.md](../menu/README.md) describes. Give the entry an `:id`
-and the deployer will render its cover automatically; the WAD is matched to
-the entry by the filename in its `:rom` path.
-
-## Saves
-
-DOOM writes its `savegame/` directory below `/mnt/data/doom`, **not** beside
-the WAD. The installed games directory is replaced wholesale on every
-activation, so saves stored there would be deleted by the next deployment.
-
-DOOM's own settings do not persist between launches: fbDOOM compiles out the
-body of `SaveDefaultCollection`, so no `default.cfg` is ever written even
-though the engine announces one. This costs nothing in practice, because the
-host applies the controller mapping and always-run after the engine reads its
-configuration, and volume comes from the dashboard.
-
-Sound effects and OPL music are both on by default and hold DOOM's full 35 Hz
-tic rate on the Deck.
-
-The sandboxed frame-hash test uses Freedoom instead of this file, pinned in
-`flake.nix`, because Freedoom is redistributable.
+DOOM saves live under `/mnt/data/doom`, outside the installed games directory.

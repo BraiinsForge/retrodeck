@@ -42,8 +42,8 @@ served by `retrodeck-native`; deployment installs them as `deck-menu`,
 `ten-seconds-deck`, and `chiptune-deck` symlinks to that binary. The console
 emulators are Rust libretro hosts (`native/src/bin/retro-host/`) with the
 pinned FCEUmm, Gambatte, Fuse, and gpSP cores statically linked, one binary per
-console. The `libretro-host-smoke` flake check runs each emulator headless
-under QEMU against a tracked ROM and pins its 120-frame video hash.
+console. The `libretro-host-smoke` flake check runs a representative ARM host
+headless under QEMU against a reproducibly fetched free test input and pins its video hash.
 
 DOOM follows the same shape without being a libretro core. `doom-deck` links
 the pinned fbDOOM fork as a static archive (`doomLib`) into the Rust host in
@@ -366,7 +366,7 @@ retrodeck/
 │   └── deploy.sh               local build, staging, and transfer
 ├── patches/                    pinned upstream fixes
 ├── protocol/                   Deck widget client protocol
-├── roms/                       private canonical ROM library and checksums
+├── roms/                       local-only ROM staging
 ├── terminal/                   vendored fbterm source and provenance
 ├── tests/                      host regression suite
 ├── flake.nix                   pinned cross-build definitions

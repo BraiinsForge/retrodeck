@@ -1096,12 +1096,6 @@ PATCH
             grep -q "test frames=120 video=120 " run.log
             grep -q "hash=$3" run.log
           }
-          run ${self.packages.${system}.nes-deck}/bin/nes-deck \
-            ${./roms/nes/micro-mages.nes} 93262b846f382c60
-          run ${self.packages.${system}.gb-deck}/bin/gb-deck \
-            ${./roms/gb/kirbys-dream-land.gb} 9e145219789c4817
-          run ${self.packages.${system}.zx-deck}/bin/zx-deck \
-            ${./roms/zx/knight-lore.tap} 9ca35bdc8ecfa26d
           # GPL homebrew fetched by hash; runs on gpSP's built-in HLE BIOS.
           run ${self.packages.${system}.gba-deck}/bin/gba-deck \
             ${pkgs.fetchurl {

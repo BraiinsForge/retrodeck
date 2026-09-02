@@ -4,3 +4,7 @@
 /.deck-configs/
 /native/target/
 *.srm
+
+# Owner-supplied commercial game data is local-only.
+/deploy/doom/*.wad
+/deploy/tamagotchi/tama.b

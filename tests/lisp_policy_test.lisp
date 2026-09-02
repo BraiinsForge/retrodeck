@@ -2606,19 +2606,13 @@ secret!9
     (multiple-value-bind (games palette loaded-p)
         (retrodeck:load-dashboard-bootstrap manifest-path palette-path)
       (assert loaded-p)
-      (assert
-       (equal (mapcar (lambda (game) (getf game :id)) (subseq games 0 21))
-              '("mario" "micro-mages" "kirbys-adventure" "metroid" "tetris"
-                "pokemon-red" "final-fantasy-legend-iii" "kirbys-dream-land"
-                "donkey-kong-country" "super-mario-bros-deluxe"
-                "slime-morimori" "kirby-nightmare-in-dream-land"
-                "zelda-link-past-four-swords" "mario-and-luigi-superstar-saga"
-                "metroid-zero-mission" "super-mario-advance-4" "elite"
-                "knight-lore" "ten-seconds" "doom" "tamagotchi")))
-      (assert
-       (equal (mapcar (lambda (game) (getf game :id)) (subseq games 21))
-              '("lua-repl" "lisp-repl" "python-repl" "scheme-repl"
-                "chiptunes" "terminal" "node-mode" "reboot")))
+        (assert
+         (equal (mapcar (lambda (game) (getf game :id)) (subseq games 0 1))
+                '("ten-seconds")))
+        (assert
+         (equal (mapcar (lambda (game) (getf game :id)) (subseq games 1))
+                '("lua-repl" "lisp-repl" "python-repl" "scheme-repl"
+                  "chiptunes" "terminal" "node-mode" "reboot")))
       (assert (equal palette retrodeck:*dashboard-palette*)))
     (assert
      (equal (reverse *regular-file-calls*)
@@ -2633,7 +2627,7 @@ secret!9
            manifest-path palette-path :credits-path credits-path)
         (assert palette-loaded-p)
         (assert credits-loaded-p)
-        (assert (= (length (getf state :games)) 29))
+          (assert (= (length (getf state :games)) 9))
         (assert (getf state :reduced-motion))
         (assert (= (length (getf (getf state :credits-crawl) :static-lines))
                    33))
@@ -4525,9 +4519,9 @@ secret!9
              (assert (eq returned-runtime runtime))
              (assert (equal traces '(((:reap-sound)) ((:reap-sound)))))
              (assert (eq reason :limit))
-             (assert (= (length (getf final :games)) 29))
-             (assert (string= (getf (first (getf final :games)) :id)
-                              "mario"))
+              (assert (= (length (getf final :games)) 9))
+              (assert (string= (getf (first (getf final :games)) :id)
+                               "ten-seconds"))
              (assert (= (getf (getf final :settings) :volume) 37))
              (assert (= *canvas-clear-color* #x010203))
              (assert-runtime-observations :active-count 2 :fbdev-open 1 :fbdev-close 1

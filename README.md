@@ -228,26 +228,23 @@ A keyboard remains a Player 1 fallback for NES and GB/GBC:
 
 ## ROMs and save games
 
-`roms/<system>/` is the canonical tracked library. Supported intake folders
-are `nes`, `gb`, `gbc`, and `zx`. A ROM or single-ROM ZIP at the
-repository root is unprocessed intake and must be validated, renamed, filed,
-checksummed, and added to the catalog before deployment. See
-[roms/README.md](roms/README.md) for the exact intake contract.
-
-The repository contains owner-supplied console ROMs.
+`roms/<system>/` is local deployment staging for owner-supplied images. Game
+images, firmware, and checksums are ignored and never enter the repository.
+Supported local directories are `nes`, `gb`, `gbc`, `gba`, and `zx`; console
+catalog paths use `/mnt/data/roms/<system>/<filename>`. See
+[roms/README.md](roms/README.md) for the layout.
 
 NES battery SRAM is saved atomically beside the ROM as `.srm`. GB and GBC use
 `.sav` plus `.rtc` when the cartridge has a real-time clock. The deploy script
 preserves these sidecars. ZX TAP files are read-only tape media and do not
 produce automatic save files.
 
-DOOM is the exception: its IWADs are tracked in `deploy/doom/` rather than
-`roms/`, because they are program data rather than console ROMs, and its
-savegames live in `/mnt/data/doom`. They are deliberately kept out of the
-installed games directory, which every deployment replaces wholesale. DOOM's
-own settings do not persist across launches, because fbDOOM compiles out its
-configuration writer; the controller mapping and volume come from Retro Deck
-instead. See [deploy/doom/README.md](deploy/doom/README.md).
+DOOM uses a locally supplied IWAD under `deploy/doom/` because it is program
+data rather than a console ROM; savegames live in `/mnt/data/doom`. They are
+kept out of the installed games directory, which every deployment replaces
+wholesale. DOOM's own settings do not persist across launches, because fbDOOM
+compiles out its configuration writer; the controller mapping and volume come
+from Retro Deck instead. See [deploy/doom/README.md](deploy/doom/README.md).
 
 ## Operations and recovery
 

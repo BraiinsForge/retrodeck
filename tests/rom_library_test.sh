@@ -14,7 +14,9 @@ for pattern in '*.nes' '*.NES' '*.gb' '*.GB' '*.gbc' '*.GBC' '*.gba' '*.GBA' \
 	done
 done
 
-(cd "$repo_root/roms" && sha256sum -c SHA256SUMS)
+if [ -s "$repo_root/roms/SHA256SUMS" ]; then
+  (cd "$repo_root/roms" && sha256sum -c SHA256SUMS)
+fi
 
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
