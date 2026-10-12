@@ -94,6 +94,50 @@
         nativeBuildInputs = [ pkgs.cmake ];
         cmakeFlags = [ "-DBUILD_SHARED_LIBS=OFF" "-DENABLE_UBSAN=OFF" ];
       };
+      staticRustTool = { name, description }: pkgs.stdenvNoCC.mkDerivation {
+        pname = name;
+        version = "1.0.0";
+        src = nativeSources;
+        cargoDeps = nativeCargoDeps;
+        cargoRoot = "native";
+        nativeBuildInputs = [
+          rustToolchain
+          pkgs.rustPlatform.cargoSetupHook
+          pkgsCross.stdenv.cc
+          pkgs.nukeReferences
+        ];
+        buildInputs = [
+          pkgsCross.glibc.static
+          staticCross.libvorbis
+          gmeStaticCross
+        ];
+        allowedReferences = [ ];
+        buildPhase = ''
+          runHook preBuild
+          cd native
+          export CARGO_HOME=$TMPDIR/cargo
+          export CARGO_BUILD_TARGET=armv7-unknown-linux-gnueabihf
+          export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER="${pkgsCross.stdenv.cc}/bin/${pkgsCross.stdenv.cc.targetPrefix}cc"
+          export RUSTFLAGS="\
+            -C target-feature=+crt-static,+v7,+hwdiv,+hwdiv-arm \
+            -C link-arg=-static \
+            -L native=${gmeStaticCross}/lib \
+            -L native=${pkgsCross.glibc.static}/lib \
+            -l m"
+          cargo build --release --locked --offline --bin ${name}
+          runHook postBuild
+        '';
+        installPhase = ''
+          runHook preInstall
+          install -Dm755 target/armv7-unknown-linux-gnueabihf/release/${name} $out/bin/${name}
+          nuke-refs $out/bin/${name}
+          runHook postInstall
+        '';
+        meta = {
+          inherit description;
+          platforms = [ system ];
+        };
+      };
       # Static libretro core archives, one per console, reusing the exact
       # upstream build steps the C++ frontends used.
       fceummCore = pkgsCross.stdenv.mkDerivation {
@@ -582,6 +626,11 @@ PATCH
           };
         };
 
+        ten-seconds-deck = staticRustTool {
+          name = "ten-seconds-deck";
+          description = "Standalone Rust 10 Seconds game for the Deck";
+        };
+
         tamagotchi-deck = pkgs.stdenvNoCC.mkDerivation {
           pname = "tamagotchi-deck";
           version = "0.1.0";
@@ -970,10 +1019,21 @@ PATCH
       };
 
       checks.${system} = {
+        ten-seconds-smoke = pkgs.runCommand "ten-seconds-smoke" { } ''
+          binary=${self.packages.${system}.ten-seconds-deck}/bin/ten-seconds-deck
+          ${pkgs.binutils}/bin/readelf -h "$binary" | grep -q 'Machine:.*ARM'
+          ! ${pkgs.binutils}/bin/readelf -l "$binary" | grep -q INTERP
+          ! ${pkgs.binutils}/bin/readelf -d "$binary" | grep -q NEEDED
+          status=0
+          output=$(${pkgs.qemu-user}/bin/qemu-arm "$binary" extra 2>&1) || status=$?
+          test "$status" -eq 2
+          test "$output" = 'usage: ten-seconds-deck'
+          touch $out
+        '';
+
         retrodeck-native-smoke = pkgs.runCommand "retrodeck-native-smoke" { } ''
           cp ${./lisp/startup.lisp} startup.lisp
           cp ${./lisp/ui.lisp} ui.lisp
-          cp ${./lisp/timer.lisp} timer.lisp
           cp ${./lisp/policy.lisp} policy.lisp
           cp ${./lisp/chiptune.lisp} chiptune.lisp
           cp ${./chiptunes/crazy.ogg} crazy.ogg

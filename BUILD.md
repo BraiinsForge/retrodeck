@@ -87,6 +87,7 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 | Package | Main output |
 | --- | --- |
 | `retrodeck-native` | `bin/retrodeck-native` |
+| `ten-seconds-deck` | `bin/ten-seconds-deck`, standalone Rust |
 | `nes-deck` | `bin/nes-deck` |
 | `gb-deck` | `bin/gb-deck` |
 | `zx-deck` | `bin/zx-deck` |
@@ -115,9 +116,8 @@ exactly as before.
 
 `lisp/startup.lisp` validates the native ABI, then loads `ui.lisp`,
 `policy.lisp`, `chiptune.lisp`, `process.lisp`, `settings.lisp`, `wifi.lisp`,
-`credits.lisp`, `dashboard.lisp`, and `timer.lisp`. These editable files own
-bitmap UI, chiptune composition, and 10 Seconds composition and policy, systems,
-labels, colors, applications,
+`credits.lisp`, and `dashboard.lisp`. These editable files own
+bitmap UI, chiptune composition and policy, systems, labels, colors, applications,
 exact game/reboot/terminal executable routes,
 ordered arguments and environment, launch/return statuses and sequencing,
 timing, settings and Wi-Fi editor state and actions, exact inherited and
@@ -129,8 +129,12 @@ controller burst recovery, input scan timing, and the Wi-Fi selector status path
 Startup finally loads an optional `local.lisp` beside them for device-local
 overrides without a Rust
 rebuild; the compiled image honors the same overlay after it initializes.
-Deployment updates the ten standard Lisp files but leaves an
+Deployment updates the nine standard Lisp files but leaves an
 existing `local.lisp` untouched.
+
+10 Seconds uses the standalone `ten-seconds-deck` Rust executable, built without
+ECL. Its reducer, pixel renderer, input loop and cues are in
+`native/src/ten_seconds.rs`; deployment removes the retired Lisp timer source.
 
 Native ABI 22 retains the widget-side Wayland and direct-fbdev primitives and
 adds exact-display widget and gameplay Wayland opens plus only narrow canvas,

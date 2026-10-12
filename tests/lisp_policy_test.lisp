@@ -394,15 +394,6 @@
 (defun assert-plist-values (plist expected)
   (loop for (name value) on expected by #'cddr
         do (assert (equal (getf plist name) value))))
-(defun assert-ten-seconds-reduction (state input now effects &rest expected)
-  (multiple-value-bind (next actual-effects)
-      (retrodeck:ten-seconds-reduce state input now)
-    (assert (equal actual-effects effects))
-    (loop for (name value) on expected by #'cddr
-          do (if (eq name :identity)
-                 (assert (eq next value))
-                 (assert (equal (getf next name) value))))
-    next))
 (defmacro with-dashboard-runtime-fixture
     ((state runtime games state-now initialize-now state-options runtime-options)
      device-options &body body)
@@ -514,44 +505,6 @@
                                            '("/tmp/brightness" "/tmp/brightness.state")
                                            (mapcar #'test-line ,write-values)))))))
      ,@(when check-state-write-p '((assert (null *state-file-write-arguments*))))))
-(defmacro with-ten-seconds-runtime-fixture
-    ((runtime runtime-options device-options &rest bindings) &body body)
-  `(let* (,@bindings
-          (,runtime (retrodeck:make-ten-seconds-runtime ,@runtime-options)))
-     (with-runtime-device-fixture ,device-options
-       (let ((*error-output* (make-broadcast-stream)))
-         ,@body))))
-(defun exercise-ten-seconds-runtime
-    (controls touches times &key wayland (active 0) (play 1))
-  (let* ((runtime (retrodeck:make-ten-seconds-runtime
-                   :presentation (and wayland "widget")
-                   :wayland-display (and wayland "wayland-test")
-                   :clock (lambda () (or (pop times) 999))))
-         (*active-status* active) (*active-count* 0)
-         (*play-status* play) (*play-arguments* nil) (*stop-count* 0)
-         (*input-poll-result* (list 1 (length controls) (length touches) 0 1 0 0))
-         (*input-poll-arguments* nil) (*canvas-clear-status* 1)
-         (*canvas-glyph-status* 1) (*canvas-fill-status* 1))
-    (with-runtime-device-fixture (:controls controls)
-      (let ((*error-output* (make-broadcast-stream))
-            (*evdev-touch-queue* touches)
-            (retrodeck::*menu-sound-input-until-ms* most-positive-fixnum))
-        (retrodeck:ten-seconds-runtime-initialize runtime)
-        (assert (zerop *wayland-open-count*))
-        (multiple-value-bind (state ignored-runtime trace)
-            (retrodeck:ten-seconds-runtime-run-iteration
-             (retrodeck:ten-seconds-initial-state) runtime)
-          (declare (ignore ignored-runtime))
-          (let ((owned (getf runtime :audio-owned-p)))
-            (retrodeck:ten-seconds-runtime-shutdown runtime)
-            (assert-runtime-observations :active-count 1 :gamepads-scan 1 :controls-scan 0
-             :controls nil :touches nil :input-poll '(0 8) :evdev-open 1
-             :fbdev-close (if wayland 0 1) :wayland-close (if wayland 1 0)
-             :wayland-kind (and wayland :widget)
-             :menu-sound-until most-positive-fixnum)
-            (values state trace
-                    (list :owned owned :play *play-arguments*
-                          :poll *input-poll-arguments* :stops *stop-count*))))))))
 (assert-unary-table #'equal #'retrodeck:menu-sound-notes
                     '((:volume ((660 60) (880 60))) (:previous ((523 35)))
                       (:next ((659 35))) (:confirm ((659 25) (880 30)))
@@ -955,8 +908,6 @@
                       ("" "")))
 (flet ((route (arguments)
          (multiple-value-list (retrodeck:main-route arguments))))
-  (assert (equal (route '("/mnt/data/nes-deck/ten-seconds-deck"))
-                 '(:ten-seconds nil)))
   (assert (equal (route '("/mnt/data/nes-deck/chiptune-deck"
                           "/mnt/data/chiptunes"))
                  '(:chiptunes ("/mnt/data/chiptunes"))))
@@ -966,7 +917,6 @@
   (assert (equal (route nil) '(:startup nil))))
 (assert-signals type-error (retrodeck:main-route "deck-menu"))
 (let ((*error-output* (make-broadcast-stream)))
-  (assert (= (retrodeck:run-ten-seconds-main '("extra")) 2))
   (assert (= (retrodeck:run-chiptune-main nil) 2))
   (assert (= (retrodeck:run-chiptune-main '("/a" "/b")) 2)))
 (let ((*program-arguments-result* '("/usr/bin/retrodeck-native"))
@@ -1251,182 +1201,12 @@
   (assert (equal (nreverse *canvas-glyph-calls*)
                  '((65 51 66 14 #xffffff)))))
 
-(assert-unary-table #'string= #'retrodeck:ten-seconds-format
-                    '((0 "00.00") (123 "01.23") (10000 "99.99")))
-(assert-unary-table
- #'equal #'retrodeck:ten-seconds-cue-notes
- '((:start ((523 28) (784 38))) (:exact ((784 35) (1047 40) (1319 55)))
-   (:miss ((659 35) (440 55)))))
-(dolist (fixture '((:back ((16 16) (167 16) (16 79) (167 79)))
-                   (:touch ((15 16) (168 16) (16 15) (16 80)))))
-  (destructuring-bind (expected points) fixture
-    (dolist (point points)
-      (assert (eq (apply #'retrodeck:ten-seconds-touch-event point) expected)))))
-(let ((ready (retrodeck:ten-seconds-initial-state)))
-  (assert-ten-seconds-reduction ready :back 0 '((:exit)) :identity ready))
-(dolist (fixture '((:touch 999 "09.99" :miss)
-                   (:controller-a 1000 "10.00" :exact)
-                   (:touch 1001 "10.01" :miss)
-                   (:touch 10000 "99.99" :miss)))
-  (destructuring-bind (input elapsed expected cue) fixture
-    (let* ((running (assert-ten-seconds-reduction
-                     (retrodeck:ten-seconds-initial-state) input 100
-                     '((:cue :start) (:redraw)) :mode :running))
-           (stopped (assert-ten-seconds-reduction
-                     running input (+ 100 (* elapsed 10000000))
-                     (list (list :result expected :input input) (list :cue cue)
-                           '(:redraw))
-                     :mode :stopped :displayed (min elapsed 9999)))
-           (retry-at (+ 101 (* elapsed 10000000))))
-      (assert-ten-seconds-reduction stopped input retry-at
-                                    '((:cue :start) (:redraw))
-                                    :mode :running :started-at retry-at))))
-(let ((running (nth-value 0 (retrodeck:ten-seconds-reduce
-                             (retrodeck:ten-seconds-initial-state) :touch 100))))
-  (dolist (fixture `((99 nil :identity ,running)
-                     (100 ((:redraw)) :displayed 0 :redraw-at 33000100)
-                     (1230000100 ((:redraw)) :displayed 123
-                      :redraw-at 1263000100)))
-    (apply #'assert-ten-seconds-reduction running :tick fixture)))
-(setf *canvas-fill-calls* nil *canvas-glyph-calls* nil)
-(assert (retrodeck:render-ten-seconds
-         (retrodeck:ten-seconds-initial-state)))
-(assert (and (zerop *canvas-clear-color*)
-             (equal (car (last *canvas-fill-calls*))
-                    '(16 16 1248 448 #x100d0c))
-             (equal (car (last *canvas-glyph-calls*))
-                    '(46 38 66 4 #xffedc2))))
-
 (dolist (fixture '((nil nil nil) ("widget" nil nil)
                    ("legacy" "wayland-1" nil) (nil "wayland-1" nil)
                    ("widget" "wayland-1" t) ("widget" "" nil)))
   (destructuring-bind (presentation display expected) fixture
-    (assert (eq (retrodeck::ten-seconds-wayland-requested-p
+    (assert (eq (retrodeck::chiptune-wayland-requested-p
                  presentation display) expected))))
-(let ((runtime (retrodeck:make-ten-seconds-runtime
-                :presentation "widget" :wayland-display "wayland-1")))
-  (assert (and (getf runtime :wayland) (null (getf runtime :volume))
-               (getf runtime :dirty) (not (getf runtime :auto-presentation))
-               (eq (getf runtime :clock) #'retrodeck:monotonic-nanoseconds))))
-(let ((errors (make-string-output-stream)))
-  (let ((*error-output* errors))
-    (assert (and (= (retrodeck::ten-seconds-runtime-volume nil) 42)
-                 (zerop (retrodeck::ten-seconds-runtime-volume "bad")))))
-  (assert (search "game cues disabled" (get-output-stream-string errors))))
-(multiple-value-bind (state trace summary)
-    (exercise-ten-seconds-runtime nil '((200 200 1 1 0)) '(100 101))
-  (assert-plist-values state '(:mode :running :started-at 101))
-  (assert (equal trace
-                 '((:reap-sound) (:tick :now 100) (:render) (:present)
-                   (:poll :wayland nil :timeout 8) (:controls 0) (:touches 1)
-                   (:touch :now 101) (:cue :start) (:redraw))))
-  (assert-plist-values summary
-                       '(:owned t :play (((523 28) (784 38)) 42) :stops 1)))
-(multiple-value-bind (state trace summary)
-    (exercise-ten-seconds-runtime '((1 4 0))
-                                  '((200 200 1 1 0) (20 20 1 1 0)) '(200))
-  (assert-plist-values state '(:mode :ready))
-  (assert (equal (last trace 2) '((:back :now 200) (:exit))))
-  (assert-plist-values summary '(:play nil)))
-(multiple-value-bind (state trace summary)
-    (exercise-ten-seconds-runtime
-     '((0 28 0) (1 8 0) (1 4 0))
-     '((200 200 1 1 0) (201 201 1 1 0)) '(300 301) :active 1 :play 2)
-  (assert-plist-values state '(:started-at 301))
-  (assert (find :controller-a trace :key #'first))
-  (assert (not (find :touch trace :key #'first)))
-  (assert-plist-values summary '(:owned nil)))
-(multiple-value-bind (state trace ignored)
-    (exercise-ten-seconds-runtime
-     '((0 28 0) (1 8 0))
-     '((200 200 1 1 0) (201 201 1 1 0) (201 201 0 0 1))
-     '(500 501 1000000501) :active 1 :play 2)
-  (declare (ignore ignored))
-  (assert-plist-values state '(:mode :stopped :displayed 100))
-  (assert (equal (remove-if-not (lambda (item) (eq (first item) :touch)) trace)
-                 '((:touch :now 501) (:touch :now 1000000501)))))
-(multiple-value-bind (state trace summary)
-    (exercise-ten-seconds-runtime nil nil '(600) :wayland t)
-  (declare (ignore state trace))
-  (assert-plist-values summary '(:poll (0 8))))
-(let ((runtime (retrodeck:make-ten-seconds-runtime
-                :presentation nil :wayland-display nil))
-      (diagnostics (make-string-output-stream)))
-  (with-runtime-device-fixture (:gamepads-scan-result '(-1 "cannot scan gamepads"))
-    (let ((*error-output* diagnostics))
-      (retrodeck:ten-seconds-runtime-initialize runtime))
-    (let* ((text (get-output-stream-string diagnostics))
-           (failure (search "controller input unavailable: cannot scan gamepads" text))
-           (ready (search "0 THEGamepad controller(s) ready" text)))
-      (assert (and failure ready (< failure ready) (= (getf runtime :volume) 42)
-                   (not (search "game cues disabled" text)))))
-    (retrodeck:ten-seconds-runtime-shutdown runtime)
-    (assert (and (= *evdev-gamepads-scan-count* 1)
-                 (zerop *evdev-controls-scan-count*)))))
-
-(with-ten-seconds-runtime-fixture
-    (runtime (:presentation "widget" :wayland-display "wayland-test")
-             (:wayland-open-status 0))
-  (assert-signals error
-    (retrodeck:ten-seconds-candidate-rehearse
-     (retrodeck:ten-seconds-initial-state) runtime :iteration-limit 1))
-  (assert-runtime-observations :wayland-open 1 :wayland-kind :widget :fbdev-open 0
-   :wayland-close 0 :evdev-close 1 :controls-close 1 :initialized nil))
-
-(with-ten-seconds-runtime-fixture
-    (runtime (:presentation nil :wayland-display nil
-              :clock (lambda () (error "Clock ran after shutdown")))
-             () (state (retrodeck:ten-seconds-initial-state)))
-  (let ((*process-shutdown-status* 1) (*active-count* 0))
-    (retrodeck:ten-seconds-runtime-initialize runtime)
-    (multiple-value-bind (returned ignored trace)
-        (retrodeck:ten-seconds-runtime-run-iteration state runtime)
-      (declare (ignore ignored))
-      (assert (eq returned state))
-      (assert (equal trace '((:shutdown))))
-      (assert-runtime-observations :active-count 0 :input-poll nil))
-    (retrodeck:ten-seconds-runtime-shutdown runtime)))
-
-(with-ten-seconds-runtime-fixture
-    (runtime (:presentation nil :wayland-display nil
-              :clock (lambda () (pop times))) ()
-             (times '(100 101 102)) (*active-status* 1) (*play-status* 1)
-             (*stop-count* 0) (*input-poll-result* '(1 0 1 0 0 0 0))
-             (*canvas-clear-status* 1)
-             (retrodeck::*menu-sound-input-until-ms* 777))
-  (let ((*evdev-touch-queue* '((200 200 1 1 0)))
-          (*record-interaction* :cleanup-error))
-    (let ((failure
-            (handler-case
-                (progn
-                  (retrodeck:ten-seconds-candidate-rehearse
-                   (retrodeck:ten-seconds-initial-state) runtime :iteration-limit 2
-                   :stop-predicate (lambda (state ignored iteration)
-                                     (declare (ignore state ignored))
-                                     (when (= iteration 1)
-                                       (setf *canvas-clear-status* 0))
-                                     nil))
-                  nil)
-              (error (condition) condition))))
-      (assert (search "10 Seconds render failed" (princ-to-string failure))))
-    (assert-runtime-observations :stop-count 1 :fbdev-close 1 :evdev-close 1 :controls-close 1
-     :menu-sound-until 777 :initialized nil :dirty nil)
-    (assert (not (getf runtime :running)))))
-
-(dolist (fixture (list (list 0 nil :limit 0)
-                       (list 1 (constantly t) :operator-stop 0)
-                       (list 1 nil :limit 1)))
-  (destructuring-bind (limit stop expected trace-count) fixture
-    (with-ten-seconds-runtime-fixture (runtime (:wayland-display "") ())
-      (multiple-value-bind (state returned traces reason)
-          (retrodeck:ten-seconds-candidate-rehearse
-           (retrodeck:ten-seconds-initial-state) runtime
-           :iteration-limit limit :stop-predicate stop)
-        (declare (ignore state))
-        (assert (eq returned runtime))
-        (assert (= (length traces) trace-count))
-        (assert (eq reason expected))
-        (assert-runtime-observations :initialized nil :fbdev-close 1)))))
 
 (defun exercise-chiptune-runtime
     (controls touches times

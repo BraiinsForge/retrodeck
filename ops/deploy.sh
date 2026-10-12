@@ -85,6 +85,7 @@ gba=$(build_flake .#gba-deck)
 doom=$(build_flake .#doom-deck)
 tamagotchi=$(build_flake .#tamagotchi-deck)
 native=$(build_flake .#retrodeck-native)
+ten_seconds=$(build_flake .#ten-seconds-deck)
 fbterm=$(build_flake .#fbterm-deck)
 rlwrap=$(build_flake .#rlwrap-deck)
 lua=$(build_flake .#lua-deck)
@@ -117,10 +118,10 @@ cp "$zx/bin/zx-deck" "$payload/nes-deck/zx-deck"
 cp "$gba/bin/gba-deck" "$payload/nes-deck/gba-deck"
 cp "$doom/bin/doom-deck" "$payload/nes-deck/doom-deck"
 cp "$tamagotchi/bin/tamagotchi-deck" "$payload/nes-deck/tamagotchi-deck"
-ln -sfn retrodeck-native "$payload/nes-deck/ten-seconds-deck"
+cp "$ten_seconds/bin/ten-seconds-deck" "$payload/nes-deck/ten-seconds-deck"
 ln -sfn ../retrodeck-native "$payload/nes-deck/menu/deck-menu"
 cp "$native/bin/retrodeck-native" "$payload/nes-deck/retrodeck-native"
-cp lisp/startup.lisp lisp/ui.lisp lisp/timer.lisp lisp/policy.lisp \
+cp lisp/startup.lisp lisp/ui.lisp lisp/policy.lisp \
   lisp/chiptune.lisp lisp/process.lisp lisp/settings.lisp lisp/wifi.lisp \
   lisp/credits.lisp \
   lisp/dashboard.lisp "$payload/nes-deck/lisp/"
@@ -251,7 +252,6 @@ find "$payload/nes-deck" -type f \( \
   -name 'ecl.bin' \) -exec chmod 0700 {} +
 chmod 0600 "$payload/nes-deck/lisp/startup.lisp" \
   "$payload/nes-deck/lisp/ui.lisp" \
-  "$payload/nes-deck/lisp/timer.lisp" \
   "$payload/nes-deck/lisp/policy.lisp" \
   "$payload/nes-deck/lisp/chiptune.lisp" \
   "$payload/nes-deck/lisp/process.lisp" \

@@ -482,6 +482,21 @@
       (finish-output *error-output*)
       0)))
 
+(defun chiptune-wayland-requested-p (presentation display)
+  (check-type presentation (or null string))
+  (check-type display (or null string))
+  (and (stringp presentation) (string= presentation "widget")
+       (stringp display) (plusp (length display))))
+
+(defmacro with-chiptune-cleanup ((cleanup) &body body)
+  `(let ((failure nil) (results nil))
+     (unwind-protect
+         (handler-case (setf results (multiple-value-list (progn ,@body)))
+           (error (condition) (setf failure condition)))
+       (handler-case ,cleanup
+         (error (condition) (unless failure (setf failure condition)))))
+     (if failure (error failure) (values-list results))))
+
 (defun make-chiptune-runtime
     (&key (directory "/mnt/data/chiptunes")
        (presentation (dashboard-environment-value "RETRO_DECK_PRESENTATION"))
@@ -492,7 +507,7 @@
   (check-type directory string)
   (check-type volume-state (or null string))
   (check-type clock function)
-  (let* ((wayland (ten-seconds-wayland-requested-p presentation wayland-display))
+  (let* ((wayland (chiptune-wayland-requested-p presentation wayland-display))
          (runtime (make-dashboard-runtime :wayland wayland
                                           :wayland-display wayland-display
                                           :default-volume 42 :clock clock)))
@@ -730,7 +745,12 @@ audio the wall clock paces decoding instead."
                   (length files))))
 
 (defun chiptune-runtime-present (runtime)
-  (ten-seconds-runtime-present runtime))
+  (when (and (getf runtime :wayland)
+             (not (getf runtime :presentation-owned-p)))
+    (unless (open-wayland-widget)
+      (return-from chiptune-runtime-present nil))
+    (setf (getf runtime :presentation-owned-p) t))
+  (dashboard-runtime-present runtime))
 
 (defun chiptune-runtime-shutdown (runtime)
   (unwind-protect
@@ -745,7 +765,7 @@ audio the wall clock paces decoding instead."
   (when (getf runtime :initialized-p)
     (error "Chiptune runtime is already initialized"))
   (let ((completed nil))
-    (with-ten-seconds-cleanup
+    (with-chiptune-cleanup
         ((unless completed (chiptune-runtime-shutdown runtime)))
       (unless (getf runtime :wayland)
         (unless (open-fbdev)
@@ -875,7 +895,7 @@ audio the wall clock paces decoding instead."
   (when (getf runtime :initialized-p)
     (error "Chiptune runtime is already initialized"))
   (let ((current nil) (iteration 0) (traces nil) (reason nil) (owned nil))
-    (with-ten-seconds-cleanup ((when owned (chiptune-runtime-shutdown runtime)))
+    (with-chiptune-cleanup ((when owned (chiptune-runtime-shutdown runtime)))
       (setf current (chiptune-runtime-initialize runtime) owned t)
       (loop
         (cond

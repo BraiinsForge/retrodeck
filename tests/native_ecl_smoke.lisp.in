@@ -61,20 +61,6 @@
                 (dashboard-runtime-wayland-requested-p runtime)
                 (not (getf runtime :wayland)))
            "Automatic presentation environment snapshot diverged"))
-  (let ((runtime (make-ten-seconds-runtime :presentation "widget")))
-    (check (and (null (getf runtime :volume)) (getf runtime :dirty)
-                (getf runtime :wayland) (not (getf runtime :auto-presentation))
-                (string= (getf runtime :wayland-display) "retrodeck-smoke")
-                (eq (getf runtime :clock) #'monotonic-nanoseconds)
-                (zerop (ten-seconds-runtime-volume)))
-           "10 Seconds candidate runtime construction diverged"))
-  (dolist (fixture '((nil "retrodeck-smoke")
-                     ("legacy" "retrodeck-smoke")
-                     ("widget" "")))
-    (check (not (getf (make-ten-seconds-runtime
-                       :presentation (first fixture)
-                       :wayland-display (second fixture)) :wayland))
-           "10 Seconds candidate presentation selector diverged"))
   (let ((runtime (make-dashboard-runtime
                   :auto-presentation t :wayland-display "")))
     (check (not (dashboard-runtime-wayland-requested-p runtime))
@@ -195,16 +181,6 @@
            (fill-canvas-rect #x80000000 0 1 1 0)) "Canvas x coordinate exceeded the native signed range")
   (check (signals-p type-error
            (fill-canvas-rect 0 0 #x100000000 1 0)) "Canvas width exceeded the native unsigned range")
-  (dolist (fixture '((:ready 0 #x562ba370a3b4da05)
-                     (:running 123 #x802225e33aea53b5)
-                     (:stopped 1000 #x171e4a78d40d458d)
-                     (:stopped 1003 #x0171d3938f410bd5)
-                     (:stopped 9999 #xd8877f2ba172c415)))
-    (destructuring-bind (mode displayed expected) fixture
-      (check (render-ten-seconds (list :mode mode :displayed displayed))
-             "10 Seconds render failed for ~S/~D" mode displayed)
-      (check (= (canvas-rgb565-hash) expected)
-             "10 Seconds frame mismatch for ~S/~D" mode displayed)))
   (check (render-chiptune
           (make-chiptune-render-state
            :ready t :title "crazy" :system "ogg vorbis"

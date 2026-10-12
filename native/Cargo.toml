@@ -29,6 +29,11 @@ name = "tamagotchi-host"
 path = "src/bin/tamagotchi-host/main.rs"
 test = false
 
+[[bin]]
+name = "ten-seconds-deck"
+path = "src/bin/ten-seconds-deck.rs"
+test = false
+
 [profile.release]
 panic = "abort"
 strip = true

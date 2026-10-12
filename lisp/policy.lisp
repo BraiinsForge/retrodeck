@@ -632,7 +632,6 @@ added as another catalog entry without changing any code."
 
 (defparameter *main-routes*
   '(("deck-menu" . :dashboard)
-    ("ten-seconds-deck" . :ten-seconds)
     ("chiptune-deck" . :chiptunes)))
 
 (defun main-invocation-name (program)

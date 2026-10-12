@@ -34,16 +34,12 @@ grep -Fq "ssh \"\$target\" sh -s -- \"\$remote_stage\" <\"\$activate_script\"" \
   "$deployer" || fail 'deployer does not stream the activation script'
 grep -Fq "[[ -f \$activate_script && ! -L \$activate_script ]]" "$deployer" ||
   fail 'deployer does not validate the activation script'
-grep -Fq 'cp lisp/startup.lisp lisp/ui.lisp lisp/timer.lisp lisp/policy.lisp' \
-  "$deployer" || fail 'deployer does not stage the editable Lisp timer policy'
 grep -Fq 'lisp/chiptune.lisp lisp/process.lisp lisp/settings.lisp lisp/wifi.lisp' \
   "$deployer" || fail 'deployer does not stage the editable Lisp chiptune renderer'
 grep -Fq 'lisp/dashboard.lisp "$payload/nes-deck/lisp/"' "$deployer" ||
   fail 'deployer does not stage the Lisp dashboard'
 grep -Fq '[ -s "$stage/nes-deck/lisp/ui.lisp" ]' "$activation" ||
   fail 'activation does not validate the staged editable Lisp UI'
-grep -Fq '[ -s "$stage/nes-deck/lisp/timer.lisp" ]' "$activation" ||
-  fail 'activation does not validate the staged editable Lisp timer'
 grep -Fq '[ -s "$stage/nes-deck/lisp/policy.lisp" ]' "$activation" ||
   fail 'activation does not validate the staged editable Lisp policy'
 grep -Fq '[ -s "$stage/nes-deck/lisp/chiptune.lisp" ]' "$activation" ||
@@ -61,7 +57,7 @@ grep -Fq '[ -s "$stage/nes-deck/lisp/dashboard.lisp" ]' "$activation" ||
 grep -Fq 'RETRO_DECK_LISP_SOURCE=1' "$activation" ||
   fail 'activation does not exercise staged source-loaded Lisp'
 grep -Fq '"$stage/nes-deck/ten-seconds-deck" extra' "$activation" ||
-  fail 'activation does not preflight the staged 10 Seconds alias'
+  fail 'activation does not preflight the staged 10 Seconds executable'
 grep -Fq '[ "$ten_seconds_output" = "usage: ten-seconds-deck" ]' \
   "$activation" || fail 'activation does not check the 10 Seconds usage result'
 grep -Fq '"$stage/nes-deck/chiptune-deck" extra extra' "$activation" ||
@@ -70,8 +66,6 @@ grep -Fq '[ "$chiptune_output" = "usage: chiptune-deck CHIPTUNE_DIRECTORY" ]' \
   "$activation" || fail 'activation does not check the chiptune usage result'
 grep -Fq 'cp -p "$stage/nes-deck/lisp/ui.lisp" "$base/lisp/ui.lisp"' \
   "$activation" || fail 'activation does not install the editable Lisp UI'
-grep -Fq 'cp -p "$stage/nes-deck/lisp/timer.lisp" "$base/lisp/timer.lisp"' \
-  "$activation" || fail 'activation does not install the editable Lisp timer'
 grep -Fq 'cp -p "$stage/nes-deck/lisp/policy.lisp" "$base/lisp/policy.lisp"' \
   "$activation" || fail 'activation does not install the editable Lisp policy'
 grep -Fq 'cp -p "$stage/nes-deck/lisp/chiptune.lisp" "$base/lisp/chiptune.lisp"' \

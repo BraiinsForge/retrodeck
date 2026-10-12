@@ -170,9 +170,17 @@ The first candidates to investigate are pixel-art sampling, SHM texture reuse,
 then measured GPU/scanout bottlenecks. Descriptor correctness is a separate
 small bugfix series when its failure is reproduced.
 
+## Implementation progress
+
+10 Seconds now uses a standalone Rust executable built without ECL.
+`native/src/ten_seconds.rs` owns timing, input priority, cues and pixel rendering.
+Deployment installs the binary and removes the old Lisp timer source.
+Five Rust tests pass, including all five reference RGB565 frame hashes; the
+static ARM binary passes its QEMU usage check. Physical Deck acceptance is pending.
+
 ## Rust-only UI inventory
 
-The current installed UI is authoritative Lisp, not a dormant parity prototype.
+This inventory records the audited `48f66a1` baseline, before the replacements above.
 `ops/deploy.sh:120-123` links `deck-menu`, `ten-seconds-deck`, and the shared host;
 `native/src/main.rs:1471-1472` calls `RETRODECK:MAIN`.
 `lisp/startup.lisp:773-803` dispatches dashboard, 10 Seconds, and chiptunes and
@@ -189,8 +197,8 @@ loads their implementation files. The ARM build also supports the compiled
 | `deploy/menu/compile-catalog.lisp` and launcher ECL invocation | Implement catalog/palette validation and compilation in Rust with the existing input/output contracts. |
 | `lisp/uploader.lisp`, `deploy/uploader/run.lisp` | Replace the first-party uploader HTTP service and HTML UI with Rust. Preserve upload/authentication/catalog activation behavior. |
 
-The nine UI/policy implementation files contain 5,807 lines; startup adds 803.
-The uploader adds 563 and the catalog compiler 414. These are scope measurements,
+At that baseline, the nine UI/policy implementation files contain 5,807 lines;
+startup adds 803, the uploader 563 and the catalog compiler 414.
 not a Rust line-count estimate. The 1,649-line native entrypoint is largely the
 ECL/primitive boundary, not an existing Rust dashboard to enable.
 

@@ -195,7 +195,6 @@
            #:*dashboard-volume-step*
            #:*menu-sound-cues*
            #:*menu-sound-input-tail-ms*
-           #:*ten-seconds-cues*
            #:apply-dashboard-touch
            #:bitmap-text-width
            #:canvas-rgb565-hash
@@ -287,7 +286,6 @@
            #:load-dashboard-palette
            #:load-dashboard-volume-state
            #:load-project-credits
-           #:render-ten-seconds
            #:list-native-directory
            #:load-text-mask
            #:main
@@ -297,11 +295,9 @@
            #:native-program-arguments
            #:run-chiptune-main
            #:run-dashboard-main
-           #:run-ten-seconds-main
            #:dashboard-main-options
            #:*dashboard-main-usage*
            #:make-dashboard-runtime
-           #:make-ten-seconds-runtime
            #:make-project-credits-crawl
            #:menu-sound-blocks-input-p
            #:menu-sound-duration-ms
@@ -364,15 +360,6 @@
            #:wifi-target-at
            #:wifi-touch-transition
            #:wifi-valid-text-p
-           #:ten-seconds-candidate-rehearse
-           #:ten-seconds-cue-notes
-           #:ten-seconds-format
-           #:ten-seconds-initial-state
-           #:ten-seconds-reduce
-           #:ten-seconds-runtime-initialize
-           #:ten-seconds-runtime-run-iteration
-           #:ten-seconds-runtime-shutdown
-           #:ten-seconds-touch-event
            #:stroke-canvas-rect
            #:wayland-shutdown-requested-p
            #:write-native-control-file
@@ -777,7 +764,6 @@
       (main-route (native-program-arguments))
     (case route
       (:dashboard (run-dashboard-main arguments))
-      (:ten-seconds (run-ten-seconds-main arguments))
       (:chiptunes (run-chiptune-main arguments))
       (otherwise
        (format t "retrodeck: Common Lisp startup loaded~%")
@@ -795,8 +781,6 @@
     (load (merge-pathnames "wifi.lisp" startup) :verbose nil :print nil)
     (load (merge-pathnames "credits.lisp" startup) :verbose nil :print nil)
     (load (merge-pathnames "dashboard.lisp" startup) :verbose nil :print nil)
-    (load (merge-pathnames "timer.lisp" startup) :verbose nil :print nil)
-    ;; The chiptune runtime reuses timer.lisp gameplay-runtime macros.
     (load (merge-pathnames "chiptune.lisp" startup) :verbose nil :print nil)
     (let ((local (merge-pathnames "local.lisp" startup)))
       (when (probe-file local)
