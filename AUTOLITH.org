@@ -110,6 +110,14 @@ never swept into a migration commit.
 - Removal condition: Remove when deployment is split into bounded resumable
   phases or the command runtime cap is raised.
 
+** Use a current RustSec scanner
+
+- Problem: Installed =cargo-audit= 0.21.2 rejects current advisory database CVSS 4.0 records.
+- Behavior: Run =nix shell nixpkgs#cargo-audit -c cargo-audit audit --file native/Cargo.lock=.
+- Scope and location: Project workflow note; no active-image mutation.
+- Verification: Version 0.22.2 parsed the current database and verified the patched dependency graph.
+- Removal condition: Remove when the installed scanner supports the current database.
+
 * Candidates
 
 None.

@@ -71,7 +71,7 @@ pkgs.runCommand "retro-deck-runtime-licenses" {
   append_rust_notice pbkdf2-0.12.2 LICENSE-APACHE
   append_rust_notice pbkdf2-0.12.2 LICENSE-MIT
   append_rust_notice proc-macro2-1.0.107 LICENSE-MIT
-  append_rust_notice quick-xml-0.39.4 LICENSE-MIT.md
+  append_rust_notice quick-xml-0.41.0 LICENSE-MIT.md
   append_rust_notice quote-1.0.47 LICENSE-MIT
   append_rust_notice radium-0.7.0 LICENSE.txt
   append_rust_notice regex-1.13.1 LICENSE-APACHE
@@ -97,7 +97,7 @@ pkgs.runCommand "retro-deck-runtime-licenses" {
   append_rust_notice version_check-0.9.5 LICENSE-MIT
   append_rust_notice wayland-backend-0.3.15 LICENSE.txt
   append_rust_notice wayland-client-0.31.14 LICENSE.txt
-  append_rust_notice wayland-scanner-0.31.10 LICENSE.txt
+  append_rust_notice wayland-scanner-0.31.11 LICENSE.txt
   append_rust_notice wayland-sys-0.31.11 LICENSE.txt
   append_rust_notice wyz-0.5.1 LICENSE.txt
 
