@@ -9,17 +9,30 @@ executable Lisp.
 
 * Project profile
 
-RetroDeck is an exact migration, not a redesign. The C++ dashboard remains the
-authoritative running product until the Rust and Common Lisp replacement passes
-host, ARM/ECL, and physical Deck parity. Common Lisp owns policy and sequencing;
-Rust remains a thin native mechanism layer. RETRODECK:MAIN stays unchanged until
-explicitly approved.
+RetroDeck is an exact migration, not a redesign. The current dashboard,
+10 Seconds, and chiptune UI run through the Rust/ECL host. The release target
+is pure Rust first-party UI, with the Common Lisp REPL kept as a separate app.
+Reuse the existing native mechanisms and preserve visual and interaction parity.
+The upstream migration plan is in =docs/upstream-rust-migration.md=.
 
 Repository work uses small imperative title-only commits and an immediate push.
 Stage exact paths so owner-supplied ROMs, firmware images, and unrelated work are
 never swept into a migration commit.
 
 * Active adaptations
+
+** Pin Deck comparisons to current GitHub master
+
+- Problem: The local BMC worktrees still have a GitLab =origin= and July 2026
+  cached refs. Using those refs missed the current keyed widget protocol.
+- Behavior: Verify =BraiinsForge/bmc-main= on GitHub, fetch master into
+  =refs/remotes/github/master=, record its full SHA, and read that revision
+  with =git show= when auditing forks. Preserve existing branches and worktrees.
+- Scope and location: Project workflow note; no active-image mutation.
+- Verification: On 2026-10-12 the GitHub API and fetched ref both resolved to
+  =e0a5c20ceac406ef22f361671516ce5e83e00de8=.
+- Removal condition: Remove after the local upstream remotes and comparison
+  workflow use GitHub directly.
 
 ** Split focused Lisp iteration from integration checks
 
@@ -50,9 +63,9 @@ never swept into a migration commit.
 
 ** Keep Deck fixtures non-authoritative and reversible
 
-- Problem: Migration fixtures must exercise installed ARM/ECL code without
-  displacing or perturbing the working C++ dashboard.
-- Behavior: Use alternate temporary startup files, simulated effect completions,
+- Problem: Migration fixtures need to exercise candidate ARM code without
+  displacing the installed dashboard.
+- Behavior: Use alternate entrypoints, simulated effect completions,
   and in-memory canvas rendering unless a supervised physical test explicitly
   requires display or input ownership. Verify the dashboard PID and run
   =ops/check-deck.sh= afterward.
@@ -60,8 +73,8 @@ never swept into a migration commit.
   persistent override or active-image mutation.
 - Verification: The installed two-phase loop fixture completed while the C++
   dashboard retained its PID and the Deck health check stayed healthy.
-- Removal condition: Remove after the Lisp runtime becomes the approved
-  authoritative dashboard.
+- Removal condition: Remove after the Rust UI passes physical acceptance and
+  becomes the approved dashboard.
 
 ** Treat Deck SSH loss as a transport failure first
 
