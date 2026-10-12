@@ -4,6 +4,9 @@
 # This script runs through SSH with the staging directory as its only argument.
 
 set -eu
+umask 077
+PATH=/run/current-profile/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
 
 if [ "$#" -ne 1 ]; then
   echo "Usage: activate.sh STAGING-DIRECTORY" >&2
@@ -32,9 +35,6 @@ service_needs_restart=0
 uploader_needs_restart=0
 bmc_mode=0
 compositor_needs_restart=0
-if [ -x /etc/init.d/bmc-compositor ]; then
-  bmc_mode=1
-fi
 restore_service_after_failure() {
   result=$?
   trap - EXIT
@@ -56,6 +56,20 @@ restore_service_after_failure() {
   exit "$result"
 }
 trap restore_service_after_failure EXIT
+presentation=$(cat "$stage/presentation")
+case "$presentation" in
+  stock-bmc)
+    sh "$stage/install-stock-widget.sh" check "$stage"
+    bmc_mode=1
+    ;;
+  framebuffer)
+    if [ -x /etc/init.d/bmc-compositor ]; then
+      echo 'Stock compositor is installed; refusing framebuffer mode' >&2
+      exit 1
+    fi
+    ;;
+  *) echo 'Invalid staged presentation mode' >&2; exit 1 ;;
+esac
 
 # Validate the complete payload before stopping a running service.
 for executable in \
@@ -78,11 +92,6 @@ for executable in \
 done
 [ -x "$stage/usr/sbin/deck-keyboard-quirks" ] || {
   echo "Staged keyboard quirk helper is missing" >&2
-  exit 1
-}
-[ -s "$stage/bmc-widgets/retro-deck/manifest.json" ] && \
-  [ -x "$stage/bmc-widgets/retro-deck/bin/retro-deck" ] || {
-  echo "Staged Retro Deck widget is incomplete" >&2
   exit 1
 }
 for wifi_executable in deck-wifi-profile-add deck-wifi-select deck-wifi-watch; do
@@ -193,7 +202,7 @@ done
 # All preflight checks passed. Service interruption begins here.
 mkdir -p "$base" /mnt/data/roms /mnt/data/langs \
   /mnt/data/chiptunes "$base/langs" "$base/licenses" \
-  "$base/uploader" "$base/uploads" /mnt/data/bmc-widgets
+  "$base/uploader" "$base/uploads"
 
 if [ -x /etc/init.d/nes-deck-uploader ]; then
   /etc/init.d/nes-deck-uploader stop 2>/dev/null || :
@@ -257,20 +266,8 @@ if [ -d "$stage/nes-deck/covers" ]; then
   cp -Rp "$stage/nes-deck/covers/." "$base/covers/"
 fi
 
-rm -rf /mnt/data/bmc-widgets/retro-deck.new
-cp -Rp "$stage/bmc-widgets/retro-deck" \
-  /mnt/data/bmc-widgets/retro-deck.new
-rm -rf /mnt/data/bmc-widgets/retro-deck
-mv /mnt/data/bmc-widgets/retro-deck.new \
-  /mnt/data/bmc-widgets/retro-deck
-if [ "$bmc_mode" -eq 1 ]; then
-  [ -f /etc/bmc_config.json ] || {
-    echo "BMC configuration is missing: /etc/bmc_config.json" >&2
-    exit 1
-  }
-  "$stage/nes-deck/langs/python" "$stage/install-bmc-scene.py" \
-    /etc/bmc_config.json
-fi
+cp -p "$stage/install-bmc-scene.py" "$base/install-bmc-scene.py"
+printf '%s\n' "$presentation" >"$base/presentation"
 
 rm -rf "$base/ecl.new" "$base/langs/chibi.new"
 mv "$stage/nes-deck/ecl" "$base/ecl.new"
@@ -332,6 +329,8 @@ if [ "$bmc_mode" -eq 1 ]; then
   /etc/init.d/nes-deck disable
   /etc/init.d/nes-deck-swap enable
   /etc/init.d/nes-deck-swap start
+  # Profile activation can start/reload BMC through upstream hooks.
+  sh "$stage/install-stock-widget.sh" install "$stage"
   service_needs_restart=0
   /etc/init.d/bmc-compositor enable
   /etc/init.d/bmc-compositor start
@@ -348,11 +347,18 @@ fi
 # A fresh Deck may need to download and decode the persistent Libretro indexes
 # before deck-menu starts. Keep this bounded, but allow the first fill to
 # finish on the target CPU instead of rolling back a healthy installation.
+dashboard_expected=1
+if [ "$bmc_mode" -eq 1 ]; then
+  enabled_widget_ids=$("$base/langs/python" "$base/install-bmc-scene.py" \
+    --enabled-widget-ids /etc/bmc/config.json)
+  [ -n "$enabled_widget_ids" ] || dashboard_expected=0
+fi
 attempt=0
 while [ "$attempt" -lt 120 ]; do
   dashboard_ready=0
   if [ "$bmc_mode" -eq 1 ] && \
-     /etc/init.d/bmc-compositor status >/dev/null 2>&1; then
+     /etc/init.d/bmc-compositor status >/dev/null 2>&1 && \
+     { [ "$dashboard_expected" -eq 0 ] || pidof deck-menu >/dev/null 2>&1; }; then
     dashboard_ready=1
   elif [ "$bmc_mode" -eq 0 ] && \
        /etc/init.d/nes-deck status >/dev/null 2>&1 && \
@@ -383,7 +389,7 @@ fi
   echo "Deck Wi-Fi watcher did not start" >&2
   exit 1
 }
-if [ "$bmc_mode" -eq 0 ] && ! pidof deck-menu >/dev/null 2>&1; then
+if [ "$dashboard_expected" -eq 1 ] && ! pidof deck-menu >/dev/null 2>&1; then
   echo "Retro Deck menu did not reach its ready state" >&2
   tail -n 80 "$base/log/deck-menu.log" >&2 || :
   exit 1

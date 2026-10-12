@@ -6,7 +6,7 @@ set -euo pipefail
 export LC_ALL=C
 
 usage() {
-  echo "Usage: $0 [--config PATH] [--check-config] [root@DECK-IP]" >&2
+  echo "Usage: $0 [--config PATH] [--check-config] [--presentation stock-bmc|framebuffer] [root@DECK-IP]" >&2
   exit 2
 }
 
@@ -17,12 +17,18 @@ config_library=$script_dir/lib/deck-config.sh
 config=$repo_root/deck.conf
 check_config=0
 target_override=
+presentation=stock-bmc
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --config)
       [[ $# -ge 2 ]] || usage
       config=$2
+      shift 2
+      ;;
+    --presentation)
+      [[ $# -ge 2 ]] || usage
+      case $2 in stock-bmc|framebuffer) presentation=$2 ;; *) usage ;; esac
       shift 2
       ;;
     --check-config)
@@ -59,7 +65,7 @@ fi
   exit 1
 }
 
-for command in nix python3 ssh tar gzip sha256sum; do
+for command in nix nix-store python3 ssh tar gzip sha256sum; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Missing required command: $command" >&2
     exit 1
@@ -96,6 +102,7 @@ python=$(build_flake .#python-deck)
 chibi=$(build_flake .#chibi-deck)
 runtime_licenses=$(build_flake .#runtime-licenses)
 ecl=$(build_flake .#ecl-arm-network)
+widget=$(build_flake .#retro-deck-widget)
 
 mkdir -p \
   "$payload/nes-deck/menu" \
@@ -105,13 +112,17 @@ mkdir -p \
   "$payload/nes-deck/terminal/fonts" \
   "$payload/nes-deck/terminal/keymaps" \
   "$payload/nes-deck/uploader" \
-  "$payload/bmc-widgets/retro-deck/bin" \
   "$payload/nes-deck/ecl" \
   "$payload/chiptunes" \
   "$payload/roms" \
   "$payload/usr/bin" \
   "$payload/usr/sbin" \
   "$payload/etc/init.d"
+printf '%s\n' "$presentation" >"$payload/presentation"
+printf '%s\n' "$widget" >"$payload/widget-store-path"
+# This package contains only a manifest and /bin/sh wrapper, with no
+# architecture-specific runtime closure. Import it through the stock store.
+nix-store --export "$widget" >"$payload/widget.nar"
 
 cp "$nes/bin/nes-deck" "$payload/nes-deck/nes-deck"
 cp "$gb/bin/gb-deck" "$payload/nes-deck/gb-deck"
@@ -153,11 +164,6 @@ cp deploy/menu/games.sexp deploy/menu/games.tsv deploy/menu/credits.tsv \
 cp "$catalog_compiler/bin/compile-catalog" "$payload/nes-deck/menu/compile-catalog"
 cp assets/settings-cog/gear-knekko-09.png \
   "$payload/nes-deck/menu/settings-icon.png"
-cp deploy/widget/manifest.json \
-  "$payload/bmc-widgets/retro-deck/manifest.json"
-cp deploy/widget/retro-deck \
-  "$payload/bmc-widgets/retro-deck/bin/retro-deck"
-chmod 0755 "$payload/bmc-widgets/retro-deck/bin/retro-deck"
 cp deploy/ecl "$payload/usr/bin/ecl"
 cp ops/deck-wifi/deck-wifi-profile-add \
   "$payload/usr/sbin/deck-wifi-profile-add"
@@ -174,6 +180,7 @@ cp deploy/menu/deck-keyboard-quirks \
 cp deploy/uploader/nes-deck-uploader.init \
   "$payload/etc/init.d/nes-deck-uploader"
 cp ops/lib/install-bmc-scene.py "$payload/install-bmc-scene.py"
+cp ops/lib/install-stock-widget.sh "$payload/install-stock-widget.sh"
 
 for result in "$nes" "$gb" "$zx" "$gba" "$doom" "$fbterm" "$rlwrap" "$lua" \
               "$python" "$chibi" "$runtime_licenses" "$ecl"; do

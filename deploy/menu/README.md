@@ -27,11 +27,22 @@ The separate uploader bundle installs `nes-deck-uploader.init` as
 `/etc/init.d/nes-deck-uploader` and the standalone Rust uploader under
 `/mnt/data/nes-deck/uploader/`.
 
-On a BMC compositor installation, the deployment also installs the Retro Deck
-widget manifest and launcher under `/mnt/data/bmc-widgets/retro-deck`. The
-dashboard runs as a normal swipeable scene. Games and native Deck programs use
-temporary layer-shell surfaces over that scene, while fbdev remains the
-fallback on Decks without BMC.
+For stock BMC master `e0a5c20ceac406ef22f361671516ce5e83e00de8`, deployment
+imports `.#retro-deck-widget` and merges it into the current BMC Nix profile
+with `bmc-nix-cli add-packages`. BMC discovers its manifest and wrapper under
+`/run/current-profile/lib/bmc-widgets/retro-deck`. The wrapper runs the
+persistent dashboard payload below `/mnt/data/nes-deck`.
+
+The dashboard runs as a swipeable fullscreen scene in the version-2
+`/etc/bmc/config.json`. Its configured widget instance UUID is supplied by BMC
+as `BMC_WIDGET_KEY`, alongside `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR`.
+Native children inherit those values, use the same configured scene, and return
+to the dashboard after exit. Existing configuration and instance IDs are
+preserved; the first edit creates `config.json.retro-deck.bak` beside the config.
+
+Select `--presentation stock-bmc` (the default) for the stock compositor, or
+`--presentation framebuffer` for a Deck without BMC. See
+[BUILD.md](../../BUILD.md#stock-bmc-installation) for prerequisites.
 
 The BMC installation also enables a private 64 MiB swapfile at
 `/mnt/data/nes-deck/state/retro-deck.swap` before the compositor starts. The

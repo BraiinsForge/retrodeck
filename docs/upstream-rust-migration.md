@@ -1,7 +1,8 @@
 # RetroDeck: minimum upstream and Rust UI migration
 
-Audit and implementation date: 2026-10-12. First-party Lisp retirement is complete
-in source and deployment packaging. No device deployment was performed.
+Audit date: 2026-10-12. Compatibility implementation: 2026-10-13. First-party
+Lisp retirement is complete in source and deployment packaging. No device
+deployment was performed.
 
 ## Decision
 
@@ -48,7 +49,8 @@ reported every fork commit as `+`: no identical patch is already upstream.
 Semantic replacements in newer master still need separate source comparison.
 
 BMC paths below refer to the pinned GitHub revision unless a fork is named.
-RetroDeck paths refer to `758ec9e`.
+Historical RetroDeck audit paths refer to `758ec9e`; implemented sections describe
+the current codebase.
 
 ## Mandatory compatibility work in RetroDeck
 
@@ -88,34 +90,41 @@ Evidence: [current protocol XML](https://github.com/BraiinsForge/bmc-main/blob/e
 `bmc-widget-protocol/src/lib.rs`, `bmc/src/widget/spawner.rs` and
 `bmc-openwrt/src/compositor/protocol/dispatch.rs`/`state.rs` at the pinned revision.
 
-### Package, manifest, and scene installation
+### Package, manifest, and scene installation: implemented
 
-The current deployer installs under `/mnt/data/bmc-widgets/retro-deck` and edits
-`/etc/bmc_config.json` through `ops/lib/install-bmc-scene.py`. Master now uses
-`/etc/bmc/config.json`; the old file is a migration input, not the runtime target
-(`bmc/src/startup.rs:1273`, `bmc/src/bin/migrate_config.rs:29-30`).
+`.#retro-deck-widget` packages the validated manifest and shell launcher under
+`lib/bmc-widgets/retro-deck`. It has no Nix runtime references. Deployment exports
+and imports its NAR, then uses stock `bmc-nix-cli add-packages` to merge it into
+the current profile without replacing other packages. Master discovers it at
+`/run/current-profile/lib/bmc-widgets`; the static application payload and
+persistent data use the existing `/mnt/data/nes-deck` layout.
 
-Build an installable widget tree containing `manifest.json`, `bin/`, and assets,
-using the current package/upgrade workflow. Master already packages native
-widgets in `nix/widget.nix:21-60` under `lib/bmc-widgets/<name>/`. Validate the
-existing RetroDeck manifest against current manifest validation and retain the
-1280x480 rectangular viewport on the Deck target.
+Deployment defaults to `stock-bmc` and validates the compositor service, mounted
+Nix store, active profile, stock CLI and version-2 `/etc/bmc/config.json` before
+stopping services. Persist a migrated BMC configuration first if its on-disk
+schema is older. The legacy `/etc/bmc_config.json` is a BMC migration input,
+not RetroDeck's runtime configuration target.
 
-Provision the fullscreen scene through current scene-management/configuration
-facilities. Keep the widget type UID, configured-widget instance UUID, and scene
-UUID separate. Replace the legacy file mutation and review activation, update,
-removal, and rollback behavior against current BMC packages.
+With the compositor stopped, activate the package before registering the
+fullscreen rectangular scene. An import or profile failure leaves the scene
+configuration untouched. Scene registration preserves existing scenes, settings,
+instance UUIDs and disabled instances, and backs up the original configuration
+once. The manifest UID, instance UUID and scene UUID are distinct. Enable swap
+before profile activation, then start the compositor through its stock service.
+The separate ECL, Scheme, Lua and Python apps, saves and history keep their
+existing routes and data paths.
 
-For development with the persistent bundle, master accepts repeated
-`--widgets-path` arguments (`bmc-openwrt/src/cli.rs:32-34`). Include both the
-profile widget directory and the persistent directory. The fork's automatic
-`/mnt/data/bmc-widgets` scan is convenience, not a missing discovery mechanism.
-The runtime default is still `/run/current-profile/lib/bmc-widgets`
-(`bmc-openwrt/src/main.rs:87-95`), despite older manifest documentation describing
-other symlink layouts. Use runtime/package code as the path authority.
+Direct framebuffer installation requires an explicit `--presentation framebuffer`
+on a system without the compositor service. Health checks use the recorded mode,
+active-profile widget and configured instance keys rather than the fork's
+persistent widget scan. Physical startup, game-return and swipe acceptance on
+stock BMC is pending.
 
-Relevant implementation: `bmc/src/widget/registry.rs:184-220`,
-`bmc/src/widget/manager.rs`, and `bmc/src/web/grpc/scene_management.rs`.
+Relevant upstream implementation: `nix/widget.nix`, `bmc-nix/src/bin/cli.rs`,
+`bmc/src/widget/{registry,manager}.rs`, `bmc/src/startup.rs`,
+`bmc/src/web/grpc/scene_management.rs`, and `bmc-openwrt/src/main.rs` at the pinned
+revision. Offline installation tests cover configuration preservation, idempotence,
+package command order, failed activation and health checks.
 
 ## Fork feature disposition
 

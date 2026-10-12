@@ -34,6 +34,7 @@ tests/settings_icons_test.sh
 tests/deploy_config_test.sh
 tests/deploy_activation_test.sh
 tests/check_deck_test.sh
+python3 tests/stock_bmc_install_test.py
 tests/provision_config_test.sh
 tests/deck_wifi_profile_add_test.sh
 tests/deck_wifi_select_test.sh

@@ -557,6 +557,14 @@ PATCH
     {
       packages.${system} = {
         ecl-arm-network = eclArmNetwork;
+        # Stock BMC discovers widgets in its active Nix profile. The wrapper
+        # deliberately points at the separately deployed persistent payload.
+        retro-deck-widget = pkgs.runCommand "bmc-widget-retro-deck-1.0.0" { } ''
+          mkdir -p $out/lib/bmc-widgets/retro-deck/bin
+          cp ${./deploy/widget/manifest.json} $out/lib/bmc-widgets/retro-deck/manifest.json
+          cp ${./deploy/widget/retro-deck} $out/lib/bmc-widgets/retro-deck/bin/retro-deck
+          chmod 0755 $out/lib/bmc-widgets/retro-deck/bin/retro-deck
+        '';
         deck-menu = staticRustTool {
           name = "deck-menu";
           description = "Standalone Retro Deck dashboard";

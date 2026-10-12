@@ -184,37 +184,53 @@ rounded display. fbterm uses a 1248x448 viewport for the same reason. Every
 frontend rejects unexpected geometry or color channel layouts rather than
 guessing.
 
-On BMC compositor installations, Retro Deck is a fullscreen scene widget.
-The menu submits event-driven XRGB8888 shared-memory buffers through the Deck
-widget protocol, so the compositor can move it during scene swipes. A launched
-game receives a Wayland connection opened by that registered process, then
-creates its own normal Deck widget surface through the inherited descriptor.
-BMC therefore keeps the scene identity and directs touch to the game. The
-emulator keeps its native frame clock and fills the 1280x480 widget black before
-placing the integer-scaled game frame in its 16-pixel safe area. BMC's Smithay
-renderer defaults to linear minification and magnification, which can still
-soften pixel boundaries during the rotated composition pass. Apply the tracked
-local patch before building a BMC image for Retro Deck:
+## Stock BMC installation
+
+The supported compositor baseline is unpatched `BraiinsForge/bmc-main` master
+`e0a5c20ceac406ef22f361671516ce5e83e00de8`. Deploy with:
 
 ```sh
-ops/bmc/apply-local-patches.sh /root/bmc-main
-nix build --no-link /root/bmc-main#deck-packages.core.pkg
+ops/deploy.sh --config deck.conf --presentation stock-bmc
 ```
 
-The patch selects nearest-neighbor filtering for both directions. The script
-is idempotent and refuses a source tree whose patch context does not match.
-When the game exits, the dashboard resumes its normal widget surface and scene
-swiping continues.
+`stock-bmc` is the default. Before stopping services, deployment requires:
 
-`ops/deploy.sh` installs the widget under `/mnt/data/bmc-widgets/retro-deck`.
-If `bmc-compositor` is present, deployment stops it, adds one idempotent Retro
-Deck scene to `/etc/bmc_config.json`, disables the legacy fbdev menu service,
-enables a 64 MiB swapfile before BMC starts, and restarts the compositor. The
-swap is needed because 128 MiB of the Deck's 256 MiB RAM is reserved for CMA;
-without it, a stock BMC widget plus Retro Deck can trigger global OOM while
-the first fullscreen SHM frame is faulted in. Existing swapfiles are left
-untouched if they cannot be enabled. The original configuration is retained
-once as `/etc/bmc_config.json.retro-deck.bak` before the first scene edit.
+- An initialized and mounted Nix store, an active BMC profile at
+  `/run/current-profile`, and stock `/etc/init.d/bmc-compositor`.
+- `nix-store` and `bmc-nix-cli` in the active profile or system PATH.
+- A migrated version-2 configuration at `/etc/bmc/config.json`. If the file
+  is still version 0 or 1, use BMC's configuration migration first.
+
+Build `.#retro-deck-widget` for the manifest and `/bin/sh` wrapper in
+`lib/bmc-widgets/retro-deck`. Deployment exports and imports this reference-free
+package, then runs stock `bmc-nix-cli add-packages` against the current profile.
+The profile merge preserves other installed packages and uses upstream activation
+hooks. Its discovery path is `/run/current-profile/lib/bmc-widgets`; the
+application payload lives separately under `/mnt/data/nes-deck`.
+
+Deployment stops the compositor before adding one fullscreen Retro Deck scene.
+It preserves existing scenes, settings, configured instance UUIDs and disabled
+instances. The original file is backed up once as
+`/etc/bmc/config.json.retro-deck.bak`. The private 64 MiB swapfile is enabled
+before the compositor starts; existing swapfiles are never reformatted.
+
+Stock BMC supplies `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR` and `BMC_WIDGET_KEY`
+to the wrapper. The key is the configured widget instance UUID, not the
+manifest's `uid`. The shell wrapper inherits these values into the dashboard,
+and launched native applications connect using the same key. The dashboard
+reconnects after its child returns. No upstream PID-registration or compositor
+patch is needed for the keyed protocol.
+
+For an installation without BMC, select `--presentation framebuffer` explicitly.
+Deployment refuses that mode when a compositor service is installed. Health
+checks read the recorded mode, inspect the active-profile widget, report its
+configured instance UUID and require the dashboard process when its scene is enabled.
+
+Stock composition uses upstream filtering. For an optional nearest-neighbor
+pixel-sampling experiment, run `ops/bmc/apply-local-patches.sh` against a separate
+BMC checkout and build that image. This experiment awaits hardware evidence.
+On-device pixel filtering, scene swiping, touch routing and game-return acceptance
+require a physical check.
 
 Audio uses `/dev/dsp` through the Deck's ALSA OSS bridge. All streams use
 signed 16-bit little-endian samples. Emulator and chiptune streams are stereo;

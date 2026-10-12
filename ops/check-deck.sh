@@ -90,25 +90,60 @@ else
   failures=$((failures + 1))
 fi
 
-if [ -x /etc/init.d/bmc-compositor ]; then
-  presentation='BMC compositor'
-  if /etc/init.d/bmc-compositor status >/dev/null 2>&1; then
-    report PRESENTATION "$presentation running"
-  else
-    report PRESENTATION "$presentation NOT RUNNING"
-    failures=$((failures + 1))
-  fi
-else
-  presentation='direct framebuffer'
-  if /etc/init.d/nes-deck status >/dev/null 2>&1; then
-    report PRESENTATION "$presentation service running"
-  else
-    report PRESENTATION "$presentation service NOT RUNNING"
-    failures=$((failures + 1))
-  fi
-fi
+# Presentation state is written by deployment, never inferred from a fork.
+dashboard_expected=1
+presentation_mode=$(cat /mnt/data/nes-deck/presentation 2>/dev/null || :)
+case "$presentation_mode" in
+  stock-bmc)
+    presentation='stock BMC compositor'
+    if /etc/init.d/bmc-compositor status >/dev/null 2>&1; then
+      report PRESENTATION "$presentation running"
+    else
+      report PRESENTATION "$presentation NOT RUNNING"
+      failures=$((failures + 1))
+    fi
+    if [ -f /run/current-profile/lib/bmc-widgets/retro-deck/manifest.json ] &&
+       [ -x /run/current-profile/lib/bmc-widgets/retro-deck/bin/retro-deck ]; then
+      report WIDGET 'installed in active Nix profile'
+    else
+      report WIDGET 'MISSING FROM ACTIVE PROFILE'
+      failures=$((failures + 1))
+    fi
+    if widget_ids=$(/mnt/data/nes-deck/langs/python \
+       /mnt/data/nes-deck/install-bmc-scene.py --widget-ids \
+       /etc/bmc/config.json 2>/dev/null); then
+      report WIDGET-KEY "$widget_ids"
+      if enabled_widget_ids=$(/mnt/data/nes-deck/langs/python \
+         /mnt/data/nes-deck/install-bmc-scene.py --enabled-widget-ids \
+         /etc/bmc/config.json 2>/dev/null); then
+        [ -n "$enabled_widget_ids" ] || dashboard_expected=0
+      else
+        failures=$((failures + 1))
+      fi
+    else
+      report WIDGET-KEY 'CONFIGURED INSTANCE MISSING OR INVALID'
+      failures=$((failures + 1))
+    fi
+    ;;
+  framebuffer)
+    presentation='direct framebuffer'
+    if /etc/init.d/nes-deck status >/dev/null 2>&1; then
+      report PRESENTATION "$presentation service running"
+    else
+      report PRESENTATION "$presentation service NOT RUNNING"
+      failures=$((failures + 1))
+    fi
+    ;;
+  *) report PRESENTATION 'MISSING OR INVALID INSTALLATION MODE'
+     failures=$((failures + 1)) ;;
+esac
+# End presentation check.
 
-require_process DASHBOARD deck-menu
+if [ "$dashboard_expected" -eq 1 ]; then
+  require_process DASHBOARD deck-menu
+else
+  report DASHBOARD 'disabled in BMC configuration'
+fi
 # Probe the uploader's HTTP endpoint, not just its process.
 if wget -q -O /dev/null -T 5 http://127.0.0.1:8080/ 2>/dev/null; then
   report UPLOADER 'running (HTTP 8080)'
