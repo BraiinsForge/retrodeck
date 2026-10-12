@@ -178,6 +178,12 @@ Deployment installs the binary and removes the old Lisp timer source.
 Five Rust tests pass, including all five reference RGB565 frame hashes; the
 static ARM binary passes its QEMU usage check. Physical Deck acceptance is pending.
 
+Catalog generation now uses `compile-catalog`, a Rust executable without ECL.
+The launcher calls it directly and retains the generated-cache and fallback TSV
+selection. The Lisp compiler is deleted. Twelve Rust tests cover bounded parsing,
+schema/palette validation and output handling; generated TSV bytes match the
+checked-in files on the host and under ARM QEMU.
+
 ## Rust-only UI inventory
 
 This inventory records the audited `48f66a1` baseline, before the replacements above.

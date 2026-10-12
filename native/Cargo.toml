@@ -34,6 +34,11 @@ name = "ten-seconds-deck"
 path = "src/bin/ten-seconds-deck.rs"
 test = false
 
+[[bin]]
+name = "compile-catalog"
+path = "src/bin/compile-catalog.rs"
+test = false
+
 [profile.release]
 panic = "abort"
 strip = true

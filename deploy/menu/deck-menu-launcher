@@ -2,7 +2,7 @@
 
 # Root launcher for the persistent Deck menu installation.  All paths are
 # fixed, all expansions are quoted, and catalog data is never evaluated by a
-# shell.  ECL reads it with Common Lisp reader evaluation disabled.
+# shell.  The Rust compiler reads it as bounded, non-evaluating data.
 
 set -u
 
@@ -51,7 +51,7 @@ CHIBI_MODULE_PATH=$BASE/langs/chibi/lib
 WIFI_HELPER=/usr/sbin/deck-wifi-profile-add
 WIFI_STATUS=/var/run/deck-wifi/status
 KEYBOARD_QUIRKS=/usr/sbin/deck-keyboard-quirks
-COMPILER=$MENU_DIR/compile-catalog.lisp
+COMPILER=$MENU_DIR/compile-catalog
 ECL=$BASE/ecl/bin/ecl.bin
 ECLDIR=$BASE/ecl/lib/ecl/
 LOG_FILE=$LOG_DIR/deck-menu.log
@@ -275,9 +275,9 @@ if [ "$catalog_cache_current" = true ]; then
 	manifest=$GENERATED_MANIFEST
 	palette=$GENERATED_PALETTE
 	log_message "using current generated manifest and dashboard palette"
-elif [ -x "$ECL" ] && [ -r "$COMPILER" ] && [ -r "$CATALOG" ]; then
-	log_message "validating menu catalog with ECL"
-	if "$ECL" --norc --shell "$COMPILER" "$CATALOG" \
+elif [ -x "$COMPILER" ] && [ -r "$CATALOG" ]; then
+	log_message "validating menu catalog with Rust"
+	if "$COMPILER" "$CATALOG" \
 		"$GENERATED_MANIFEST" "$GENERATED_PALETTE" "$PALETTE_OVERRIDE" \
 		>> "$LOG_FILE" 2>&1 &&
 		[ -r "$GENERATED_MANIFEST" ] && [ -s "$GENERATED_MANIFEST" ] &&
@@ -289,7 +289,7 @@ elif [ -x "$ECL" ] && [ -r "$COMPILER" ] && [ -r "$CATALOG" ]; then
 		log_message "catalog generation failed; using checked-in manifest and palette"
 	fi
 else
-	log_message "ECL catalog compiler unavailable; using checked-in manifest and palette"
+	log_message "catalog compiler unavailable; using checked-in manifest and palette"
 fi
 
 if [ -s "$UPLOAD_MANIFEST" ] && [ ! -L "$UPLOAD_MANIFEST" ]; then

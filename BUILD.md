@@ -88,6 +88,7 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 | --- | --- |
 | `retrodeck-native` | `bin/retrodeck-native` |
 | `ten-seconds-deck` | `bin/ten-seconds-deck`, standalone Rust |
+| `compile-catalog` | `bin/compile-catalog`, standalone Rust |
 | `nes-deck` | `bin/nes-deck` |
 | `gb-deck` | `bin/gb-deck` |
 | `zx-deck` | `bin/zx-deck` |

@@ -68,6 +68,7 @@ for executable in \
 done
 for executable in \
   retrodeck-native menu/deck-menu menu/deck-menu-launcher menu/fetch-covers \
+  menu/compile-catalog \
   terminal/fbterm terminal/loadkeys terminal/retro-terminal terminal/rlwrap \
   langs/lua langs/python langs/chibi/chibi-scheme ecl/bin/ecl.bin; do
   [ -x "$stage/nes-deck/$executable" ] || {
@@ -178,6 +179,12 @@ chiptune_output=$(RETRO_DECK_LISP_SOURCE=1 \
 "$stage/nes-deck/menu/deck-menu" --help >/dev/null
 "$stage/nes-deck/menu/deck-menu" --validate-palette \
   "$stage/nes-deck/menu/palette.tsv"
+"$stage/nes-deck/menu/compile-catalog" "$stage/nes-deck/menu/games.sexp" \
+  "$stage/catalog-games.tsv" "$stage/catalog-palette.tsv" \
+  "$stage/no-palette-override.sexp"
+cmp "$stage/catalog-games.tsv" "$stage/nes-deck/menu/games.tsv"
+cmp "$stage/catalog-palette.tsv" "$stage/nes-deck/menu/palette.tsv"
+rm -f "$stage/catalog-games.tsv" "$stage/catalog-palette.tsv"
 uploader_deploy_config=$stage/nes-deck/uploader/password.conf
 [ -f "$uploader_deploy_config" ] && [ ! -L "$uploader_deploy_config" ] || {
   echo "Staged uploader password configuration is missing or unsafe" >&2
@@ -255,6 +262,7 @@ chmod 0600 "$base/uploader/password.conf"
 
 mkdir -p "$base/menu" "$base/terminal" "$base/licenses"
 cp -Rp "$stage/nes-deck/menu/." "$base/menu/"
+rm -f "$base/menu/compile-catalog.lisp"
 rm -rf "$base/menu/settings-icons"
 rm -f "$base/menu/knekko-settings-icons.tsv"
 # CHIP-8 was retired from the product.

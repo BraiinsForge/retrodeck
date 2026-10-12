@@ -626,6 +626,11 @@ PATCH
           };
         };
 
+        compile-catalog = staticRustTool {
+          name = "compile-catalog";
+          description = "Bounded non-evaluating RetroDeck catalog compiler";
+        };
+
         ten-seconds-deck = staticRustTool {
           name = "ten-seconds-deck";
           description = "Standalone Rust 10 Seconds game for the Deck";
@@ -1019,6 +1024,25 @@ PATCH
       };
 
       checks.${system} = {
+        catalog-smoke = pkgs.runCommand "catalog-smoke" { } ''
+          binary=${self.packages.${system}.compile-catalog}/bin/compile-catalog
+          ${pkgs.binutils}/bin/readelf -h "$binary" | grep -q 'Machine:.*ARM'
+          ! ${pkgs.binutils}/bin/readelf -l "$binary" | grep -q INTERP
+          ! ${pkgs.binutils}/bin/readelf -d "$binary" | grep -q NEEDED
+          ${pkgs.qemu-user}/bin/qemu-arm "$binary" ${./deploy/menu/games.sexp} \
+            games.tsv palette.tsv missing-override.sexp
+          cmp games.tsv ${./deploy/menu/games.tsv}
+          cmp palette.tsv ${./deploy/menu/palette.tsv}
+          printf '#.(error "reader evaluation")\n' > invalid.sexp
+          if ${pkgs.qemu-user}/bin/qemu-arm "$binary" invalid.sexp \
+            games.tsv palette.tsv missing-override.sexp; then
+            exit 1
+          fi
+          cmp games.tsv ${./deploy/menu/games.tsv}
+          cmp palette.tsv ${./deploy/menu/palette.tsv}
+          touch $out
+        '';
+
         ten-seconds-smoke = pkgs.runCommand "ten-seconds-smoke" { } ''
           binary=${self.packages.${system}.ten-seconds-deck}/bin/ten-seconds-deck
           ${pkgs.binutils}/bin/readelf -h "$binary" | grep -q 'Machine:.*ARM'

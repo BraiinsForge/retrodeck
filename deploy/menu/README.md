@@ -6,16 +6,16 @@ the native `deck-menu` binary.
 
 ## Installed layout
 
-Copy these files to the Deck without changing their basenames:
+Install these files and build outputs without changing their basenames:
 
-| Repository file | Deck path |
+| Repository file or build output | Deck path |
 | --- | --- |
 | `games.sexp` | `/mnt/data/nes-deck/menu/games.sexp` |
 | `games.tsv` | `/mnt/data/nes-deck/menu/games.tsv` |
 | `credits.tsv` | `/mnt/data/nes-deck/menu/credits.tsv` |
 | `palette.tsv` | `/mnt/data/nes-deck/menu/palette.tsv` |
 | `assets/settings-cog/gear-knekko-09.png` | `/mnt/data/nes-deck/menu/settings-icon.png` |
-| `compile-catalog.lisp` | `/mnt/data/nes-deck/menu/compile-catalog.lisp` |
+| `compile-catalog` package: `bin/compile-catalog` | `/mnt/data/nes-deck/menu/compile-catalog` |
 | `deck-menu-launcher` | `/mnt/data/nes-deck/menu/deck-menu-launcher` |
 | `deck-keyboard-quirks` | `/usr/sbin/deck-keyboard-quirks` |
 | `nes-deck-keyboard.hotplug` | `/etc/hotplug.d/usb/90-nes-deck-keyboard` |
@@ -190,7 +190,7 @@ five required keys:
    IWADs are catalog-only changes.
 5. `:color` - exact canonical xterm-256 `#RRGGBB` accent color
 
-`compile-catalog.lisp` permits no missing, duplicate, or unknown keys. It
+The Rust `compile-catalog` executable permits no missing, duplicate, or unknown keys. It
 rejects duplicate IDs and ROM paths, dotted/circular/oversized forms, reader
 evaluation, control characters, non-ASCII text, malformed colors, and paths
 outside the persistent installation. It also rejects colors outside the fixed
@@ -208,7 +208,7 @@ generated palette, or checked-in fallback is malformed or missing, startup
 continues with the last usable layer or built-in defaults.
 
 The checked-in `games.tsv` and `palette.tsv` files are known-good fallbacks.
-Every palette row contains one semantic color. If ECL, the source catalog, or
+Every palette row contains one semantic color. If the compiler, source catalog, or
 generation is unavailable, the launcher uses those files and logs the reason.
 No shell evaluates catalog content. The settings button always uses the sole
 approved `gear-knekko-09` asset and an equivalent built-in fallback.
@@ -218,10 +218,10 @@ in [ASSETS.md](ASSETS.md).
 
 ## Pre-deployment check
 
-With ECL available on the build machine:
+From this directory, build and run the Rust compiler:
 
 ```sh
-ecl --norc --shell compile-catalog.lisp games.sexp \
+cargo run --manifest-path ../../native/Cargo.toml --bin compile-catalog -- games.sexp \
   /tmp/games.tsv /tmp/palette.tsv /tmp/missing-palette-override.sexp
 cmp games.tsv /tmp/games.tsv
 cmp palette.tsv /tmp/palette.tsv

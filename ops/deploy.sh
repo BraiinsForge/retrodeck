@@ -86,6 +86,7 @@ doom=$(build_flake .#doom-deck)
 tamagotchi=$(build_flake .#tamagotchi-deck)
 native=$(build_flake .#retrodeck-native)
 ten_seconds=$(build_flake .#ten-seconds-deck)
+catalog_compiler=$(build_flake .#compile-catalog)
 fbterm=$(build_flake .#fbterm-deck)
 rlwrap=$(build_flake .#rlwrap-deck)
 lua=$(build_flake .#lua-deck)
@@ -154,8 +155,9 @@ cp deploy/terminal/fonts.conf deploy/terminal/retro-terminal \
 cp deploy/menu/games.sexp deploy/menu/games.tsv deploy/menu/credits.tsv \
   deploy/menu/palette.tsv \
   deploy/menu/ASSETS.md \
-  deploy/menu/compile-catalog.lisp deploy/menu/deck-menu-launcher \
+  deploy/menu/deck-menu-launcher \
   deploy/menu/fetch-covers deploy/menu/node-mode "$payload/nes-deck/menu/"
+cp "$catalog_compiler/bin/compile-catalog" "$payload/nes-deck/menu/compile-catalog"
 cp assets/settings-cog/gear-knekko-09.png \
   "$payload/nes-deck/menu/settings-icon.png"
 cp deploy/widget/manifest.json \
@@ -244,7 +246,7 @@ find "$payload/nes-deck" -type f \( \
   -name 'doom-deck' -o -name 'tamagotchi-deck' -o \
   -name 'ten-seconds-deck' -o \
   -name 'chiptune-deck' -o -name 'retrodeck-native' -o \
-  -name 'deck-menu' -o \
+  -name 'deck-menu' -o -name 'compile-catalog' -o \
   -name 'deck-menu-launcher' -o -name 'fetch-covers' -o \
   -name 'retro-terminal' -o -name 'fbterm' -o -name 'loadkeys' -o \
   -name 'rlwrap' -o \
