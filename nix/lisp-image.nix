@@ -48,7 +48,7 @@ pkgs.runCommand "retrodeck-lisp-image-1.0.0" {
   (pushnew :retrodeck-image *features*)
   (defparameter *units*
     '("image-prologue" "startup" "ui" "policy" "process" "settings"
-      "wifi" "credits" "dashboard" "chiptune"))
+      "wifi" "credits" "dashboard"))
   (dolist (unit *units*)
     (let ((source (concatenate 'string unit ".lisp")))
       (format t "~&;; compiling ~A~%" source)

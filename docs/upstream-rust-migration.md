@@ -184,6 +184,12 @@ selection. The Lisp compiler is deleted. Twelve Rust tests cover bounded parsing
 schema/palette validation and output handling; generated TSV bytes match the
 checked-in files on the host and under ARM QEMU.
 
+Chiptunes now use `chiptune-deck`, a standalone Rust GME/Vorbis player.
+The Lisp player, scanner/display policy, entrypoint and compilation are deleted.
+Five Rust tests cover scanning, input, playback transitions and muted pacing;
+both reference frame hashes match. The static ARM entrypoint passes QEMU.
+Physical input and audio acceptance is pending.
+
 ## Rust-only UI inventory
 
 This inventory records the audited `48f66a1` baseline, before the replacements above.

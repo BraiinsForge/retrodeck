@@ -37,10 +37,10 @@ cd retrodeck
 The first Nix build downloads the pinned cross toolchain and may take several
 minutes. Later builds reuse the Nix store.
 
-The dashboard, timer, and chiptune player are startup-loaded Common Lisp
-served by `retrodeck-native`; deployment installs them as `deck-menu`,
-`ten-seconds-deck`, and `chiptune-deck` symlinks to that binary. The console
-emulators are Rust libretro hosts (`native/src/bin/retro-host/`) with the
+The dashboard is Common Lisp served by `retrodeck-native`, installed as the
+`deck-menu` alias. The timer, chiptune player, and catalog compiler are standalone
+Rust executables. The console emulators are Rust libretro hosts
+(`native/src/bin/retro-host/`) with the
 pinned FCEUmm, Gambatte, Fuse, and gpSP cores statically linked, one binary per
 console. The `libretro-host-smoke` flake check runs a representative ARM host
 headless under QEMU against a reproducibly fetched free test input and pins its video hash.
@@ -70,6 +70,9 @@ Use `--no-link` to avoid leaving `result-*` symlinks in the repository:
 
 ```sh
 nix build --no-link --print-out-paths .#retrodeck-native
+nix build --no-link --print-out-paths .#ten-seconds-deck
+nix build --no-link --print-out-paths .#chiptune-deck
+nix build --no-link --print-out-paths .#compile-catalog
 nix build --no-link --print-out-paths .#nes-deck
 nix build --no-link --print-out-paths .#gb-deck
 nix build --no-link --print-out-paths .#zx-deck
@@ -88,6 +91,7 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 | --- | --- |
 | `retrodeck-native` | `bin/retrodeck-native` |
 | `ten-seconds-deck` | `bin/ten-seconds-deck`, standalone Rust |
+| `chiptune-deck` | `bin/chiptune-deck`, standalone Rust |
 | `compile-catalog` | `bin/compile-catalog`, standalone Rust |
 | `nes-deck` | `bin/nes-deck` |
 | `gb-deck` | `bin/gb-deck` |
@@ -116,9 +120,9 @@ setting `RETRO_DECK_LISP_SOURCE` forces the sibling
 exactly as before.
 
 `lisp/startup.lisp` validates the native ABI, then loads `ui.lisp`,
-`policy.lisp`, `chiptune.lisp`, `process.lisp`, `settings.lisp`, `wifi.lisp`,
+`policy.lisp`, `process.lisp`, `settings.lisp`, `wifi.lisp`,
 `credits.lisp`, and `dashboard.lisp`. These editable files own
-bitmap UI, chiptune composition and policy, systems, labels, colors, applications,
+bitmap UI, systems, labels, colors, applications,
 exact game/reboot/terminal executable routes,
 ordered arguments and environment, launch/return statuses and sequencing,
 timing, settings and Wi-Fi editor state and actions, exact inherited and

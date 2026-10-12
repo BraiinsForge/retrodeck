@@ -83,13 +83,13 @@ fi
 if [ -s /mnt/data/nes-deck/lisp/startup.lisp ] &&
    [ -s /mnt/data/nes-deck/lisp/ui.lisp ] &&
    [ -s /mnt/data/nes-deck/lisp/policy.lisp ] &&
-   [ -s /mnt/data/nes-deck/lisp/chiptune.lisp ] &&
+   [ -x /mnt/data/nes-deck/chiptune-deck ] &&
    [ -s /mnt/data/nes-deck/lisp/process.lisp ] &&
    [ -s /mnt/data/nes-deck/lisp/settings.lisp ] &&
    [ -s /mnt/data/nes-deck/lisp/wifi.lisp ] &&
    [ -s /mnt/data/nes-deck/lisp/credits.lisp ] &&
    [ -s /mnt/data/nes-deck/lisp/dashboard.lisp ]; then
-  report LISP-POLICY 'startup, UI, policy, chiptune, process, settings, Wi-Fi, credits, and dashboard installed'
+  report LISP-POLICY 'startup, UI, policy, process, settings, Wi-Fi, credits, dashboard, and chiptune executable installed'
 else
   report LISP-POLICY 'COMMON LISP DASHBOARD FILE MISSING'
   failures=$((failures + 1))

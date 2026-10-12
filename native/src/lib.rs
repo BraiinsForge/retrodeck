@@ -2,6 +2,7 @@ pub mod audio;
 pub mod canvas;
 pub mod catalog;
 pub mod chiptune;
+pub mod chiptune_ui;
 pub mod control_file;
 pub mod controls;
 pub mod doom_input;

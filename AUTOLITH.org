@@ -9,8 +9,8 @@ executable Lisp.
 
 * Project profile
 
-RetroDeck is an exact migration, not a redesign. The dashboard and chiptune
-UI run through the Rust/ECL host; 10 Seconds uses a standalone Rust executable.
+RetroDeck is an exact migration, not a redesign. The dashboard currently runs
+through the Rust/ECL host; 10 Seconds and chiptunes use standalone Rust executables.
 The release target is pure Rust first-party UI, with the Lisp REPL as a separate app.
 Reuse the existing native mechanisms and preserve visual and interaction parity.
 The upstream migration plan is in =docs/upstream-rust-migration.md=.

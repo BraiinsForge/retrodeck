@@ -118,7 +118,6 @@ done
 [ -s "$stage/nes-deck/lisp/startup.lisp" ] && \
   [ -s "$stage/nes-deck/lisp/ui.lisp" ] && \
   [ -s "$stage/nes-deck/lisp/policy.lisp" ] && \
-  [ -s "$stage/nes-deck/lisp/chiptune.lisp" ] && \
   [ -s "$stage/nes-deck/lisp/process.lisp" ] && \
   [ -s "$stage/nes-deck/lisp/settings.lisp" ] && \
   [ -s "$stage/nes-deck/lisp/wifi.lisp" ] && \
@@ -167,9 +166,7 @@ ten_seconds_output=$("$stage/nes-deck/ten-seconds-deck" extra 2>&1) || \
   exit 1
 }
 chiptune_status=0
-chiptune_output=$(RETRO_DECK_LISP_SOURCE=1 \
-  ECLDIR="$stage/nes-deck/ecl/lib/ecl/" \
-  "$stage/nes-deck/chiptune-deck" extra extra 2>&1) || \
+chiptune_output=$("$stage/nes-deck/chiptune-deck" extra extra 2>&1) || \
   chiptune_status=$?
 [ "$chiptune_status" -eq 2 ] && \
   [ "$chiptune_output" = "usage: chiptune-deck CHIPTUNE_DIRECTORY" ] || {
@@ -226,14 +223,15 @@ cp -p "$stage/nes-deck/doom-deck" "$base/doom-deck"
 cp -p "$stage/nes-deck/tamagotchi-deck" "$base/tamagotchi-deck"
 rm -f "$base/ten-seconds-deck"
 cp -p "$stage/nes-deck/ten-seconds-deck" "$base/ten-seconds-deck"
-ln -sfn retrodeck-native "$base/chiptune-deck"
+rm -f "$base/chiptune-deck"
+cp -p "$stage/nes-deck/chiptune-deck" "$base/chiptune-deck"
 cp -p "$stage/nes-deck/retrodeck-native" "$base/retrodeck-native"
 mkdir -p "$base/lisp"
 cp -p "$stage/nes-deck/lisp/startup.lisp" "$base/lisp/startup.lisp"
 cp -p "$stage/nes-deck/lisp/ui.lisp" "$base/lisp/ui.lisp"
 rm -f "$base/lisp/timer.lisp"
 cp -p "$stage/nes-deck/lisp/policy.lisp" "$base/lisp/policy.lisp"
-cp -p "$stage/nes-deck/lisp/chiptune.lisp" "$base/lisp/chiptune.lisp"
+rm -f "$base/lisp/chiptune.lisp"
 cp -p "$stage/nes-deck/lisp/process.lisp" "$base/lisp/process.lisp"
 cp -p "$stage/nes-deck/lisp/settings.lisp" "$base/lisp/settings.lisp"
 cp -p "$stage/nes-deck/lisp/wifi.lisp" "$base/lisp/wifi.lisp"
@@ -242,7 +240,7 @@ cp -p "$stage/nes-deck/lisp/dashboard.lisp" "$base/lisp/dashboard.lisp"
 chmod 0700 "$base/retrodeck-native" "$base/lisp"
 chmod 0600 "$base/lisp/startup.lisp" "$base/lisp/ui.lisp" \
   "$base/lisp/policy.lisp" \
-  "$base/lisp/chiptune.lisp" "$base/lisp/process.lisp" \
+  "$base/lisp/process.lisp" \
   "$base/lisp/settings.lisp" "$base/lisp/wifi.lisp" \
   "$base/lisp/credits.lisp" \
   "$base/lisp/dashboard.lisp"

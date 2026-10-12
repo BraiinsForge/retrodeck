@@ -636,6 +636,11 @@ PATCH
           description = "Standalone Rust 10 Seconds game for the Deck";
         };
 
+        chiptune-deck = staticRustTool {
+          name = "chiptune-deck";
+          description = "Standalone Rust GME/Vorbis player for the Deck";
+        };
+
         tamagotchi-deck = pkgs.stdenvNoCC.mkDerivation {
           pname = "tamagotchi-deck";
           version = "0.1.0";
@@ -1055,12 +1060,22 @@ PATCH
           touch $out
         '';
 
+        chiptune-smoke = pkgs.runCommand "chiptune-smoke" { } ''
+          binary=${self.packages.${system}.chiptune-deck}/bin/chiptune-deck
+          ${pkgs.binutils}/bin/readelf -h "$binary" | grep -q 'Machine:.*ARM'
+          ! ${pkgs.binutils}/bin/readelf -l "$binary" | grep -q INTERP
+          ! ${pkgs.binutils}/bin/readelf -d "$binary" | grep -q NEEDED
+          status=0
+          output=$(${pkgs.qemu-user}/bin/qemu-arm "$binary" extra extra 2>&1) || status=$?
+          test "$status" -eq 2
+          test "$output" = 'usage: chiptune-deck CHIPTUNE_DIRECTORY'
+          touch $out
+        '';
+
         retrodeck-native-smoke = pkgs.runCommand "retrodeck-native-smoke" { } ''
           cp ${./lisp/startup.lisp} startup.lisp
           cp ${./lisp/ui.lisp} ui.lisp
           cp ${./lisp/policy.lisp} policy.lisp
-          cp ${./lisp/chiptune.lisp} chiptune.lisp
-          cp ${./chiptunes/crazy.ogg} crazy.ogg
           cp ${./lisp/process.lisp} process.lisp
           cp ${./lisp/settings.lisp} settings.lisp
           cp ${./lisp/wifi.lisp} wifi.lisp
@@ -1150,8 +1165,7 @@ PATCH
             --subst-var-by palette ${./deploy/menu/palette.tsv} \
             --subst-var-by combined_games "$PWD/combined-games.tsv" \
             --subst-var-by invalid_games "$PWD/invalid-games.tsv" \
-            --subst-var-by credits ${./deploy/menu/credits.tsv} \
-            --subst-var-by chiptune "$PWD/crazy.ogg"
+            --subst-var-by credits ${./deploy/menu/credits.tsv}
           WAYLAND_DISPLAY=retrodeck-smoke \
             XDG_RUNTIME_DIR=/tmp \
             RETRO_DECK_VOLUME_PERCENT=0 \

@@ -39,6 +39,11 @@ name = "compile-catalog"
 path = "src/bin/compile-catalog.rs"
 test = false
 
+[[bin]]
+name = "chiptune-deck"
+path = "src/bin/chiptune-deck.rs"
+test = false
+
 [profile.release]
 panic = "abort"
 strip = true

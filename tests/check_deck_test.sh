@@ -59,8 +59,8 @@ grep -Fq '[ -s /mnt/data/nes-deck/lisp/ui.lisp ]' "$remote_script" ||
   fail 'remote health check does not verify the editable Lisp UI'
 grep -Fq '[ -s /mnt/data/nes-deck/lisp/policy.lisp ]' "$remote_script" ||
   fail 'remote health check does not verify the editable Lisp policy'
-grep -Fq '[ -s /mnt/data/nes-deck/lisp/chiptune.lisp ]' "$remote_script" ||
-  fail 'remote health check does not verify the Lisp chiptune renderer'
+grep -Fq '[ -x /mnt/data/nes-deck/chiptune-deck ]' "$remote_script" ||
+  fail 'remote health check does not verify the chiptune executable'
 grep -Fq '[ -s /mnt/data/nes-deck/lisp/process.lisp ]' "$remote_script" ||
   fail 'remote health check does not verify the editable Lisp process policy'
 grep -Fq '[ -s /mnt/data/nes-deck/lisp/settings.lisp ]' "$remote_script" ||

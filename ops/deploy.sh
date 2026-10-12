@@ -86,6 +86,7 @@ doom=$(build_flake .#doom-deck)
 tamagotchi=$(build_flake .#tamagotchi-deck)
 native=$(build_flake .#retrodeck-native)
 ten_seconds=$(build_flake .#ten-seconds-deck)
+chiptune=$(build_flake .#chiptune-deck)
 catalog_compiler=$(build_flake .#compile-catalog)
 fbterm=$(build_flake .#fbterm-deck)
 rlwrap=$(build_flake .#rlwrap-deck)
@@ -123,10 +124,10 @@ cp "$ten_seconds/bin/ten-seconds-deck" "$payload/nes-deck/ten-seconds-deck"
 ln -sfn ../retrodeck-native "$payload/nes-deck/menu/deck-menu"
 cp "$native/bin/retrodeck-native" "$payload/nes-deck/retrodeck-native"
 cp lisp/startup.lisp lisp/ui.lisp lisp/policy.lisp \
-  lisp/chiptune.lisp lisp/process.lisp lisp/settings.lisp lisp/wifi.lisp \
+  lisp/process.lisp lisp/settings.lisp lisp/wifi.lisp \
   lisp/credits.lisp \
   lisp/dashboard.lisp "$payload/nes-deck/lisp/"
-ln -sfn retrodeck-native "$payload/nes-deck/chiptune-deck"
+cp "$chiptune/bin/chiptune-deck" "$payload/nes-deck/chiptune-deck"
 cp lisp/uploader.lisp lisp/uploader-paper.css lisp/uploader-palette.js \
   deploy/uploader/run.lisp "$payload/nes-deck/uploader/"
 cp -a "$uploader_libraries/share/common-lisp/source" \
@@ -255,7 +256,6 @@ find "$payload/nes-deck" -type f \( \
 chmod 0600 "$payload/nes-deck/lisp/startup.lisp" \
   "$payload/nes-deck/lisp/ui.lisp" \
   "$payload/nes-deck/lisp/policy.lisp" \
-  "$payload/nes-deck/lisp/chiptune.lisp" \
   "$payload/nes-deck/lisp/process.lisp" \
   "$payload/nes-deck/lisp/settings.lisp" \
   "$payload/nes-deck/lisp/wifi.lisp" \

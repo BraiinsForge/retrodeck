@@ -10,9 +10,7 @@
   (1 *play-status* *canvas-clear-status* *canvas-glyph-status*
      *canvas-fill-status* *projection-status* *projected-text-status*
      *control-file-write-status* *state-file-write-status*
-     *chiptune-rewind-status* *chiptune-close-status*
-     *chiptune-audio-open-status* *chiptune-audio-write-status*
-     *chiptune-audio-close-status* *canvas-raster-status* *evdev-open-status* *fbdev-open-status*
+     *canvas-raster-status* *evdev-open-status* *fbdev-open-status*
      *fbdev-canvas-status* *fbdev-present-status* *wayland-open-status*
      *wayland-canvas-status* *wayland-present-status*)
   (0 *active-status* *active-count* *stop-count* *finish-count*
@@ -43,12 +41,9 @@
        *wayland-open-display* *wayland-open-kind* *wayland-present-color*
        *wayland-dispatch-timeout* *wayland-touch* *wayland-touch-queue*
        *wayland-size* *helper-arguments* *terminal-arguments*
-       *child-arguments* *chiptune-open-result* *chiptune-step-result*
-       *chiptune-open-path* *chiptune-start-track-index*
-       *chiptune-audio-open-volume* *chiptune-audio-write-pcm*
+       *child-arguments*
        *list-directory-path* *list-directory-result*
        *program-arguments-result* *canvas-waveform-arguments*)
-      (0 *chiptune-rewind-count*)
   ("" *control-file-read-result*)
   ('(1 2 3 4) *canvas-hash-words* *monotonic-words*)
   ('(0) *state-file-read-result*)
@@ -119,24 +114,6 @@
     (setf *list-directory-path* path)
     *list-directory-result*)
   (audio-active-p () (incf *active-count*) *active-status*)
-  (chiptune-audio-open (volume)
-    (setf *chiptune-audio-open-volume* volume)
-    *chiptune-audio-open-status*)
-  (chiptune-audio-write (pcm)
-    (setf *chiptune-audio-write-pcm* pcm)
-    *chiptune-audio-write-status*)
-  (chiptune-audio-close () *chiptune-audio-close-status*)
-  (chiptune-open (path)
-    (setf *chiptune-open-path* path)
-    *chiptune-open-result*)
-  (chiptune-start-track (track)
-    (setf *chiptune-start-track-index* track)
-    *chiptune-open-result*)
-  (chiptune-step () *chiptune-step-result*)
-  (chiptune-rewind ()
-    (incf *chiptune-rewind-count*)
-    *chiptune-rewind-status*)
-  (chiptune-close () *chiptune-close-status*)
   (process-shutdown-p () *process-shutdown-status*)
   (play-tones (&rest arguments) (record-native-play arguments))
   (play-tone-sequence (&rest arguments) (record-native-play arguments))
@@ -832,93 +809,17 @@
                         (lambda () (retrodeck:draw-canvas-raster 0 0 0 1 1))))
   (assert-signals type-error (funcall function)))
 
-(assert (equal retrodeck:*chiptune-extensions*
-               '(".ay" ".gbs" ".gym" ".hes" ".kss" ".nsf" ".nsfe" ".sap"
-                 ".spc" ".vgm" ".vgz" ".ogg")))
-(assert (and (= retrodeck:*chiptune-maximum-depth* 4)
-             (= retrodeck:*chiptune-maximum-files* 1024)
-             (= retrodeck:*chiptune-maximum-file-size* 16777216)))
-(assert-binary-table #'eq #'retrodeck:chiptune-file-accepted-p
-                     `(("demo.NSFE" 16777216 t) ("demo.ogg" 1 t)
-                       ("demo.mp3" 1 nil) ("demo.ogg" 0 nil)
-                       ("demo.ogg" 16777217 nil) ("demo" 1 nil)
-                       (,(format nil "demo.~CSS" (code-char #x212a)) 1 nil)))
-(flet ((lister-for (tree)
-         (lambda (path)
-           (cdr (assoc path tree :test #'string=)))))
-  (let ((tree
-          '(("/music"
-             (:name "zelda.nsf" :kind :file :size 4096)
-             (:name ".hidden.ogg" :kind :file :size 4096)
-             (:name "broken.ogg" :kind :other :size 0)
-             (:name "huge.spc" :kind :file :size 16777217)
-             (:name "empty.gbs" :kind :file :size 0)
-             (:name "readme.txt" :kind :file :size 12)
-             (:name "b-side" :kind :directory :size 0)
-             (:name "a-side" :kind :directory :size 0))
-            ("/music/a-side"
-             (:name "crazy.OGG" :kind :file :size 100))
-            ("/music/b-side"
-             (:name "deep" :kind :directory :size 0))
-            ("/music/b-side/deep"
-             (:name "tune.ay" :kind :file :size 1)))))
-    (assert (equal (retrodeck:scan-chiptune-files
-                    "/music" :lister (lister-for tree))
-                   '("/music/a-side/crazy.OGG"
-                     "/music/b-side/deep/tune.ay"
-                     "/music/zelda.nsf"))))
-  (let ((tree '(("/deep" (:name "d" :kind :directory :size 0))
-                ("/deep/d" (:name "d" :kind :directory :size 0))
-                ("/deep/d/d" (:name "d" :kind :directory :size 0))
-                ("/deep/d/d/d" (:name "d" :kind :directory :size 0))
-                ("/deep/d/d/d/d"
-                 (:name "reachable.ogg" :kind :file :size 1)
-                 (:name "d" :kind :directory :size 0))
-                ("/deep/d/d/d/d/d"
-                 (:name "unreachable.ogg" :kind :file :size 1)))))
-    (assert (equal (retrodeck:scan-chiptune-files
-                    "/deep" :lister (lister-for tree))
-                   '("/deep/d/d/d/d/reachable.ogg"))))
-  (let ((retrodeck:*chiptune-maximum-files* 2))
-    (assert (equal (retrodeck:scan-chiptune-files
-                    "/cap"
-                    :lister (lister-for
-                             '(("/cap"
-                                (:name "c.ogg" :kind :file :size 1)
-                                (:name "a.ogg" :kind :file :size 1)
-                                (:name "b.ogg" :kind :file :size 1)))))
-                   '("/cap/a.ogg" "/cap/b.ogg")))))
-(assert-signals type-error (retrodeck:scan-chiptune-files 4))
-(assert-binary-table #'string= #'retrodeck:chiptune-display-text
-                     '(("a_z 9.:+-/Č!" 64 "A Z 9.:+-/")
-                       ("abcdef" 6 "ABCDEF") ("abcdef" 5 "AB...")
-                       ("abcdef" 3 "ABC") ("abcdef" 0 "")))
-(assert (string= (retrodeck:chiptune-display-text
-                  (format nil "x~Cy" #\Tab) 3) "X Y"))
-(assert-unary-table #'string= #'retrodeck:chiptune-base-name
-                    '(("/tmp/my-song_name.ogg" "my song name")
-                      ("archive.tar.NSF" "archive.tar")
-                      (".hidden" "") ("plain" "plain")))
-(assert-unary-table #'string= #'retrodeck:chiptune-format-time
-                    '((-1 "0:00") (0 "0:00") (999 "0:00") (1000 "0:01")
-                      (59999 "0:59") (60000 "1:00") (3600000 "60:00")))
 (assert-unary-table #'string= #'retrodeck:main-invocation-name
-                    '(("/mnt/data/nes-deck/chiptune-deck" "chiptune-deck")
+                    '(("/mnt/data/nes-deck/deck-menu" "deck-menu")
                       ("deck-menu" "deck-menu")
                       ("" "")))
 (flet ((route (arguments)
          (multiple-value-list (retrodeck:main-route arguments))))
-  (assert (equal (route '("/mnt/data/nes-deck/chiptune-deck"
-                          "/mnt/data/chiptunes"))
-                 '(:chiptunes ("/mnt/data/chiptunes"))))
   (assert (equal (route '("./deck-menu")) '(:dashboard nil)))
   (assert (equal (route '("/usr/bin/retrodeck-native" "startup.lisp"))
                  '(:startup ("startup.lisp"))))
   (assert (equal (route nil) '(:startup nil))))
 (assert-signals type-error (retrodeck:main-route "deck-menu"))
-(let ((*error-output* (make-broadcast-stream)))
-  (assert (= (retrodeck:run-chiptune-main nil) 2))
-  (assert (= (retrodeck:run-chiptune-main '("/a" "/b")) 2)))
 (let ((*program-arguments-result* '("/usr/bin/retrodeck-native"))
       (*standard-output* (make-broadcast-stream)))
   (assert (zerop (retrodeck:main))))
@@ -959,188 +860,6 @@
                      '("/tmp/override-settings.png" 23 23)))
       (assert (= (length *raster-png-calls*) 1))
       (assert (= *fbdev-close-count* 1)))))
-(assert-unary-table #'equal #'retrodeck:chiptune-control-commands
-                    '(((:kind :keyboard :code 28 :shift nil :repeat nil) nil)
-                      ((:kind :gamepad :edges #x001) (:back))
-                      ((:kind :gamepad :edges #x002) (:back))
-                      ((:kind :gamepad :edges #x004) (:toggle-pause))
-                      ((:kind :gamepad :edges #x008) (:toggle-pause))
-                      ((:kind :gamepad :edges #x010) (:previous-track))
-                      ((:kind :gamepad :edges #x020) (:next-track))
-                      ((:kind :gamepad :edges #x040) nil)
-                      ((:kind :gamepad :edges #x080) (:playback-mode))
-                      ((:kind :gamepad :edges #x100) (:previous-file))
-                      ((:kind :gamepad :edges #x200) (:next-file))
-                      ((:kind :gamepad :edges #x400) (:volume-up))
-                      ((:kind :gamepad :edges #x800) (:volume-down))
-                      ((:kind :gamepad :edges #x00c) (:toggle-pause))
-                      ((:kind :gamepad :edges #x300)
-                       (:previous-file :next-file))))
-(assert-signals error (retrodeck:chiptune-control-commands '(:kind :mouse)))
-(assert-unary-table #'eq #'retrodeck:chiptune-touch-command
-                    '((:close :back) (:pause :toggle-pause)
-                      (:previous-file :previous-file)
-                      (:next-file :next-file)
-                      (:playback-mode :playback-mode)))
-(assert-signals error (retrodeck:chiptune-touch-command :volume-up))
-(assert-unary-table #'eq #'retrodeck:chiptune-next-playback-mode
-                    '((:loop-all :loop-one) (:loop-one :shuffle)
-                      (:shuffle :loop-all)))
-(let ((state 12345))
-  (assert (= (setf state (retrodeck:chiptune-next-random state)) 3336926330))
-  (assert (= (setf state (retrodeck:chiptune-next-random state)) 1697253807))
-  (assert (= (retrodeck:chiptune-next-random state) 2816511904)))
-(assert (= (retrodeck:chiptune-next-random 0) 1085196063))
-(assert (equal (retrodeck:chiptune-file-candidates 4 1 1) '(2 3 0 1)))
-(assert (equal (retrodeck:chiptune-file-candidates 4 1 -1) '(0 3 2 1)))
-(assert (equal (retrodeck:chiptune-file-candidates 1 0 1) '(0)))
-(assert (equal (retrodeck:chiptune-shuffle-candidates 4 1 6) '(2 3 0)))
-(assert (equal (retrodeck:chiptune-shuffle-candidates 4 1 7) '(3 0 2)))
-(assert (equal (retrodeck:chiptune-shuffle-candidates 1 0 99) '(0)))
-(assert-unary-table
- #'equal (lambda (arguments)
-           (apply #'retrodeck:chiptune-advance-plan arguments))
- '(((:loop-one 0 1) (:restart)) ((:loop-one 2 4) (:restart))
-   ((:shuffle 0 1) (:shuffle)) ((:loop-all 0 3) (:track 1))
-   ((:loop-all 2 3) (:next-file)) ((:loop-all 0 1) (:next-file))))
-(assert-binary-table #'= #'retrodeck:chiptune-volume-step
-                     '((42 1 47) (98 1 100) (100 1 100)
-                       (42 -1 37) (4 -1 0) (0 -1 0)))
-(assert-signals type-error (retrodeck:chiptune-volume-step 101 1))
-(assert-signals type-error (retrodeck:chiptune-next-random -1))
-(assert-signals type-error (retrodeck:chiptune-file-accepted-p 4 1))
-(assert-signals type-error (retrodeck:chiptune-file-accepted-p "x.ogg" 1.5))
-(assert-signals type-error (retrodeck:chiptune-display-text "x" -1))
-(assert-signals type-error (retrodeck:chiptune-base-name 4))
-(assert-signals type-error (retrodeck:chiptune-format-time 1.5))
-
-(assert (= (retrodeck::chiptune-color :orange) #xff6d20))
-(assert (= (retrodeck::chiptune-color :muted) #x949594))
-(assert-unary-table #'eq (lambda (point)
-                           (apply #'retrodeck:chiptune-touch-action point))
-                    '(((1124 22) :close) ((1247 89) :close)
-                      ((446 370) :previous-file) ((650 370) :pause)
-                      ((854 370) :next-file) ((242 370) :playback-mode)
-                      ((1248 22) nil) ((1124 90) nil)))
-(let ((pcm (make-string 2940 :initial-element (code-char 0))))
-  (flet ((sample (index value)
-           (let ((unsigned (ldb (byte 16 0) value))
-                 (offset (* index 2)))
-             (setf (char pcm offset) (code-char (ldb (byte 8 0) unsigned))
-                   (char pcm (1+ offset))
-                   (code-char (ldb (byte 8 8) unsigned))))))
-    (sample 0 -32768)
-    (sample 1 32767)
-    (sample 1469 -1))
-  (let ((*chiptune-open-result* '("" "artist" "" "" 50851 1))
-        (*chiptune-step-result* (list pcm 0 735 66))
-        (*chiptune-open-path* nil)
-        (*chiptune-start-track-index* nil))
-    (assert (equal (retrodeck:open-chiptune-file "/tmp/crazy.ogg")
-                   '(:title "crazy" :subtitle "artist" :system "OGG VORBIS"
-                     :length 50851 :track-index 0 :track-count 1)))
-    (assert (and (typep *chiptune-open-path* 'base-string)
-                 (string= *chiptune-open-path* "/tmp/crazy.ogg")))
-    (let ((*chiptune-open-result*
-            '("Song 3" "Game" "Author" "Nintendo NES" 150000 4)))
-      (assert (equal (retrodeck:open-chiptune-file "/tmp/game.nsf")
-                     '(:title "Song 3" :subtitle "Game - Author"
-                       :system "Nintendo NES" :length 150000
-                       :track-index 0 :track-count 4)))
-      (assert (equal (retrodeck:start-chiptune-track "/tmp/game.nsf" 2)
-                     '(:title "Song 3" :subtitle "Game - Author"
-                       :system "Nintendo NES" :length 150000
-                       :track-index 2 :track-count 4)))
-      (assert (= *chiptune-start-track-index* 2))
-      (assert-signals error (retrodeck:start-chiptune-track "/tmp/game.nsf" 4)))
-    (let ((*chiptune-open-result* '("" "" "COMPOSER" "Spectrum" -1 2)))
-      (assert (equal (retrodeck:open-chiptune-file "/tmp/tune.ay")
-                     '(:title "tune" :subtitle "COMPOSER" :system "Spectrum"
-                       :length -1 :track-index 0 :track-count 2))))
-    (multiple-value-bind (raw-pcm ended frames position)
-        (retrodeck:step-chiptune-file)
-      (assert (and (string= raw-pcm pcm)
-                   (not ended) (= frames 735) (= position 66)))
-      (let ((visual (retrodeck::chiptune-decode-pcm raw-pcm)))
-        (assert (and (typep visual '(simple-array (signed-byte 16) (1470)))
-                     (= (aref visual 0) -32768)
-                     (= (aref visual 1) 32767)
-                     (zerop (aref visual 2))
-                     (= (aref visual 1469) -1)))))
-    (assert (and (retrodeck:open-chiptune-audio 42)
-                 (= *chiptune-audio-open-volume* 42)
-                 (retrodeck:write-chiptune-audio pcm)
-                 (string= *chiptune-audio-write-pcm* pcm)
-                 (retrodeck:close-chiptune-audio)
-                 (retrodeck:rewind-chiptune-file)
-                 (retrodeck:close-chiptune-file)))))
-(let ((*chiptune-open-result* nil) (*chiptune-step-result* nil)
-      (*chiptune-rewind-status* 0) (*chiptune-close-status* 0)
-      (*chiptune-audio-open-status* 0) (*chiptune-audio-write-status* 0)
-      (*chiptune-audio-close-status* 0))
-  (assert (and (null (retrodeck:open-chiptune-file "/tmp/missing.ogg"))
-               (null (retrodeck:step-chiptune-file))
-               (not (retrodeck:open-chiptune-audio 42))
-               (not (retrodeck:write-chiptune-audio
-                     (make-string 2940 :initial-element (code-char 0))))
-               (not (retrodeck:close-chiptune-audio))
-               (not (retrodeck:rewind-chiptune-file))
-               (not (retrodeck:close-chiptune-file)))))
-(let ((*chiptune-open-result* '("bad"))
-      (*chiptune-step-result* '("short" 0 735 0)))
-  (assert-signals error (retrodeck:open-chiptune-file "/tmp/bad.ogg"))
-  (assert-signals error (retrodeck:start-chiptune-track "/tmp/bad.nsf" 0))
-  (assert-signals error (retrodeck:step-chiptune-file))
-  (assert-signals error (retrodeck:open-chiptune-audio 101))
-  (assert-signals error (retrodeck:write-chiptune-audio "short")))
-(let ((ready (retrodeck:make-chiptune-render-state
-              :ready t :title "crazy" :system "ogg vorbis"
-              :position 25000 :length 50000 :file-index 1 :file-count 3
-              :track-index 0 :track-count 1 :volume 42)))
-  (setf *canvas-fill-calls* nil *canvas-glyph-calls* nil)
-  (assert (retrodeck:render-chiptune ready))
-  (assert (and (zerop *canvas-clear-color*)
-               (member '(16 16 1248 448 0) *canvas-fill-calls* :test #'equal)
-               (member '(208 184 864 88 0) *canvas-fill-calls* :test #'equal)
-               (member '(208 226 864 2 9737620) *canvas-fill-calls* :test #'equal)
-               (member '(208 284 432 6 8629891) *canvas-fill-calls* :test #'equal)
-               (member '(582 116 67 4 16777215) *canvas-glyph-calls*
-                       :test #'equal)
-               (member '(32 44 86 2 8629891) *canvas-glyph-calls*
-                       :test #'equal))))
-(let ((visual (make-array 1470 :element-type '(signed-byte 16)
-                          :initial-element 0)))
-  (setf (aref visual 0) 32767 (aref visual 1) 32767
-        (aref visual 1466) -32768 (aref visual 1467) -32768
-        *canvas-fill-calls* nil)
-  (assert (retrodeck:render-chiptune
-           (retrodeck:make-chiptune-render-state
-            :ready t :title "x" :system "ogg" :file-count 1 :track-count 1
-            :visual visual)))
-  (assert (and (member '(208 186 2 40 16739616) *canvas-fill-calls*
-                       :test #'equal)
-               (member '(1070 228 2 40 16739616) *canvas-fill-calls*
-                       :test #'equal))))
-(dolist (fixture '((:loop-one t (330 398 49 2 16777215))
-                   (:shuffle nil (310 394 2 2 16777215))))
-  (destructuring-bind (mode paused expected) fixture
-    (setf *canvas-fill-calls* nil *canvas-glyph-calls* nil)
-    (assert (retrodeck:render-chiptune
-             (retrodeck:make-chiptune-render-state
-              :ready nil :playback-mode mode :paused paused :volume 0)))
-    (assert (member expected (if (eq mode :loop-one)
-                                 *canvas-glyph-calls* *canvas-fill-calls*)
-                    :test #'equal))))
-(dolist (function
-         (list (lambda () (retrodeck:make-chiptune-render-state
-                           :ready t :file-count 0 :track-count 1))
-               (lambda () (retrodeck:make-chiptune-render-state
-                           :ready nil :playback-mode :random))
-               (lambda () (retrodeck:make-chiptune-render-state
-                           :ready nil :visual #(0)))
-               (lambda () (retrodeck:chiptune-touch-action 1.5 2))))
-  (assert-signals error (funcall function)))
-
 (assert (string= (retrodeck:display-ascii "AČz") "A?z"))
 (labels ((bytes (&rest values)
            (map 'string #'code-char values)))
@@ -1200,118 +919,6 @@
                    (94 42 6 116 #xffffff))))
   (assert (equal (nreverse *canvas-glyph-calls*)
                  '((65 51 66 14 #xffffff)))))
-
-(dolist (fixture '((nil nil nil) ("widget" nil nil)
-                   ("legacy" "wayland-1" nil) (nil "wayland-1" nil)
-                   ("widget" "wayland-1" t) ("widget" "" nil)))
-  (destructuring-bind (presentation display expected) fixture
-    (assert (eq (retrodeck::chiptune-wayland-requested-p
-                 presentation display) expected))))
-
-(defun exercise-chiptune-runtime
-    (controls touches times
-     &key (entries '(("crazy.ogg" 0 100)))
-       (open-result '("" "artist" "" "" 50851 1))
-       step-result (iterations 1) volume-state (audio-open 1)
-       (write-status 1))
-  (let* ((runtime (retrodeck:make-chiptune-runtime
-                   :directory "/tunes"
-                   :presentation nil :wayland-display nil
-                   :volume-state (or volume-state "")
-                   :clock (lambda () (or (pop times) 999))))
-         (*list-directory-result* entries)
-         (*list-directory-path* nil)
-         (*chiptune-open-result* open-result)
-         (*chiptune-open-path* nil)
-         (*chiptune-start-track-index* nil)
-         (*chiptune-step-result* step-result)
-         (*chiptune-audio-open-status* audio-open)
-         (*chiptune-audio-open-volume* nil)
-         (*chiptune-audio-write-status* write-status)
-         (*chiptune-audio-write-pcm* nil)
-         (*chiptune-rewind-status* 1)
-         (*chiptune-rewind-count* 0)
-         (*chiptune-close-status* 1)
-         (*chiptune-audio-close-status* 1)
-         (*input-poll-result* (list 1 (length controls) (length touches) 0 1 0 0))
-         (*canvas-clear-status* 1)
-         (*canvas-glyph-status* 1)
-         (*canvas-fill-status* 1)
-         (*state-file-write-arguments* nil))
-    (with-runtime-device-fixture (:controls controls)
-      (let ((*error-output* (make-broadcast-stream))
-            (*evdev-touch-queue* touches))
-        (let ((state (retrodeck:chiptune-runtime-initialize runtime))
-              (traces nil))
-          (dotimes (index iterations)
-            (when (getf runtime :running)
-              (multiple-value-bind (next ignored trace)
-                  (retrodeck:chiptune-runtime-run-iteration state runtime)
-                (declare (ignore ignored))
-                (setf state next)
-                (push trace traces))))
-          (let ((summary (list :volume (getf runtime :volume)
-                               :running (getf runtime :running)
-                               :blocks (getf runtime :chiptune-blocks)
-                               :open-path *chiptune-open-path*
-                               :audio-volume *chiptune-audio-open-volume*
-                               :written *chiptune-audio-write-pcm*
-                               :state-write *state-file-write-arguments*
-                               :start-track *chiptune-start-track-index*
-                               :rewinds *chiptune-rewind-count*)))
-            (retrodeck:chiptune-runtime-shutdown runtime)
-            (values state (nreverse traces) summary)))))))
-
-(let ((pcm (make-string 2940 :initial-element (code-char 0))))
-  ;; One happy iteration: scan, open, decode a block, feed audio, present.
-  (multiple-value-bind (state traces summary)
-      (exercise-chiptune-runtime nil nil (list 1 2 3)
-                                 :step-result (list pcm 0 735 66))
-    (assert-plist-values state '(:file-index 0 :position 66 :paused nil
-                                 :playback-mode :loop-all))
-    (assert (equal (getf state :files) '("/tunes/crazy.ogg")))
-    (assert (string= (getf (getf state :metadata) :title) "crazy"))
-    (assert (string= (getf state :visual) pcm))
-    (assert (equal (first traces)
-                   '((:generate :now 3 :decoded t) (:render) (:present)
-                     (:poll :timeout 0 :controls 0 :touches 0))))
-    (assert-plist-values summary '(:running t :blocks 1 :audio-volume 42))
-    (assert (string= (getf summary :written) pcm)))
-  ;; An empty library renders the guidance screen and close exits.
-  (multiple-value-bind (state traces summary)
-      (exercise-chiptune-runtime nil '((1130 30 1 1 0)) (list 1 2 3)
-                                 :entries nil)
-    (assert (null (getf state :metadata)))
-    (assert (string= (getf state :status) "ADD MUSIC TO /tunes"))
-    (assert (equal (first (last (first traces))) '(:commands (:back))))
-    (assert-plist-values summary '(:running nil :blocks 0 :open-path nil)))
-  ;; Gamepad edges drive navigation, volume, and persistence.
-  (multiple-value-bind (state traces summary)
-      (exercise-chiptune-runtime '((1 #x200 0) (1 #x400 0)) nil (list 1 2 3)
-                                 :entries '(("a.ogg" 0 10) ("b.ogg" 0 10))
-                                 :volume-state "/tmp/volume.state")
-    (declare (ignore traces))
-    (assert-plist-values state '(:file-index 1))
-    (assert-plist-values summary '(:volume 47 :audio-volume 47))
-    (assert (equal (getf summary :open-path) "/tunes/b.ogg"))
-    (assert (equal (getf summary :state-write)
-                   (list "/tmp/volume.state" (format nil "47~%")))))
-  ;; Touch cycles the playback mode; loop-one track ends rewind in place.
-  (multiple-value-bind (state traces summary)
-      (exercise-chiptune-runtime nil '((250 380 1 1 0)) (list 1 2 3)
-                                 :step-result (list pcm 0 735 66))
-    (declare (ignore traces summary))
-    (assert-plist-values state '(:playback-mode :loop-one)))
-  (multiple-value-bind (state traces summary)
-      (exercise-chiptune-runtime nil nil (list 1 2 3 4)
-                                 :entries '(("a.ogg" 0 10) ("b.ogg" 0 10))
-                                 :step-result (list pcm 1 735 50851)
-                                 :iterations 1)
-    (declare (ignore traces))
-    ;; loop-all with a single-track file advances to the next file.
-    (assert-plist-values state '(:file-index 1))
-    (assert (equal (getf summary :open-path) "/tunes/b.ogg"))
-    (assert-plist-values summary '(:rewinds 0))))
 
 (let* ((credits-path (test-menu-path "credits.tsv"))
        (*regular-file-result* (test-file-string credits-path))

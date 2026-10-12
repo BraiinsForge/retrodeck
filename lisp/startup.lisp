@@ -10,14 +10,6 @@
            #:canvas-draw-waveform
            #:canvas-fill-rect
            #:canvas-rgb565-hash-words
-           #:chiptune-audio-close
-           #:chiptune-audio-open
-           #:chiptune-audio-write
-           #:chiptune-close
-           #:chiptune-open
-           #:chiptune-rewind
-           #:chiptune-start-track
-           #:chiptune-step
            #:evdev-controls-close
            #:evdev-controls-dispatch
            #:evdev-controls-scan
@@ -121,44 +113,7 @@
                 #:wayland-present-solid
                 #:wayland-shutdown-p
                 #:wayland-size)
-  (:export #:*chiptune-colors*
-           #:*chiptune-controls*
-           #:*chiptune-extensions*
-           #:*chiptune-gamepad-controls*
-           #:*chiptune-maximum-depth*
-           #:*chiptune-maximum-file-size*
-           #:*chiptune-maximum-files*
-           #:chiptune-advance-plan
-           #:chiptune-base-name
-           #:chiptune-candidate-rehearse
-           #:chiptune-control-commands
-           #:chiptune-display-text
-           #:chiptune-file-accepted-p
-           #:chiptune-file-candidates
-           #:chiptune-format-time
-           #:chiptune-next-playback-mode
-           #:chiptune-next-random
-           #:chiptune-runtime-initialize
-           #:chiptune-runtime-run-iteration
-           #:chiptune-runtime-shutdown
-           #:chiptune-shuffle-candidates
-           #:chiptune-touch-action
-           #:chiptune-touch-command
-           #:chiptune-volume-step
-           #:close-chiptune-audio
-           #:close-chiptune-file
-           #:make-chiptune-player-state
-           #:make-chiptune-render-state
-           #:make-chiptune-runtime
-           #:open-chiptune-audio
-           #:open-chiptune-file
-           #:render-chiptune
-           #:rewind-chiptune-file
-           #:scan-chiptune-files
-           #:start-chiptune-track
-           #:step-chiptune-file
-           #:write-chiptune-audio
-           #:*dashboard-version-label*
+  (:export #:*dashboard-version-label*
            #:dashboard-directory-path
            #:*dashboard-brightness-minimum*
            #:*dashboard-brightness-step*
@@ -293,7 +248,6 @@
            #:main-route
            #:*main-routes*
            #:native-program-arguments
-           #:run-chiptune-main
            #:run-dashboard-main
            #:dashboard-main-options
            #:*dashboard-main-usage*
@@ -764,7 +718,6 @@
       (main-route (native-program-arguments))
     (case route
       (:dashboard (run-dashboard-main arguments))
-      (:chiptunes (run-chiptune-main arguments))
       (otherwise
        (format t "retrodeck: Common Lisp startup loaded~%")
        (finish-output)
@@ -781,7 +734,6 @@
     (load (merge-pathnames "wifi.lisp" startup) :verbose nil :print nil)
     (load (merge-pathnames "credits.lisp" startup) :verbose nil :print nil)
     (load (merge-pathnames "dashboard.lisp" startup) :verbose nil :print nil)
-    (load (merge-pathnames "chiptune.lisp" startup) :verbose nil :print nil)
     (let ((local (merge-pathnames "local.lisp" startup)))
       (when (probe-file local)
         (load local :verbose nil :print nil)))))
