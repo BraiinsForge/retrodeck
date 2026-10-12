@@ -669,9 +669,26 @@ mod tests {
     const HELPER_SIGTERM: HelperOutcome = (Complete, None, Some(libc::SIGTERM), false);
     const HELPER_INPUT_EXIT_7: HelperOutcome = (Input, Some(7), None, true);
 
+    fn run_script_fixture(path: &Path, input: &[u8]) -> HelperResult {
+        let busy = io::Error::from_raw_os_error(libc::ETXTBSY).to_string();
+        for attempt in 0..5 {
+            let result = run_helper(path, input);
+            // A parallel fork can briefly inherit the temporary script's writer
+            // descriptor before exec. Retry only that transient start failure.
+            if result.phase != Start
+                || result.error.as_deref() != Some(busy.as_str())
+                || attempt == 4
+            {
+                return result;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        unreachable!()
+    }
+
     fn assert_script(body: &str, input: &[u8], expected: HelperOutcome) {
         let helper = helper_script(body);
-        let result = run_helper(&helper, input);
+        let result = run_script_fixture(&helper, input);
         std::fs::remove_file(helper).unwrap();
         assert_eq!(result.phase, expected.0, "{result:?}");
         assert_eq!(result.exit_code, expected.1);
@@ -685,7 +702,7 @@ mod tests {
         let body = format!("cat > '{}'\n", capture.display());
         let helper = helper_script(&body);
         let input = b"test net\nsecret!9\n";
-        let result = run_helper(&helper, input);
+        let result = run_script_fixture(&helper, input);
         assert_eq!(result.phase, Complete, "{result:?}");
         assert_eq!(result.exit_code, Some(0));
         assert_eq!(std::fs::read(&capture).unwrap(), input);
