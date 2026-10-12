@@ -5,6 +5,7 @@ pub mod chiptune;
 pub mod chiptune_ui;
 pub mod control_file;
 pub mod controls;
+pub mod dashboard;
 pub mod doom_input;
 pub mod fbdev;
 pub mod game_audio;

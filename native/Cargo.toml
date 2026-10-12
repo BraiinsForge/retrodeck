@@ -45,6 +45,11 @@ path = "src/bin/chiptune-deck.rs"
 test = false
 
 [[bin]]
+name = "deck-menu"
+path = "src/bin/deck-menu.rs"
+test = false
+
+[[bin]]
 name = "rom-uploader"
 path = "src/bin/rom-uploader.rs"
 test = false
