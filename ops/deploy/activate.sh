@@ -67,7 +67,7 @@ for executable in \
   }
 done
 for executable in \
-  retrodeck-native menu/deck-menu menu/deck-menu-launcher menu/fetch-covers \
+  uploader/rom-uploader menu/deck-menu menu/deck-menu-launcher menu/fetch-covers \
   menu/compile-catalog \
   terminal/fbterm terminal/loadkeys terminal/retro-terminal terminal/rlwrap \
   langs/lua langs/python langs/chibi/chibi-scheme ecl/bin/ecl.bin; do
@@ -115,17 +115,6 @@ done
   echo "Staged dashboard palette is empty" >&2
   exit 1
 }
-[ -s "$stage/nes-deck/lisp/startup.lisp" ] && \
-  [ -s "$stage/nes-deck/lisp/ui.lisp" ] && \
-  [ -s "$stage/nes-deck/lisp/policy.lisp" ] && \
-  [ -s "$stage/nes-deck/lisp/process.lisp" ] && \
-  [ -s "$stage/nes-deck/lisp/settings.lisp" ] && \
-  [ -s "$stage/nes-deck/lisp/wifi.lisp" ] && \
-  [ -s "$stage/nes-deck/lisp/credits.lisp" ] && \
-  [ -s "$stage/nes-deck/lisp/dashboard.lisp" ] || {
-  echo "Staged Common Lisp dashboard files are incomplete" >&2
-  exit 1
-}
 [ -s "$stage/nes-deck/licenses/runtime/Wayland-COPYING" ] && \
   [ -s "$stage/nes-deck/licenses/ecl-deck/ECL-LICENSE" ] || {
   echo "Staged third-party license archive is incomplete" >&2
@@ -155,8 +144,13 @@ scheme_result=$(
   echo "Staged Scheme runtime failed its smoke test" >&2
   exit 1
 }
-ECLDIR="$stage/nes-deck/ecl/lib/ecl/" \
-  "$stage/nes-deck/retrodeck-native" "$stage/nes-deck/lisp/startup.lisp"
+ecl_result=$(ECLDIR="$stage/nes-deck/ecl/lib/ecl/" \
+  "$stage/nes-deck/ecl/bin/ecl.bin" -norc \
+  -eval '(format t "ecl-repl-smoke: ~D~%" (* 6 7))' -eval '(ext:quit 0)')
+printf '%s\n' "$ecl_result" | grep -q 'ecl-repl-smoke: 42' || {
+  echo "Staged Common Lisp interpreter failed its smoke test" >&2
+  exit 1
+}
 ten_seconds_status=0
 ten_seconds_output=$("$stage/nes-deck/ten-seconds-deck" extra 2>&1) || \
   ten_seconds_status=$?
@@ -187,11 +181,11 @@ uploader_deploy_config=$stage/nes-deck/uploader/password.conf
   echo "Staged uploader password configuration is missing or unsafe" >&2
   exit 1
 }
-"$stage/nes-deck/retrodeck-native" --check-uploader-password-config \
+"$stage/nes-deck/uploader/rom-uploader" --check-uploader-password-config \
   "$uploader_deploy_config"
-for source in run.lisp uploader.lisp uploader-paper.css uploader-palette.js; do
+for source in uploader-paper.css uploader-palette.js; do
   [ -f "$stage/nes-deck/uploader/$source" ] || {
-    echo "Staged uploader source is missing: $source" >&2
+    echo "Staged uploader asset is missing: $source" >&2
     exit 1
   }
 done
@@ -225,40 +219,20 @@ rm -f "$base/ten-seconds-deck"
 cp -p "$stage/nes-deck/ten-seconds-deck" "$base/ten-seconds-deck"
 rm -f "$base/chiptune-deck"
 cp -p "$stage/nes-deck/chiptune-deck" "$base/chiptune-deck"
-cp -p "$stage/nes-deck/retrodeck-native" "$base/retrodeck-native"
-mkdir -p "$base/lisp"
-cp -p "$stage/nes-deck/lisp/startup.lisp" "$base/lisp/startup.lisp"
-cp -p "$stage/nes-deck/lisp/ui.lisp" "$base/lisp/ui.lisp"
-rm -f "$base/lisp/timer.lisp"
-cp -p "$stage/nes-deck/lisp/policy.lisp" "$base/lisp/policy.lisp"
-rm -f "$base/lisp/chiptune.lisp"
-cp -p "$stage/nes-deck/lisp/process.lisp" "$base/lisp/process.lisp"
-cp -p "$stage/nes-deck/lisp/settings.lisp" "$base/lisp/settings.lisp"
-cp -p "$stage/nes-deck/lisp/wifi.lisp" "$base/lisp/wifi.lisp"
-cp -p "$stage/nes-deck/lisp/credits.lisp" "$base/lisp/credits.lisp"
-cp -p "$stage/nes-deck/lisp/dashboard.lisp" "$base/lisp/dashboard.lisp"
-chmod 0700 "$base/retrodeck-native" "$base/lisp"
-chmod 0600 "$base/lisp/startup.lisp" "$base/lisp/ui.lisp" \
-  "$base/lisp/policy.lisp" \
-  "$base/lisp/process.lisp" \
-  "$base/lisp/settings.lisp" "$base/lisp/wifi.lisp" \
-  "$base/lisp/credits.lisp" \
-  "$base/lisp/dashboard.lisp"
-cp -p "$stage/nes-deck/uploader/run.lisp" \
-  "$stage/nes-deck/uploader/uploader.lisp" \
+rm -rf "$base/lisp" "$base/uploader/lisp-libraries"
+rm -f "$base/retrodeck-native" "$base/uploader/run.lisp" \
+  "$base/uploader/uploader.lisp" "$base/uploader/address.conf"
+cp -p "$stage/nes-deck/uploader/rom-uploader" \
   "$stage/nes-deck/uploader/uploader-paper.css" \
   "$stage/nes-deck/uploader/uploader-palette.js" "$base/uploader/"
-rm -rf "$base/uploader/lisp-libraries.new"
-cp -Rp "$stage/nes-deck/uploader/lisp-libraries" \
-  "$base/uploader/lisp-libraries.new"
-rm -rf "$base/uploader/lisp-libraries"
-mv "$base/uploader/lisp-libraries.new" "$base/uploader/lisp-libraries"
-rm -f "$base/uploader/rom-uploader" "$base/uploader/address.conf"
-chmod 0700 "$base/uploader" "$base/uploads"
+chmod 0700 "$base/uploader" "$base/uploader/rom-uploader" "$base/uploads"
+chmod 0600 "$base/uploader/uploader-paper.css" \
+  "$base/uploader/uploader-palette.js"
 cp -p "$uploader_deploy_config" "$base/uploader/password.conf"
 chmod 0600 "$base/uploader/password.conf"
 
 mkdir -p "$base/menu" "$base/terminal" "$base/licenses"
+rm -f "$base/menu/deck-menu"
 cp -Rp "$stage/nes-deck/menu/." "$base/menu/"
 rm -f "$base/menu/compile-catalog.lisp"
 rm -rf "$base/menu/settings-icons"

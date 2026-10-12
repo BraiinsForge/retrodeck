@@ -88,6 +88,9 @@ build and test commands are in [BUILD.md](BUILD.md).
 
 ## Included systems and programs
 
+The dashboard and ROM upload service are standalone Rust applications. Common
+Lisp runs as a separate ECL language app, alongside Lua, Python, and Scheme.
+
 | Dashboard section | Runtime | Persistent content |
 | --- | --- | --- |
 | NES | FCEUmm | `/mnt/data/roms/nes` |

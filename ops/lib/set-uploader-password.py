@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write the uploader password.conf verified by retrodeck-native.
+"""Write the uploader password.conf verified by rom-uploader.
 
 Reads one password line from stdin and writes the PBKDF2-HMAC-SHA256
 configuration to the path given as the only argument.

@@ -64,9 +64,10 @@ verify_package() {
   echo "$attribute: OK"
 }
 
-verify_package retrodeck-native bin/retrodeck-native
-build_flake .#checks.x86_64-linux.retrodeck-native-smoke >/dev/null
-echo "retrodeck-native-smoke: OK"
+verify_package deck-menu bin/deck-menu
+verify_package rom-uploader bin/rom-uploader
+build_flake .#checks.x86_64-linux.deck-menu-smoke >/dev/null
+echo "deck-menu-smoke: OK"
 build_flake .#checks.x86_64-linux.uploader-password-smoke >/dev/null
 echo "uploader-password-smoke: OK"
 verify_package compile-catalog bin/compile-catalog
@@ -90,12 +91,6 @@ verify_package chibi-deck bin/chibi-scheme
 verify_package ecl-arm-network bin/ecl.bin
 build_flake .#checks.x86_64-linux.ecl-arm-network-smoke >/dev/null
 echo "ecl-arm-network-smoke: OK"
-verify_package uploader-lisp-libraries
-build_flake .#checks.x86_64-linux.uploader-lisp-policy >/dev/null
-echo "uploader-lisp-policy: OK"
-build_flake .#checks.x86_64-linux.uploader-lisp-http-smoke >/dev/null
-echo "uploader-lisp-http-smoke: OK"
-
 runtime_licenses=$(build_flake .#runtime-licenses)
 verify_closure_free runtime-licenses "$runtime_licenses"
 for notice in Wayland-COPYING Rust-crates-NOTICES.txt; do

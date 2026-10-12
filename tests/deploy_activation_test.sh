@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# Match the deployment scripts literally, including their variable references.
+# shellcheck disable=SC2016
+
 set -euo pipefail
 
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
@@ -36,22 +39,6 @@ grep -Fq "[[ -f \$activate_script && ! -L \$activate_script ]]" "$deployer" ||
   fail 'deployer does not validate the activation script'
 grep -Fq 'cp "$chiptune/bin/chiptune-deck" "$payload/nes-deck/chiptune-deck"' \
   "$deployer" || fail 'deployer does not stage the chiptune executable'
-grep -Fq 'lisp/dashboard.lisp "$payload/nes-deck/lisp/"' "$deployer" ||
-  fail 'deployer does not stage the Lisp dashboard'
-grep -Fq '[ -s "$stage/nes-deck/lisp/ui.lisp" ]' "$activation" ||
-  fail 'activation does not validate the staged editable Lisp UI'
-grep -Fq '[ -s "$stage/nes-deck/lisp/policy.lisp" ]' "$activation" ||
-  fail 'activation does not validate the staged editable Lisp policy'
-grep -Fq '[ -s "$stage/nes-deck/lisp/process.lisp" ]' "$activation" ||
-  fail 'activation does not validate the staged editable Lisp process policy'
-grep -Fq '[ -s "$stage/nes-deck/lisp/settings.lisp" ]' "$activation" ||
-  fail 'activation does not validate the staged editable Lisp settings'
-grep -Fq '[ -s "$stage/nes-deck/lisp/wifi.lisp" ]' "$activation" ||
-  fail 'activation does not validate the staged editable Lisp Wi-Fi editor'
-grep -Fq '[ -s "$stage/nes-deck/lisp/credits.lisp" ]' "$activation" ||
-  fail 'activation does not validate the staged editable Lisp credits'
-grep -Fq '[ -s "$stage/nes-deck/lisp/dashboard.lisp" ]' "$activation" ||
-  fail 'activation does not validate the staged Lisp dashboard'
 grep -Fq '"$stage/nes-deck/ten-seconds-deck" extra' "$activation" ||
   fail 'activation does not preflight the staged 10 Seconds executable'
 grep -Fq '[ "$ten_seconds_output" = "usage: ten-seconds-deck" ]' \
@@ -60,22 +47,8 @@ grep -Fq '"$stage/nes-deck/chiptune-deck" extra extra' "$activation" ||
   fail 'activation does not preflight the staged chiptune executable'
 grep -Fq '[ "$chiptune_output" = "usage: chiptune-deck CHIPTUNE_DIRECTORY" ]' \
   "$activation" || fail 'activation does not check the chiptune usage result'
-grep -Fq 'cp -p "$stage/nes-deck/lisp/ui.lisp" "$base/lisp/ui.lisp"' \
-  "$activation" || fail 'activation does not install the editable Lisp UI'
-grep -Fq 'cp -p "$stage/nes-deck/lisp/policy.lisp" "$base/lisp/policy.lisp"' \
-  "$activation" || fail 'activation does not install the editable Lisp policy'
 grep -Fq 'cp -p "$stage/nes-deck/chiptune-deck" "$base/chiptune-deck"' \
   "$activation" || fail 'activation does not install the chiptune executable'
-grep -Fq 'cp -p "$stage/nes-deck/lisp/process.lisp" "$base/lisp/process.lisp"' \
-  "$activation" || fail 'activation does not install the editable Lisp process policy'
-grep -Fq 'cp -p "$stage/nes-deck/lisp/settings.lisp" "$base/lisp/settings.lisp"' \
-  "$activation" || fail 'activation does not install the editable Lisp settings'
-grep -Fq 'cp -p "$stage/nes-deck/lisp/wifi.lisp" "$base/lisp/wifi.lisp"' \
-  "$activation" || fail 'activation does not install the editable Lisp Wi-Fi editor'
-grep -Fq 'cp -p "$stage/nes-deck/lisp/credits.lisp" "$base/lisp/credits.lisp"' \
-  "$activation" || fail 'activation does not install the editable Lisp credits'
-grep -Fq 'cp -p "$stage/nes-deck/lisp/dashboard.lisp" "$base/lisp/dashboard.lisp"' \
-  "$activation" || fail 'activation does not install the Lisp dashboard'
 
 grep -Fq 'doom=$(build_flake .#doom-deck)' "$deployer" ||
   fail 'deployer does not build the DOOM host'
@@ -110,8 +83,6 @@ grep -Fq 'cp -p "$stage/nes-deck/tamagotchi-deck" "$base/tamagotchi-deck"' \
 # that directory wholesale on every deployment.
 grep -Fq '/mnt/data/doom' "$activation" ||
   fail 'activation does not create the persistent DOOM save directory'
-grep -Fq 'RETRO_DECK_DOOM_STATE' "$repo_root/lisp/policy.lisp" ||
-  fail 'policy does not point DOOM at a persistent save directory'
 grep -Fq '"$base/games.new/"' "$activation" ||
   fail 'activation no longer replaces the games directory; recheck DOOM saves'
 

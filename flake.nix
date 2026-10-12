@@ -56,13 +56,8 @@
       pkgs = nixpkgs.legacyPackages.${system};
       pkgsCross = pkgs.pkgsCross.armv7l-hf-multiplatform;
       staticCross = pkgs.pkgsCross.armv7l-hf-multiplatform.pkgsStatic;
-      eclArm = import ./nix/ecl-arm-static.nix { };
-      retrodeckLispImage = import ./nix/lisp-image.nix { lispDir = ./lisp; };
       eclArmNetwork = import ./nix/ecl-arm-static.nix {
         networkSupport = true;
-      };
-      uploaderLispLibraries = import ./nix/uploader-lisp-libraries.nix {
-        inherit pkgs;
       };
       rustToolchain = fenix.packages.${system}.combine [
         fenix.packages.${system}.stable.cargo
@@ -562,70 +557,14 @@ PATCH
     {
       packages.${system} = {
         ecl-arm-network = eclArmNetwork;
-        retrodeck-lisp-image = retrodeckLispImage;
-        uploader-lisp-libraries = uploaderLispLibraries;
-
-        retrodeck-native = pkgs.stdenvNoCC.mkDerivation {
-          pname = "retrodeck-native";
-          version = "1.0.0";
-
-          src = nativeSources;
-          cargoDeps = nativeCargoDeps;
-          cargoRoot = "native";
-          nativeBuildInputs = [
-            rustToolchain
-            pkgs.rustPlatform.cargoSetupHook
-            pkgsCross.stdenv.cc
-            pkgs.nukeReferences
-          ];
-          buildInputs = [
-            pkgsCross.glibc.static
-            staticCross.libvorbis
-            gmeStaticCross
-          ];
-          allowedReferences = [ ];
-
-          buildPhase = ''
-            runHook preBuild
-            cd native
-            export CARGO_HOME=$TMPDIR/cargo
-            export CARGO_BUILD_TARGET=armv7-unknown-linux-gnueabihf
-            export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER="${pkgsCross.stdenv.cc}/bin/${pkgsCross.stdenv.cc.targetPrefix}cc"
-            export RUSTFLAGS="\
-              -C target-feature=+crt-static,+v7,+hwdiv,+hwdiv-arm \
-              -C link-arg=-static \
-              -L native=${retrodeckLispImage}/lib \
-              -L native=${eclArm.dev}/lib \
-              -L native=${pkgsCross.glibc.static}/lib \
-              -l static=retrodeck-lisp \
-              -l static=ecl \
-              -l static=eclgc \
-              -l static=gmp \
-              -l dl \
-              -l m"
-            # Scoped to one binary on purpose: retro-host and doom-host each
-            # need a statically linked engine that this derivation does not
-            # provide, so an unscoped build would try to link them and fail.
-            cargo build --release --locked --offline --features lisp-image \
-              --bin retrodeck-native
-            runHook postBuild
-          '';
-
-          installPhase = ''
-            runHook preInstall
-            install -Dm755 \
-              target/armv7-unknown-linux-gnueabihf/release/retrodeck-native \
-              $out/bin/retrodeck-native
-            nuke-refs $out/bin/retrodeck-native
-            runHook postInstall
-          '';
-
-          meta = {
-            description = "Rust mechanism host for the RetroDeck Lisp orchestrator";
-            platforms = [ system ];
-          };
+        deck-menu = staticRustTool {
+          name = "deck-menu";
+          description = "Standalone Retro Deck dashboard";
         };
-
+        rom-uploader = staticRustTool {
+          name = "rom-uploader";
+          description = "Standalone Retro Deck upload service";
+        };
         compile-catalog = staticRustTool {
           name = "compile-catalog";
           description = "Bounded non-evaluating RetroDeck catalog compiler";
@@ -1072,117 +1011,6 @@ PATCH
           touch $out
         '';
 
-        retrodeck-native-smoke = pkgs.runCommand "retrodeck-native-smoke" { } ''
-          cp ${./lisp/startup.lisp} startup.lisp
-          cp ${./lisp/ui.lisp} ui.lisp
-          cp ${./lisp/policy.lisp} policy.lisp
-          cp ${./lisp/process.lisp} process.lisp
-          cp ${./lisp/settings.lisp} settings.lisp
-          cp ${./lisp/wifi.lisp} wifi.lisp
-          cp ${./lisp/credits.lisp} credits.lisp
-          cp ${./lisp/dashboard.lisp} dashboard.lisp
-          cp ${./assets/settings-cog/gear-knekko-09.png} settings-icon.png
-          cat > terminal-fixture <<'EOF'
-          #!${pkgs.runtimeShell}
-          [ "$#" -eq 1 ] || exit 90
-          [ "$RETRO_DECK_KEYMAP" = cz ] || exit 92
-          case "$1" in
-            shell) exit 0 ;;
-            failure) exit 7 ;;
-            signal) kill -TERM "$$" ;;
-            *) exit 91 ;;
-          esac
-          EOF
-          chmod +x terminal-fixture
-          cat > child-fixture <<'EOF'
-          #!${pkgs.runtimeShell}
-          [ "$#" -eq 2 ] || exit 90
-          [ "$2" = "second argument" ] || exit 91
-          [ "$RETRODECK_ALPHA" = "alpha value" ] || exit 92
-          [ "$RETRODECK_BETA" = beta ] || exit 93
-          case "$1" in
-            clean) exit 0 ;;
-            failure) exit 7 ;;
-            signal) kill -TERM "$$" ;;
-            *) exit 94 ;;
-          esac
-          EOF
-          cat > reboot-fixture <<'EOF'
-          #!${pkgs.runtimeShell}
-          [ "$#" -eq 0 ] || exit 90
-          exit 0
-          EOF
-          chmod +x child-fixture reboot-fixture
-          cat > helper-fixture <<'EOF'
-          #!${pkgs.runtimeShell}
-          [ "$#" -eq 0 ] || exit 90
-          cat > helper-capture
-          EOF
-          cat > helper-failure-fixture <<'EOF'
-          #!${pkgs.runtimeShell}
-          [ "$#" -eq 0 ] || exit 90
-          cat >/dev/null
-          exit 7
-          EOF
-          cat > helper-signal-fixture <<'EOF'
-          #!${pkgs.runtimeShell}
-          [ "$#" -eq 0 ] || exit 90
-          cat >/dev/null
-          kill -TERM "$$"
-          EOF
-          cat > helper-reject-fixture <<'EOF'
-          #!${pkgs.runtimeShell}
-          [ "$#" -eq 0 ] || exit 90
-          exit 7
-          EOF
-          chmod +x helper-fixture helper-failure-fixture \
-            helper-signal-fixture helper-reject-fixture
-          printf 'CONNECTED\n' > wifi-status
-          rm -f helper-capture state-file state-file.keymap state-file.control \
-            state-file.brightness state-file.brightness-max \
-            state-file.brightness-state
-          printf '12\n' > state-file.control
-          printf '12\n' > state-file.brightness
-          printf '20\n' > state-file.brightness-max
-          printf '%b' 'id\ttitle\tsystem\trom\t#RRGGBB\r\nupload-one\t\0305\0275lu\0305\0245\tgb\t/missing/upload.gb\t#87AFAF\r\n' \
-            > combined-games.tsv
-          printf '%b' 'bad-utf8\t\0300\0257\tnes\t/missing/bad.nes\t#D78787\n' \
-            > invalid-games.tsv
-          substitute ${./tests/native_ecl_smoke.lisp.in} smoke.lisp \
-            --subst-var-by startup "$PWD/startup.lisp" \
-            --subst-var-by state_file "$PWD/state-file" \
-            --subst-var-by wifi_status "$PWD/wifi-status" \
-            --subst-var-by settings_icon "$PWD/settings-icon.png" \
-            --subst-var-by terminal_fixture "$PWD/terminal-fixture" \
-            --subst-var-by child_fixture "$PWD/child-fixture" \
-            --subst-var-by reboot_fixture "$PWD/reboot-fixture" \
-            --subst-var-by helper_fixture "$PWD/helper-fixture" \
-            --subst-var-by helper_failure_fixture "$PWD/helper-failure-fixture" \
-            --subst-var-by helper_signal_fixture "$PWD/helper-signal-fixture" \
-            --subst-var-by helper_reject_fixture "$PWD/helper-reject-fixture" \
-            --subst-var-by helper_capture "$PWD/helper-capture" \
-            --subst-var-by games ${./deploy/menu/games.tsv} \
-            --subst-var-by palette ${./deploy/menu/palette.tsv} \
-            --subst-var-by combined_games "$PWD/combined-games.tsv" \
-            --subst-var-by invalid_games "$PWD/invalid-games.tsv" \
-            --subst-var-by credits ${./deploy/menu/credits.tsv}
-          WAYLAND_DISPLAY=retrodeck-smoke \
-            XDG_RUNTIME_DIR=/tmp \
-            RETRO_DECK_VOLUME_PERCENT=0 \
-            RETRO_DECK_REDUCED_MOTION=1 \
-            ECLDIR=${eclArm}/lib/ecl/ \
-            ${pkgs.qemu-user}/bin/qemu-arm \
-            ${self.packages.${system}.retrodeck-native}/bin/retrodeck-native \
-            smoke.lisp
-          # Without arguments the binary must come up from the compiled-in
-          # Lisp image with no sources on disk at all.
-          ${pkgs.qemu-user}/bin/qemu-arm \
-            ${self.packages.${system}.retrodeck-native}/bin/retrodeck-native \
-            > image.log
-          grep -q "retrodeck: Common Lisp startup loaded" image.log
-          touch $out
-        '';
-
         libretro-host-smoke = pkgs.runCommand "libretro-host-smoke" { } ''
           run() {
             rom=$(basename "$2")
@@ -1246,6 +1074,19 @@ PATCH
           touch $out
         '';
 
+        deck-menu-smoke = pkgs.runCommand "deck-menu-smoke" { } ''
+          menu=${self.packages.${system}.deck-menu}/bin/deck-menu
+          qemu=${pkgs.qemu-user}/bin/qemu-arm
+          $qemu $menu --help > help.log
+          $qemu $menu --validate-palette ${./deploy/menu/palette.tsv}
+          printf 'invalid\n' > invalid.tsv
+          if $qemu $menu --validate-palette invalid.tsv; then
+            echo "dashboard accepted an invalid palette" >&2
+            exit 1
+          fi
+          touch $out
+        '';
+
         uploader-password-smoke = pkgs.runCommand "uploader-password-smoke" { } ''
           cat > password.conf <<'EOF'
           version=1
@@ -1254,8 +1095,10 @@ PATCH
           digest=d43qgN/WlhHSRiEo/5Z7C52SrUrDpGclHZKmaPtBmTo
           EOF
           chmod 600 password.conf
-          helper=${self.packages.${system}.retrodeck-native}/bin/retrodeck-native
+          helper=${self.packages.${system}.rom-uploader}/bin/rom-uploader
           qemu=${pkgs.qemu-user}/bin/qemu-arm
+          $qemu $helper --help > help.log
+          $qemu $helper --check-uploader-password-config password.conf
           printf configured-test-password | $qemu $helper \
             --verify-uploader-password password.conf
           if printf wrong-password | $qemu $helper \
@@ -1280,26 +1123,6 @@ PATCH
               exit 1
             fi
           done
-          touch $out
-        '';
-
-        uploader-lisp-policy = pkgs.runCommand "uploader-lisp-policy" {
-          nativeBuildInputs = [ pkgs.sbcl ];
-        } ''
-          mkdir -p source/{deploy/menu,lisp,tests} home
-          cp ${./deploy/menu/palette.tsv} source/deploy/menu/palette.tsv
-          cp ${./lisp/uploader.lisp} source/lisp/uploader.lisp
-          cp ${./tests/uploader_lisp_test.lisp} source/tests/uploader_lisp_test.lisp
-          cd source
-          HOME=$NIX_BUILD_TOP/home \
-            CL_SOURCE_REGISTRY=${uploaderLispLibraries}/share/common-lisp/source//: \
-            sbcl --noinform --disable-debugger --script tests/uploader_lisp_test.lisp
-          HOME=$NIX_BUILD_TOP/home \
-            XDG_CACHE_HOME=$NIX_BUILD_TOP/home/cache \
-            CL_SOURCE_REGISTRY=${uploaderLispLibraries}/share/common-lisp/source//: \
-            ECLDIR=${eclArmNetwork}/lib/ecl/ \
-            ${pkgs.qemu-user}/bin/qemu-arm ${eclArmNetwork}/bin/ecl.bin \
-            -norc -load tests/uploader_lisp_test.lisp -eval '(ext:quit 0)'
           touch $out
         '';
 
@@ -1336,23 +1159,6 @@ PATCH
           touch $out
         '';
 
-        uploader-lisp-http-smoke = pkgs.runCommand "uploader-lisp-http-smoke" {
-          nativeBuildInputs = [ pkgs.bash pkgs.curl pkgs.sbcl pkgs.zip ];
-        } ''
-          export CL_SOURCE_REGISTRY=${uploaderLispLibraries}/share/common-lisp/source//:
-          export UPLOADER_SOURCE=${./lisp/uploader.lisp}
-          export UPLOADER_SERVER=${./tests/uploader_http_smoke.lisp}
-          export UPLOADER_ASSET_ROOT=${./lisp}
-          export UPLOADER_PALETTE=${./deploy/menu/palette.tsv}
-          export UPLOADER_SHELL=${pkgs.bash}/bin/bash
-          ${pkgs.bash}/bin/bash ${./tests/uploader-http-smoke.sh} host \
-            ${pkgs.sbcl}/bin/sbcl --noinform --disable-debugger --script
-          ECLDIR=${eclArmNetwork}/lib/ecl/ \
-            ${pkgs.bash}/bin/bash ${./tests/uploader-http-smoke.sh} arm-ecl \
-            ${pkgs.qemu-user}/bin/qemu-arm \
-            ${eclArmNetwork}/bin/ecl.bin -norc -load
-          touch $out
-        '';
       };
 
       devShells.${system}.default = pkgs.mkShell {

@@ -1,13 +1,13 @@
 # ROM intake web server
 
-The Common Lisp uploader service (`lisp/uploader.lisp`, one Hunchentoot file)
+The standalone Rust uploader (`native/src/uploader/`, `rom-uploader`)
 accepts owner-supplied ROMs at the Deck's active Wi-Fi or WireGuard IPv4
 address on port 8080. It listens on every IPv4 interface; requests must use an
 IPv4 literal host on port 8080, and form origins must match that exact
-address. The `nes-deck-uploader` init script runs it on the deployed
-network-enabled ECL with `deploy/uploader/run.lisp` as the entry point and
-the bundled `lisp-libraries` source tree on `CL_SOURCE_REGISTRY`. Password
-verification calls `retrodeck-native --verify-uploader-password`;
+address. The `nes-deck-uploader` init script runs
+`/mnt/data/nes-deck/uploader/rom-uploader`. Password configuration checks and
+verification use `rom-uploader --check-uploader-password-config PATH` and
+`rom-uploader --verify-uploader-password PATH` (password on stdin);
 `ops/lib/set-uploader-password.py` writes the matching configuration at
 deployment time.
 
@@ -26,6 +26,7 @@ the dashboard. Existing version-3 overrides remain readable: their colors are
 preserved and their retired settings-icon choice is ignored. Built-in defaults
 remain available when the optional override is malformed.
 
-The Lisp service is authoritative. `tests/uploader_lisp_test.lisp` and
-`tests/uploader-http-smoke.sh` exercise its policy and full HTTP contract on
-host SBCL and on the ARM network ECL under QEMU through the flake checks.
+Run `cargo build --manifest-path native/Cargo.toml --bin rom-uploader`, then
+`tests/uploader-rust-http.sh native/target/debug/rom-uploader` for the HTTP
+contract tests. The ARM/QEMU `uploader-password-smoke` check exercises the
+configuration parser and password verifier.

@@ -15,6 +15,7 @@ Install these files and build outputs without changing their basenames:
 | `credits.tsv` | `/mnt/data/nes-deck/menu/credits.tsv` |
 | `palette.tsv` | `/mnt/data/nes-deck/menu/palette.tsv` |
 | `assets/settings-cog/gear-knekko-09.png` | `/mnt/data/nes-deck/menu/settings-icon.png` |
+| `deck-menu` package: `bin/deck-menu` | `/mnt/data/nes-deck/menu/deck-menu` |
 | `compile-catalog` package: `bin/compile-catalog` | `/mnt/data/nes-deck/menu/compile-catalog` |
 | `deck-menu-launcher` | `/mnt/data/nes-deck/menu/deck-menu-launcher` |
 | `deck-keyboard-quirks` | `/usr/sbin/deck-keyboard-quirks` |
@@ -23,7 +24,7 @@ Install these files and build outputs without changing their basenames:
 | `nes-deck-swap.init` | `/etc/init.d/nes-deck-swap` |
 
 The separate uploader bundle installs `nes-deck-uploader.init` as
-`/etc/init.d/nes-deck-uploader` and the Lisp service sources under
+`/etc/init.d/nes-deck-uploader` and the standalone Rust uploader under
 `/mnt/data/nes-deck/uploader/`.
 
 On a BMC compositor installation, the deployment also installs the Retro Deck
@@ -65,8 +66,7 @@ The launcher also expects:
 - `/mnt/data/chiptunes/` for user and tracked music files
 - `/mnt/data/nes-deck/uploads/games.tsv` for validated web uploads
 
-The launcher exports the exact trailing-slash runtime path
-`ECLDIR=/mnt/data/nes-deck/ecl/lib/ecl/`. It initializes persistent volume at
+The launcher starts the standalone Rust dashboard. It initializes persistent volume at
 `/mnt/data/nes-deck/state/menu-volume.state` to 42, adopts the current display
 backlight in `/mnt/data/nes-deck/state/menu-brightness.state`, and initializes
 terminal layout at `/mnt/data/nes-deck/state/terminal-keymap.state` to `us`.

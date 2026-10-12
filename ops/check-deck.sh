@@ -80,18 +80,13 @@ else
   failures=$((failures + 1))
 fi
 
-if [ -s /mnt/data/nes-deck/lisp/startup.lisp ] &&
-   [ -s /mnt/data/nes-deck/lisp/ui.lisp ] &&
-   [ -s /mnt/data/nes-deck/lisp/policy.lisp ] &&
+if [ -x /mnt/data/nes-deck/menu/deck-menu ] &&
+   [ -x /mnt/data/nes-deck/uploader/rom-uploader ] &&
    [ -x /mnt/data/nes-deck/chiptune-deck ] &&
-   [ -s /mnt/data/nes-deck/lisp/process.lisp ] &&
-   [ -s /mnt/data/nes-deck/lisp/settings.lisp ] &&
-   [ -s /mnt/data/nes-deck/lisp/wifi.lisp ] &&
-   [ -s /mnt/data/nes-deck/lisp/credits.lisp ] &&
-   [ -s /mnt/data/nes-deck/lisp/dashboard.lisp ]; then
-  report LISP-POLICY 'startup, UI, policy, process, settings, Wi-Fi, credits, dashboard, and chiptune executable installed'
+   [ -x /mnt/data/nes-deck/ecl/bin/ecl.bin ]; then
+  report RUNTIMES 'dashboard, uploader, chiptunes, and Lisp interpreter installed'
 else
-  report LISP-POLICY 'COMMON LISP DASHBOARD FILE MISSING'
+  report RUNTIMES 'APPLICATION RUNTIME MISSING'
   failures=$((failures + 1))
 fi
 
@@ -114,8 +109,7 @@ else
 fi
 
 require_process DASHBOARD deck-menu
-# The Lisp uploader runs as the network ECL binary; probe its HTTP port
-# instead of a process name.
+# Probe the uploader's HTTP endpoint, not just its process.
 if wget -q -O /dev/null -T 5 http://127.0.0.1:8080/ 2>/dev/null; then
   report UPLOADER 'running (HTTP 8080)'
 else

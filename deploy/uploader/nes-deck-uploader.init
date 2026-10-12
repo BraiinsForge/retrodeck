@@ -1,6 +1,6 @@
 #!/bin/sh /etc/rc.common
 
-# Passworded ROM intake on every IPv4 interface, served by the Lisp uploader.
+# Passworded ROM intake on every IPv4 interface.
 
 # rc.common consumes these declarations after sourcing this file.
 # shellcheck disable=SC2034
@@ -11,27 +11,25 @@ STOP=08
 USE_PROCD=1
 
 UPLOADER_DIR=/mnt/data/nes-deck/uploader
-ECL=/mnt/data/nes-deck/ecl/bin/ecl.bin
+UPLOADER=$UPLOADER_DIR/rom-uploader
 PASSWORD_CONFIG=$UPLOADER_DIR/password.conf
 
 start_service() {
-	if [ ! -x "$ECL" ]; then
-		logger -t nes-deck-uploader "ECL is missing or not executable: $ECL"
-		return 1
-	fi
-	if [ ! -r "$UPLOADER_DIR/run.lisp" ] || [ ! -r "$UPLOADER_DIR/uploader.lisp" ]; then
-		logger -t nes-deck-uploader "uploader sources are missing in $UPLOADER_DIR"
+	if [ ! -x "$UPLOADER" ]; then
+		logger -t nes-deck-uploader "uploader is missing or not executable: $UPLOADER"
 		return 1
 	fi
 	if [ ! -r "$PASSWORD_CONFIG" ]; then
 		logger -t nes-deck-uploader "password configuration is missing: $PASSWORD_CONFIG"
 		return 1
 	fi
+	if ! "$UPLOADER" --check-uploader-password-config "$PASSWORD_CONFIG"; then
+		logger -t nes-deck-uploader "password configuration is invalid: $PASSWORD_CONFIG"
+		return 1
+	fi
 
 	procd_open_instance
-	procd_set_param command "$ECL" -norc -load "$UPLOADER_DIR/run.lisp"
-	procd_set_param env ECLDIR=/mnt/data/nes-deck/ecl/lib/ecl/ \
-		CL_SOURCE_REGISTRY="$UPLOADER_DIR/lisp-libraries//:"
+	procd_set_param command "$UPLOADER"
 	procd_set_param stdout 1
 	procd_set_param stderr 1
 	procd_set_param respawn 3600 5 5

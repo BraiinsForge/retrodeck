@@ -5,7 +5,6 @@ use std::os::fd::IntoRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::ptr::NonNull;
-use std::sync::{Mutex, MutexGuard};
 
 pub const FRAMES_PER_TICK: usize = 735;
 const MAXIMUM_FILE_SIZE: u64 = 16 * 1024 * 1024;
@@ -13,8 +12,6 @@ const MAXIMUM_FILE_SIZE: u64 = 16 * 1024 * 1024;
 // 720 bytes on ARM. calloc supplies its required alignment; keep oversized
 // private storage here rather than adding a first-party C shim.
 const VORBIS_STATE_BYTES: usize = 8192;
-
-static PLAYER: Mutex<Option<Player>> = Mutex::new(None);
 
 #[repr(C)]
 struct VorbisInfo {
@@ -101,9 +98,6 @@ pub struct OggPlayer {
     samples: Vec<i16>,
 }
 
-// PLAYER serializes every access to the movable decoder handle.
-unsafe impl Send for OggPlayer {}
-
 pub struct DecodeBlock {
     pub ended: bool,
     pub frames: usize,
@@ -118,14 +112,6 @@ pub struct Metadata {
     pub length_ms: i32,
     pub track_count: i32,
     pub track_index: i32,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct Snapshot {
-    pub samples: Vec<i16>,
-    pub ended: bool,
-    pub frames: usize,
-    pub position_ms: i32,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -294,9 +280,6 @@ pub struct GmePlayer {
     track_count: i32,
     samples: Vec<i16>,
 }
-
-// PLAYER serializes every access to the movable emulator handle.
-unsafe impl Send for GmePlayer {}
 
 impl GmePlayer {
     pub fn open(path: &Path) -> Result<Self, String> {
@@ -501,53 +484,6 @@ fn read_chiptune_bytes(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-pub fn open(path: &Path) -> Result<Metadata, String> {
-    *lock_player()? = None;
-    let player = Player::open(path)?;
-    let metadata = player.metadata();
-    *lock_player()? = Some(player);
-    Ok(metadata)
-}
-
-pub fn step() -> Result<Snapshot, String> {
-    let mut guard = lock_player()?;
-    let player = guard
-        .as_mut()
-        .ok_or_else(|| "no chiptune is open".to_owned())?;
-    let block = player.decode()?;
-    Ok(Snapshot {
-        samples: player.samples().to_vec(),
-        ended: block.ended,
-        frames: block.frames,
-        position_ms: player.position_ms(),
-    })
-}
-
-pub fn rewind() -> Result<(), String> {
-    lock_player()?
-        .as_mut()
-        .ok_or_else(|| "no chiptune is open".to_owned())?
-        .rewind()
-}
-
-pub fn start_track(track: i32) -> Result<Metadata, String> {
-    lock_player()?
-        .as_mut()
-        .ok_or_else(|| "no chiptune is open".to_owned())?
-        .start_track(track)
-}
-
-pub fn close() -> Result<(), String> {
-    *lock_player()? = None;
-    Ok(())
-}
-
-fn lock_player() -> Result<MutexGuard<'static, Option<Player>>, String> {
-    PLAYER
-        .lock()
-        .map_err(|_| "chiptune lock is poisoned".to_owned())
-}
-
 pub fn probe(path: &Path) -> Result<Probe, String> {
     match Player::open(path)? {
         Player::Ogg(mut player) => {
@@ -660,11 +596,18 @@ mod tests {
             )
         );
         assert_eq!(
-            (metadata.length_ms, metadata.track_count, metadata.track_index),
+            (
+                metadata.length_ms,
+                metadata.track_count,
+                metadata.track_index
+            ),
             (150000, 2, 0)
         );
         let block = player.decode().unwrap();
-        assert_eq!((block.frames, player.samples().len()), (FRAMES_PER_TICK, 1470));
+        assert_eq!(
+            (block.frames, player.samples().len()),
+            (FRAMES_PER_TICK, 1470)
+        );
         assert!(player.position_ms() > 0);
         assert_eq!(player.start_track(1).unwrap().track_index, 1);
         assert!(player.start_track(2).is_err());
@@ -688,7 +631,7 @@ mod tests {
     fn routes_only_ogg_extensions_to_vorbis() {
         assert!(has_ogg_extension(Path::new("/tmp/song.OGG")));
         assert!(!has_ogg_extension(Path::new("/tmp/song.nsf")));
-        assert!(open(Path::new("/tmp/retrodeck-missing.spc")).is_err());
+        assert!(Player::open(Path::new("/tmp/retrodeck-missing.spc")).is_err());
     }
 
     #[test]
@@ -716,22 +659,5 @@ mod tests {
         assert!(player.position_ms() > 0);
         player.rewind().unwrap();
         assert_eq!(player.position_ms(), 0);
-    }
-
-    #[test]
-    fn owns_one_decoder_through_the_global_boundary() {
-        close().unwrap();
-        let metadata = open(&fixture()).unwrap();
-        assert_eq!((metadata.title, metadata.artist), (Vec::new(), Vec::new()));
-        assert!(metadata.length_ms >= 50000);
-        let snapshot = step().unwrap();
-        assert_eq!((snapshot.ended, snapshot.frames), (false, FRAMES_PER_TICK));
-        assert_eq!(snapshot.samples.len(), FRAMES_PER_TICK * 2);
-        assert!(snapshot.position_ms > 0);
-        rewind().unwrap();
-        assert_eq!(step().unwrap().position_ms, snapshot.position_ms);
-        assert!(open(Path::new("/no/such/retrodeck-chiptune.ogg")).is_err());
-        assert!(step().is_err());
-        close().unwrap();
     }
 }

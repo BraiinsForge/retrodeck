@@ -10,8 +10,7 @@ cd "$repo_root"
 unset RETRO_DECK_VOLUME_PERCENT
 
 cargo=${CARGO:-cargo}
-sbcl=${SBCL:-sbcl}
-for command in "$cargo" "$sbcl" nix; do
+for command in "$cargo" nix; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Missing required command: $command" >&2
     exit 1
@@ -23,7 +22,9 @@ trap 'rm -rf "$work"' EXIT INT TERM HUP
 
 CARGO_TARGET_DIR="$work/cargo-target" \
   "$cargo" test --manifest-path native/Cargo.toml --locked --lib
-"$sbcl" --noinform --disable-debugger --script tests/lisp_policy_test.lisp
+CARGO_TARGET_DIR="$work/cargo-target" \
+  "$cargo" build --manifest-path native/Cargo.toml --locked --bin rom-uploader
+tests/uploader-rust-http.sh "$work/cargo-target/debug/rom-uploader"
 
 tests/rom_library_test.sh
 tests/catalog_test.sh

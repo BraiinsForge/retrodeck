@@ -382,12 +382,6 @@ pub fn run_child(
     result
 }
 
-pub fn run_terminal(executable: &Path, keymap: &OsStr, mode: &OsStr, label: &str) -> ChildResult {
-    let arguments = [OsString::from(mode)];
-    let environment = [(OsString::from("RETRO_DECK_KEYMAP"), OsString::from(keymap))];
-    run_child(executable, &arguments, &environment, label, true, true)
-}
-
 fn spawn_and_supervise<F>(
     executable: &Path,
     arguments: &[OsString],

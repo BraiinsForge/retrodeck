@@ -566,10 +566,6 @@ thread_local! {
     static WIDGET: RefCell<Option<Widget>> = const { RefCell::new(None) };
 }
 
-pub fn open_widget() -> Result<(), String> {
-    open_widget_for(None)
-}
-
 pub fn open_widget_at(display: &Path) -> Result<(), String> {
     open_widget_for(Some(display))
 }

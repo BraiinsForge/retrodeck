@@ -9,9 +9,9 @@ executable Lisp.
 
 * Project profile
 
-RetroDeck is an exact migration, not a redesign. The dashboard currently runs
-through the Rust/ECL host; 10 Seconds and chiptunes use standalone Rust executables.
-The release target is pure Rust first-party UI, with the Lisp REPL as a separate app.
+RetroDeck is an exact migration, not a redesign. First-party dashboard,
+uploader, timer, chiptunes, and catalog code use standalone Rust executables.
+The Common Lisp REPL is a separate ECL app.
 Reuse the existing native mechanisms and preserve visual and interaction parity.
 The upstream migration plan is in =docs/upstream-rust-migration.md=.
 
@@ -33,21 +33,6 @@ never swept into a migration commit.
   =e0a5c20ceac406ef22f361671516ce5e83e00de8=.
 - Removal condition: Remove after the local upstream remotes and comparison
   workflow use GitHub directly.
-
-** Split focused Lisp iteration from integration checks
-
-- Problem: A persistent Lisp worker speeds focused iteration but retained
-  packages or definitions can hide startup and load-order defects.
-- Behavior: Use a named isolated =lisp.*= worker for exploratory loads and
-  assertions. Confirm checked-in Lisp with a fresh
-  =sbcl --noinform --disable-debugger --script tests/lisp_policy_test.lisp=
-  process and the repository host suite before committing.
-- Scope and location: Tracked project workflow note in this file. No active-image
-  mutation.
-- Verification: Both paths have exercised the dashboard reducer; the fresh
-  script and complete host suite pass.
-- Removal condition: Remove when the project replaces these entry points or no
-  longer supports host SBCL testing.
 
 ** Use component working directories for direct tool checks
 

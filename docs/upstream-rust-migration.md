@@ -1,7 +1,7 @@
 # RetroDeck: minimum upstream and Rust UI migration
 
-Audit date: 2026-10-12. This is a source audit and implementation plan.
-No firmware, application, or UI replacement was deployed during the audit.
+Audit and implementation date: 2026-10-12. First-party Lisp retirement is complete
+in source and deployment packaging. No device deployment was performed.
 
 ## Decision
 
@@ -172,6 +172,35 @@ small bugfix series when its failure is reproduced.
 
 ## Implementation progress
 
+The first-party Rust migration is complete. Keyed-widget protocol and
+current-master package/scene migration are separate work, described below.
+
+`deck-menu` now owns the dashboard, settings, Wi-Fi editor, credits, input policy
+and application launch/return. It calls the existing native library directly.
+All 37 dashboard reference frames match: 19 menu, eight settings, four Wi-Fi and
+six credits. Menu transcripts and their provenance are kept under
+`native/src/dashboard/oracles/`.
+
+`rom-uploader` now serves the uploader HTTP and HTML interfaces. Eight unit tests
+and the real HTTP suite cover authentication, password configuration, limits,
+archives, catalog activation and upload responses. The HTTP suite also passes
+against the static ARM executable under QEMU.
+
+Deployment installs standalone Rust executables and removes the former installed
+Lisp UI/uploader trees. The first-party `lisp/` sources, ECL-driven Rust entrypoint,
+Lisp image build, uploader Lisp dependencies and obsolete test harnesses are
+deleted. Unused ABI-era tone, waveform, terminal, chiptune singleton and Wi-Fi
+helper wrappers are removed.
+
+Verification: 147 native tests and the full host suite pass; all deployable ARM
+payloads are static and closure-free, with QEMU app/password/catalog/timer/player,
+DOOM, libretro and network-ECL checks passing. The dependency audit reports no
+vulnerabilities or warnings; runtime license coverage passes.
+
+ECL is packaged only for the separate Common Lisp app, including its network
+support. Common Lisp, Scheme, Lua and Python programs, persistent data and history
+are preserved. Hardware interaction/audio and current-master protocol acceptance
+have not been performed.
 10 Seconds now uses a standalone Rust executable built without ECL.
 `native/src/ten_seconds.rs` owns timing, input priority, cues and pixel rendering.
 Deployment installs the binary and removes the old Lisp timer source.
@@ -190,7 +219,7 @@ Five Rust tests cover scanning, input, playback transitions and muted pacing;
 both reference frame hashes match. The static ARM entrypoint passes QEMU.
 Physical input and audio acceptance is pending.
 
-## Rust-only UI inventory
+## Historical Rust-only UI inventory
 
 This inventory records the audited `48f66a1` baseline, before the replacements above.
 `ops/deploy.sh:120-123` links `deck-menu`, `ten-seconds-deck`, and the shared host;
@@ -199,7 +228,7 @@ This inventory records the audited `48f66a1` baseline, before the replacements a
 loads their implementation files. The ARM build also supports the compiled
 `lisp-image` feature (`flake.nix:554-565`).
 
-| Current source | Rust replacement scope |
+| Baseline source (retired) | Implemented Rust replacement scope |
 | --- | --- |
 | `lisp/ui.lisp`, `lisp/dashboard.lisp` | Layout, covers, tabs/carousel, rendering, reducer/runtime loop, status and launch/return. |
 | `lisp/policy.lisp`, `lisp/process.lisp` | Routing, input/modal priority, timers, cue/ownership policy and child recovery. Call existing Rust process mechanisms directly. |
@@ -229,7 +258,7 @@ ECL, its persistent `/mnt/data/langs/lisp` directory and history. Its interprete
 and user programs are independent of the UI Lisp tree. Keep that app when removing
 UI source installation and ECL linkage from dashboard/game/player binaries.
 
-## Smallest implementation sequence
+## Migration sequence
 
 1. **Current-master bridge.** Update protocol bindings, `BMC_WIDGET_KEY`, memfd
    payload handling and child identity propagation in the shared Rust library.
@@ -240,23 +269,22 @@ UI source installation and ECL linkage from dashboard/game/player binaries.
    manifest, and replace legacy scene/config provisioning. Include current game
    hosts and REPL runtimes. Prove install/update/removal without requiring the
    fork's application supervisor.
-3. **Rust dashboard.** Add a Rust `deck-menu` over the existing native library.
-   Port the reducer/rendering, settings, Wi-Fi, credits, input policy, audio cues
-   and launch/return as one usable replacement. Use existing Lisp behavior and
-   fixtures as the differential reference while developing it.
-4. **Rust app UI and supporting services.** Port 10 Seconds and the chiptune UI;
-   port the catalog compiler and uploader in their own focused changes. Preserve
-   catalog outputs, upload responses, authentication and state/save paths.
-5. **Remove the UI Lisp bootstrap.** Switch production entrypoints after parity,
-   remove UI `lisp-image`/ECL linkage and installed UI Lisp sources, and simplify
-   build/deploy/test plumbing. Keep the ECL REPL package and launcher.
+3. **Rust dashboard: complete.** Standalone `deck-menu` implements rendering,
+   settings, Wi-Fi, credits, input policy, cues and launch/return over the existing
+   native library. Differential frame fixtures preserve the original visuals.
+4. **Rust app UI and supporting services: complete.** Standalone 10 Seconds,
+   chiptune player, catalog compiler and uploader preserve the existing formats,
+   authentication, catalog outputs and state/save paths.
+5. **Remove the UI Lisp bootstrap: complete.** Production build/deploy entrypoints
+   use Rust executables. UI ECL linkage, Lisp images, installed first-party Lisp
+   sources and obsolete glue/harnesses are removed; the ECL REPL is separate.
 6. **Evidence-backed upstream series.** Run the acceptance matrix on unmodified
    current master. Upstream only gaps demonstrated there, as independent changes
    rebased onto master, rather than merging either July fork wholesale.
 
-Steps 1-2 establish the path to current master. Steps 3-5 satisfy the Rust-only UI
-release target. Package/protocol work can proceed without choosing the fork's
-renderer, managed applications, gamepad transport or managed PCM architecture.
+Steps 3-5 are complete. Steps 1-2 establish the separate path to current master.
+Package/protocol work can proceed without choosing the fork's renderer, managed
+applications, gamepad transport or managed PCM architecture.
 
 ## Verification and release decisions
 

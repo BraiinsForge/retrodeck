@@ -1,8 +1,8 @@
 # RetroDeck migration baseline
 
-This document records the implementation that the Rust and Common Lisp
-migration must replace. The running product remains authoritative whenever this
-summary and observed behavior disagree.
+This historical baseline records the earlier Rust and Common Lisp migration.
+The current architecture uses standalone Rust applications and a separate
+Common Lisp REPL. See [the current migration plan](upstream-rust-migration.md).
 
 ## Contract
 

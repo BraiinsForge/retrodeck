@@ -29,7 +29,7 @@ const PCM_ENABLE_OUTPUT: c_int = 0x2;
 const CHIPTUNE_PCM_BYTES: usize = 735 * 2 * mem::size_of::<i16>();
 // Six blocks (~100 ms) plus the ~93 ms prefilled kernel buffer absorb the
 // worst decode-loop stalls while keeping pause/volume/track controls snappy;
-// the Lisp pump keeps this queue full and is paced by its backpressure.
+// the decoder loop keeps this queue full and is paced by its backpressure.
 const CHIPTUNE_QUEUE_BLOCKS: usize = 6;
 
 #[repr(C)]
@@ -80,22 +80,6 @@ unsafe extern "C" {
     fn kill(pid: c_int, signal: c_int) -> c_int;
     fn signal(signal: c_int, handler: usize) -> usize;
     fn _exit(status: c_int) -> !;
-}
-
-pub fn play_tones(
-    first_frequency: c_int,
-    first_duration_ms: c_int,
-    second_frequency: c_int,
-    second_duration_ms: c_int,
-    volume_percent: c_int,
-) -> Result<PlayOutcome, String> {
-    let (tones, count) = tone_sequence(
-        first_frequency,
-        first_duration_ms,
-        second_frequency,
-        second_duration_ms,
-    )?;
-    play_tone_sequence(&tones[..count], volume_percent)
 }
 
 pub fn play_tone_sequence(tones: &[Tone], volume_percent: c_int) -> Result<PlayOutcome, String> {
@@ -390,32 +374,6 @@ fn render_chiptune_pcm_mono(pcm: &[u8], volume_percent: c_int) -> Result<Vec<i16
         .collect())
 }
 
-fn tone_sequence(
-    first_frequency: c_int,
-    first_duration_ms: c_int,
-    second_frequency: c_int,
-    second_duration_ms: c_int,
-) -> Result<([Tone; 2], usize), String> {
-    let tones = [
-        Tone {
-            frequency: first_frequency,
-            duration_ms: first_duration_ms,
-        },
-        Tone {
-            frequency: second_frequency,
-            duration_ms: second_duration_ms,
-        },
-    ];
-    let count = if second_frequency == 0 && second_duration_ms == 0 {
-        1
-    } else if second_frequency > 0 && second_duration_ms > 0 {
-        2
-    } else {
-        return Err("the optional second tone needs frequency and duration".to_owned());
-    };
-    Ok((tones, count))
-}
-
 fn validate(tones: &[Tone], rate: c_int, volume_percent: c_int) -> Result<(), String> {
     if !(1..=3).contains(&tones.len()) {
         return Err("menu sounds need one through three tones".to_owned());
@@ -582,7 +540,6 @@ mod tests {
 
     #[test]
     fn rejects_invalid_tone_requests() {
-        assert!(tone_sequence(659, 25, 0, 30).is_err());
         for (tones, volume) in [
             (&[tone(659, 25); 4][..], 42),
             (&[tone(0, 25)][..], 42),

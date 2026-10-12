@@ -53,11 +53,11 @@ WIFI_STATUS=/var/run/deck-wifi/status
 KEYBOARD_QUIRKS=/usr/sbin/deck-keyboard-quirks
 COMPILER=$MENU_DIR/compile-catalog
 ECL=$BASE/ecl/bin/ecl.bin
-ECLDIR=$BASE/ecl/lib/ecl/
+ECL_RUNTIME=$BASE/ecl/lib/ecl/
 LOG_FILE=$LOG_DIR/deck-menu.log
 VOLUME_ON=42
 
-export PATH LC_ALL ECLDIR TMPDIR
+export PATH LC_ALL TMPDIR
 export RETRO_DECK_VOLUME_PERCENT=$VOLUME_ON
 
 umask 077
@@ -171,7 +171,7 @@ if [ ! -x "$SCHEME" ] || [ ! -r "$CHIBI_MODULE_PATH/init-7.scm" ]; then
 	log_message "Chibi Scheme runtime is unavailable under $BASE/langs/chibi"
 	exit 1
 fi
-if [ ! -x "$ECL" ] || [ ! -d "$ECLDIR" ] || [ ! -x "$RLWRAP" ]; then
+if [ ! -x "$ECL" ] || [ ! -d "$ECL_RUNTIME" ] || [ ! -x "$RLWRAP" ]; then
 	log_message "Lisp runtime or rlwrap is unavailable under $BASE"
 	exit 1
 fi

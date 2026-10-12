@@ -84,7 +84,8 @@ zx=$(build_flake .#zx-deck)
 gba=$(build_flake .#gba-deck)
 doom=$(build_flake .#doom-deck)
 tamagotchi=$(build_flake .#tamagotchi-deck)
-native=$(build_flake .#retrodeck-native)
+menu=$(build_flake .#deck-menu)
+uploader=$(build_flake .#rom-uploader)
 ten_seconds=$(build_flake .#ten-seconds-deck)
 chiptune=$(build_flake .#chiptune-deck)
 catalog_compiler=$(build_flake .#compile-catalog)
@@ -93,14 +94,12 @@ rlwrap=$(build_flake .#rlwrap-deck)
 lua=$(build_flake .#lua-deck)
 python=$(build_flake .#python-deck)
 chibi=$(build_flake .#chibi-deck)
-uploader_libraries=$(build_flake .#uploader-lisp-libraries)
 runtime_licenses=$(build_flake .#runtime-licenses)
 ecl=$(build_flake .#ecl-arm-network)
 
 mkdir -p \
   "$payload/nes-deck/menu" \
   "$payload/nes-deck/games" \
-  "$payload/nes-deck/lisp" \
   "$payload/nes-deck/langs/chibi/lib" \
   "$payload/nes-deck/licenses" \
   "$payload/nes-deck/terminal/fonts" \
@@ -121,18 +120,11 @@ cp "$gba/bin/gba-deck" "$payload/nes-deck/gba-deck"
 cp "$doom/bin/doom-deck" "$payload/nes-deck/doom-deck"
 cp "$tamagotchi/bin/tamagotchi-deck" "$payload/nes-deck/tamagotchi-deck"
 cp "$ten_seconds/bin/ten-seconds-deck" "$payload/nes-deck/ten-seconds-deck"
-ln -sfn ../retrodeck-native "$payload/nes-deck/menu/deck-menu"
-cp "$native/bin/retrodeck-native" "$payload/nes-deck/retrodeck-native"
-cp lisp/startup.lisp lisp/ui.lisp lisp/policy.lisp \
-  lisp/process.lisp lisp/settings.lisp lisp/wifi.lisp \
-  lisp/credits.lisp \
-  lisp/dashboard.lisp "$payload/nes-deck/lisp/"
 cp "$chiptune/bin/chiptune-deck" "$payload/nes-deck/chiptune-deck"
-cp lisp/uploader.lisp lisp/uploader-paper.css lisp/uploader-palette.js \
-  deploy/uploader/run.lisp "$payload/nes-deck/uploader/"
-cp -a "$uploader_libraries/share/common-lisp/source" \
-  "$payload/nes-deck/uploader/lisp-libraries"
-chmod -R u+w "$payload/nes-deck/uploader/lisp-libraries"
+cp "$menu/bin/deck-menu" "$payload/nes-deck/menu/deck-menu"
+cp "$uploader/bin/rom-uploader" "$payload/nes-deck/uploader/rom-uploader"
+cp deploy/uploader/uploader-paper.css deploy/uploader/uploader-palette.js \
+  "$payload/nes-deck/uploader/"
 printf '%s\n' "$uploader_password" |
   python3 ops/lib/set-uploader-password.py \
     "$payload/nes-deck/uploader/password.conf"
@@ -246,26 +238,16 @@ find "$payload/nes-deck" -type f \( \
   -name 'nes-deck' -o -name 'gb-deck' -o -name 'zx-deck' -o -name 'gba-deck' -o \
   -name 'doom-deck' -o -name 'tamagotchi-deck' -o \
   -name 'ten-seconds-deck' -o \
-  -name 'chiptune-deck' -o -name 'retrodeck-native' -o \
+  -name 'chiptune-deck' -o -name 'rom-uploader' -o \
   -name 'deck-menu' -o -name 'compile-catalog' -o \
   -name 'deck-menu-launcher' -o -name 'fetch-covers' -o \
   -name 'retro-terminal' -o -name 'fbterm' -o -name 'loadkeys' -o \
   -name 'rlwrap' -o \
   -name 'lua' -o -name 'python' -o -name 'chibi-scheme' -o \
   -name 'ecl.bin' \) -exec chmod 0700 {} +
-chmod 0600 "$payload/nes-deck/lisp/startup.lisp" \
-  "$payload/nes-deck/lisp/ui.lisp" \
-  "$payload/nes-deck/lisp/policy.lisp" \
-  "$payload/nes-deck/lisp/process.lisp" \
-  "$payload/nes-deck/lisp/settings.lisp" \
-  "$payload/nes-deck/lisp/wifi.lisp" \
-  "$payload/nes-deck/lisp/credits.lisp" \
-  "$payload/nes-deck/lisp/dashboard.lisp"
 chmod 0600 "$payload/nes-deck/uploader/password.conf" \
-  "$payload/nes-deck/uploader/uploader.lisp" \
   "$payload/nes-deck/uploader/uploader-paper.css" \
-  "$payload/nes-deck/uploader/uploader-palette.js" \
-  "$payload/nes-deck/uploader/run.lisp"
+  "$payload/nes-deck/uploader/uploader-palette.js"
 chmod 0700 "$payload/usr/bin/ecl" \
   "$payload/usr/sbin/deck-keyboard-quirks" \
   "$payload/usr/sbin/deck-wifi-profile-add" \

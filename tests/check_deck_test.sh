@@ -55,22 +55,10 @@ grep -Fq "pidof \"\$process\"" "$remote_script" ||
   fail 'remote health check does not inspect required processes'
 grep -Fq "grep -q ' /mnt/data ' /proc/mounts" "$remote_script" ||
   fail 'remote health check does not verify persistent storage'
-grep -Fq '[ -s /mnt/data/nes-deck/lisp/ui.lisp ]' "$remote_script" ||
-  fail 'remote health check does not verify the editable Lisp UI'
-grep -Fq '[ -s /mnt/data/nes-deck/lisp/policy.lisp ]' "$remote_script" ||
-  fail 'remote health check does not verify the editable Lisp policy'
-grep -Fq '[ -x /mnt/data/nes-deck/chiptune-deck ]' "$remote_script" ||
-  fail 'remote health check does not verify the chiptune executable'
-grep -Fq '[ -s /mnt/data/nes-deck/lisp/process.lisp ]' "$remote_script" ||
-  fail 'remote health check does not verify the editable Lisp process policy'
-grep -Fq '[ -s /mnt/data/nes-deck/lisp/settings.lisp ]' "$remote_script" ||
-  fail 'remote health check does not verify the editable Lisp settings'
-grep -Fq '[ -s /mnt/data/nes-deck/lisp/wifi.lisp ]' "$remote_script" ||
-  fail 'remote health check does not verify the editable Lisp Wi-Fi editor'
-grep -Fq '[ -s /mnt/data/nes-deck/lisp/credits.lisp ]' "$remote_script" ||
-  fail 'remote health check does not verify the editable Lisp credits'
-grep -Fq '[ -s /mnt/data/nes-deck/lisp/dashboard.lisp ]' "$remote_script" ||
-  fail 'remote health check does not verify the Lisp dashboard'
+for runtime in menu/deck-menu uploader/rom-uploader chiptune-deck ecl/bin/ecl.bin; do
+  grep -Fq "[ -x /mnt/data/nes-deck/$runtime ]" "$remote_script" ||
+    fail "remote health check does not verify $runtime"
+done
 grep -Fq 'interface_address wlan0' "$remote_script" ||
   fail 'remote health check does not report the WLAN address'
 grep -Fq '/usr/sbin/iw dev wlan0 link' "$remote_script" ||
