@@ -232,6 +232,7 @@ pkgs.runCommand "retro-deck-runtime-licenses" {
   append_rust_notice wayland-backend-0.3.15 LICENSE.txt
   append_rust_notice wayland-client-0.31.14 LICENSE.txt
   append_rust_notice wayland-scanner-0.31.11 LICENSE.txt
+  append_rust_notice wayland-server-0.31.14 LICENSE.txt
   append_rust_notice wayland-sys-0.31.11 LICENSE.txt
   append_rust_notice wyz-0.5.1 LICENSE.txt
 

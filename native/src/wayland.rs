@@ -1065,3 +1065,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "wayland_wire_tests.rs"]
+mod wire_tests;
