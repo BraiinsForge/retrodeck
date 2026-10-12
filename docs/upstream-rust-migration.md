@@ -52,49 +52,41 @@ RetroDeck paths refer to `758ec9e`.
 
 ## Mandatory compatibility work in RetroDeck
 
-### Widget protocol and launch identity
+### Widget protocol and launch identity: implemented
 
-RetroDeck currently generates bindings from `protocol/deck-widget-v1.xml` and
-binds `deck_widget_manager_v1` in `native/src/wayland.rs:810-840`. Current master
-exports `deck_widget_manager_v3` and `deck_widget_surface_v2`. These are different
-interface names, not a compatible version increment.
+RetroDeck generates bindings from the unmodified current-master
+`protocol/deck-widget.xml`, using `deck_widget_manager_v3` and
+`deck_widget_surface_v2`. `protocol/PROVENANCE.md` records the upstream revision.
+The old compact fork protocol is deleted.
 
-Current upstream contract:
+- Validate the canonical lowercase configured-widget UUID in `BMC_WIDGET_KEY`.
+  The dashboard and widget-presented children inherit and bind the same key.
+- Close unused `params`, `credentials` and `credential_secrets` FDs explicitly,
+  including runtime updates. RetroDeck declares no parameter or credential slots.
+- Wait for `configure_done` before rendering, and replay lifecycle, incoming
+  transition and shutdown events through the shared client.
 
-- `get_widget_surface` takes a canonical configured-widget UUID and the surface.
-- BMC passes that UUID through `BMC_WIDGET_KEY`, distinct from the widget type UID
-  in the manifest. Inherit it into game processes and use it for every surface.
-- `params`, `credentials`, and `credential_secrets` arrive as sealed memfd plus
-  byte count, rather than JSON strings. Consume or close every descriptor without
-  logging credential contents. Wait for the complete configure batch.
-- Regenerate bindings from current XML, or reuse the current upstream protocol
-  crate. Update event dispatch and lifecycle handling together.
+Current master accepts connections by configured-widget key, without the fork's
+parent-process credential check. Game clients therefore connect through normal
+`WAYLAND_DISPLAY`/`XDG_RUNTIME_DIR` discovery. The FD-9 socket transfer, its
+pre-exec descriptor setup and inherited-FD client code are deleted. Process-group
+cleanup and terminal restoration use the existing native process mechanisms.
+
+When a child attaches for the same instance, master closes the previous client's
+entire connection. During the child session, the dashboard suspends dispatch,
+touch supervision and rendering for that connection. On return it discards the
+replaced client and reconnects, including the initial configuration/lifecycle
+batch, before drawing the dashboard again. Terminal mirroring uses the dashboard
+surface rather than a replacement widget client.
+
+Host tests cover canonical keys, configuration ordering, descriptor ownership,
+lifecycle replay, child key propagation and parent suspension. Full-frame UI
+references are unchanged. Live repeated dashboard/game/dashboard acceptance on
+stock BMC is pending; unit and QEMU checks do not certify device interaction.
 
 Evidence: [current protocol XML](https://github.com/BraiinsForge/bmc-main/blob/e0a5c20ceac406ef22f361671516ce5e83e00de8/bmc-widget-protocol/protocol/deck-widget.xml),
-`bmc-widget-protocol/src/lib.rs:107-137`,
-`bmc/src/widget/spawner.rs:48-66`, and
-`bmc-openwrt/src/compositor/protocol/dispatch.rs:138-166`.
-
-Keep the current child connection scheme: the registered dashboard opens the
-Wayland socket before spawning the game and passes it as fd 9 with
-`RETRO_DECK_WIDGET_FD=9`. The compositor therefore sees the registered parent's
-peer credentials, not the child's. Keep process-group cleanup and terminal
-restoration in `native/src/process.rs`.
-
-The new instance key supplements this connection scheme. When a new client
-attaches for the same instance, master forcibly closes the previous client's
-Wayland connection, not just its surface. The current parent keeps dispatching
-that connection during child supervision (`native/src/process.rs:194-225`).
-Adapt launch/return to suspend or detach the dashboard deliberately and reconnect
-it after the game exits; account for the compositor's disconnect cleanup and
-initial lifecycle replay. Verify repeated dashboard -> game -> dashboard
-transitions before accepting the adapter. Source-level replacement support alone
-does not establish lifecycle-safe handoff.
-
-Evidence: RetroDeck `native/src/wayland.rs:194-233` and
-`native/src/process.rs:341-382,404-416,492-519`; master
-`bmc-openwrt/src/compositor/protocol/dispatch.rs:85-92,162-166` and
-`bmc-openwrt/src/compositor/protocol/state.rs:228-263,302-329`.
+`bmc-widget-protocol/src/lib.rs`, `bmc/src/widget/spawner.rs` and
+`bmc-openwrt/src/compositor/protocol/dispatch.rs`/`state.rs` at the pinned revision.
 
 ### Package, manifest, and scene installation
 

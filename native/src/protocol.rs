@@ -4,8 +4,8 @@ pub mod deck_widget {
 
     pub mod __interfaces {
         use wayland_client::protocol::__interfaces::*;
-        wayland_scanner::generate_interfaces!("../protocol/deck-widget-v1.xml");
+        wayland_scanner::generate_interfaces!("../protocol/deck-widget.xml");
     }
     use self::__interfaces::*;
-    wayland_scanner::generate_client_code!("../protocol/deck-widget-v1.xml");
+    wayland_scanner::generate_client_code!("../protocol/deck-widget.xml");
 }

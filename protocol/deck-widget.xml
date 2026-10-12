@@ -1,0 +1,499 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="deck_widget">
+  <copyright>
+    Copyright (C) 2026  Braiins Forge s.r.o.
+    SPDX-License-Identifier: MIT
+  </copyright>
+
+  <interface name="deck_widget_manager_v3" version="1">
+    <description summary="keyed Deck widget manager">
+      Global interface for creating a widget surface identified by its
+      configured widget instance key.
+
+      get_widget_surface creates the surface at the manager resource's version,
+      so an event added to deck_widget_surface_v2 later needs the manager's version,
+      and the version its global is advertised at, raised to match.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">
+        Destroy the widget manager. Does not affect existing widget surfaces.
+      </description>
+    </request>
+
+    <request name="get_widget_surface">
+      <description summary="create a keyed widget surface">
+        Create a deck_widget_surface_v2 for the given wl_surface and canonical
+        configured-widget UUID. The wl_surface must not already have a role.
+      </description>
+      <arg name="id" type="new_id" interface="deck_widget_surface_v2"/>
+      <arg name="widget_instance_key" type="string" summary="canonical configured-widget UUID"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+    </request>
+
+    <enum name="error">
+      <entry name="role" value="0" summary="surface already has a role"/>
+      <entry name="invalid_key" value="1" summary="widget instance key is not canonical"/>
+      <entry name="unknown_widget" value="2" summary="widget instance is not accepting connections"/>
+    </enum>
+  </interface>
+
+  <interface name="deck_widget_surface_v2" version="1">
+    <description summary="Deck widget surface">
+      Interface for a widget surface. On surface creation, the compositor
+      emits initial configuration as a sequence of events, terminated by
+      configure_done:
+
+        configure(width, height, viewport_shape, token)
+        display_info(width, height, shape, dpi)
+        params(fd, size)
+        credentials(fd, size) / credential_secrets(fd, size)
+        timezone / night_mode / date_format / ... (setting events)
+        configure_done
+
+      The widget must wait for configure_done before starting to render.
+      After configure_done, the same setting events continue to flow
+      whenever system settings change. Widget readiness is detected when
+      the first buffer is committed.
+
+      JSON payloads (params, credentials, credential_secrets) travel
+      as a file descriptor, not a string argument:
+      libwayland caps a message at 4096 bytes
+      and disconnects a client sent a larger event.
+      The fd is a sealed memfd (no write, shrink or grow)
+      holding exactly size bytes of UTF-8 JSON.
+      Its file offset is left at the end of the write,
+      so the receiver reads positionally from offset 0, then closes the fd.
+    </description>
+
+    <!-- Requests (Widget → Compositor) -->
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the widget surface">
+        Destroy the widget surface role. The wl_surface remains valid.
+      </description>
+    </request>
+
+    <request name="play_sound">
+      <description summary="play a sound by name">
+        Ask the compositor to play a system sound. The sound must be one
+        of the names registered with the compositor's sound manager.
+      </description>
+      <arg name="sound" type="string" summary="sound identifier"/>
+    </request>
+
+    <request name="stop_sound">
+      <description summary="stop the currently playing sound"/>
+    </request>
+
+    <request name="led_temporary">
+      <description summary="run an LED effect for a finite duration">
+        The compositor will run the given effect for `duration_ms`
+        milliseconds, then return to whatever LED state was active before
+        the request. `period_ms` controls per-effect animation speed and
+        is ignored for effects that have no notion of period (e.g.
+        `solid`). A `period_ms` of 0 means "use the effect's default".
+
+        `request_id` is a widget-allocated identifier; the compositor
+        replies with a `led_request_status` event whose `request_id`
+        echoes this value as the request progresses (accepted, then
+        eventually expired or superseded). The widget's namespace is
+        scoped to its own surface — different widgets can reuse the
+        same numeric value without collision. The value 0 is reserved
+        for stop-all semantics on `stop_led` and must not be used here.
+      </description>
+      <arg name="request_id" type="uint" summary="widget-allocated request id, must be non-zero"/>
+      <arg name="effect" type="uint" enum="led_effect"/>
+      <arg name="r" type="uint" summary="red component, 0-255"/>
+      <arg name="g" type="uint" summary="green component, 0-255"/>
+      <arg name="b" type="uint" summary="blue component, 0-255"/>
+      <arg name="period_ms" type="uint" summary="animation period in milliseconds, 0 for default"/>
+      <arg name="duration_ms" type="uint" summary="duration in milliseconds"/>
+      <arg name="scope" type="uint" enum="led_scope" summary="led_scope.local for scene-scoped requests, led_scope.global for ambient signals"/>
+    </request>
+
+    <request name="led_endless">
+      <description summary="run an LED effect indefinitely">
+        The compositor will run the given effect until a `led_temporary`,
+        another `led_endless`, or `stop_led` request supersedes it.
+        `period_ms` controls per-effect animation speed and is ignored for
+        effects that have no notion of period. A `period_ms` of 0 means
+        "use the effect's default".
+
+        See `led_temporary` for the semantics of `request_id` and the
+        `led_request_status` reply.
+      </description>
+      <arg name="request_id" type="uint" summary="widget-allocated request id, must be non-zero"/>
+      <arg name="effect" type="uint" enum="led_effect"/>
+      <arg name="r" type="uint" summary="red component, 0-255"/>
+      <arg name="g" type="uint" summary="green component, 0-255"/>
+      <arg name="b" type="uint" summary="blue component, 0-255"/>
+      <arg name="period_ms" type="uint" summary="animation period in milliseconds, 0 for default"/>
+      <arg name="scope" type="uint" enum="led_scope" summary="led_scope.local for scene-scoped requests, led_scope.global for ambient signals"/>
+    </request>
+
+    <request name="stop_led">
+      <description summary="stop a running LED effect">
+        Cancel an LED request the widget previously made. If `request_id`
+        is non-zero, only the matching request is cancelled; if zero,
+        every LED request the widget owns is cancelled. `stop_led` is
+        always accepted by the compositor and produces no
+        `led_request_status` reply on its own — but cancelled requests
+        receive a `superseded` status under their original ids.
+      </description>
+      <arg name="request_id" type="uint" summary="widget request id to cancel, 0 for all of this widget's"/>
+    </request>
+
+    <!-- Events (Compositor → Widget) -->
+
+    <event name="configure">
+      <description summary="widget geometry, viewport shape, and instance identity">
+        Delivered once on surface creation. Carries the widget's pixel
+        dimensions, the shape of its viewport, and the opaque, stable
+        per-instance token (usable to key per-instance resources such as an
+        asset cache; stable across dormancy and restart). Follow-up `params`,
+        credential and setting events refine configuration; the batch is
+        terminated by `configure_done`.
+      </description>
+      <arg name="width" type="uint" summary="pixel width"/>
+      <arg name="height" type="uint" summary="pixel height"/>
+      <arg name="viewport_shape" type="uint" enum="viewport_shape"/>
+      <arg name="token" type="string" summary="opaque stable per-instance identity"/>
+    </event>
+
+    <event name="display_info">
+      <description summary="active display geometry and shape">
+        Delivered once on surface creation, after `configure` and before
+        `configure_done`. Carries the active display's logical pixel size,
+        shape, and DPI so widgets can adapt panel-wide rendering (e.g.
+        corner masking on a round panel). DPI is the platform's real display
+        density and is advisory during this development stage.
+      </description>
+      <arg name="width" type="uint" summary="logical display width in pixels"/>
+      <arg name="height" type="uint" summary="logical display height in pixels"/>
+      <arg name="shape" type="uint" enum="display_shape"/>
+      <arg name="dpi" type="uint" summary="display density; advisory"/>
+    </event>
+
+
+    <event name="params">
+      <description summary="widget-specific configuration params">
+        The widget's per-instance params, exactly as stored in the scene
+        configuration. A JSON-encoded object whose keys and value types
+        match the widget's manifest. The compositor does not parse or
+        validate this — the widget owns its manifest and is authoritative
+        on what values are meaningful.
+
+        Emitted on surface creation as part of the initial configure
+        batch, and re-emitted at runtime whenever the widget's params
+        change (via an update that keeps the widget's geometry stable).
+        An empty JSON object ("{}") is sent when no params are configured.
+      </description>
+      <arg name="fd" type="fd" summary="sealed memfd holding the JSON-encoded params object"/>
+      <arg name="size" type="uint" summary="byte length of the JSON"/>
+    </event>
+
+    <event name="credentials">
+      <description summary="which credential slots are bound, and to what">
+        The widget's credential slots that currently resolve to a saved
+        account, as a JSON-encoded object keyed by manifest slot name:
+        {"SLOT": {"type": "CREDENTIAL-TYPE-ID", "account":
+        "OPERATOR-CHOSEN-NAME"}}. A slot absent from the object is
+        unbound, whether the operator never bound it or bound it to an
+        account that no longer exists.
+
+        Carries no secret material and is safe to log. This is the whole
+        of what a widget may learn about its credentials; the values
+        themselves arrive on credential_secrets and stop at the widget
+        process.
+
+        Emitted on surface creation as part of the initial configure
+        batch, and re-emitted whenever the resolution changes. An empty
+        JSON object ("{}") is sent when nothing is bound.
+      </description>
+      <arg name="fd" type="fd" summary="sealed memfd holding the JSON-encoded slot-to-account object"/>
+      <arg name="size" type="uint" summary="byte length of the JSON"/>
+    </event>
+
+    <event name="credential_secrets">
+      <description summary="secret field values for the bound slots">
+        The secret field values behind each bound slot, as a JSON-encoded
+        object keyed by manifest slot name: {"SLOT": {"fields": {"FIELD":
+        "VALUE"}, "allow_hosts": ["HOST", …]}}. Slot keys match the
+        credentials event exactly. allow_hosts is the account's own egress
+        pin in the catalog's pin grammar; absent or empty, the slot's
+        credential type decides.
+
+        This event carries live secrets and must never be forwarded to
+        guest WASM, written to a log, or persisted. The widget process is
+        trusted to hold it and to substitute the values into outbound
+        requests on the widget's behalf; the widget itself never sees them.
+
+        Emitted alongside credentials, on the same occasions.
+      </description>
+      <arg name="fd" type="fd" summary="sealed memfd holding the JSON-encoded slot-to-field-values object"/>
+      <arg name="size" type="uint" summary="byte length of the JSON"/>
+    </event>
+
+    <event name="configure_done">
+      <description summary="initial configuration batch complete">
+        Terminates the initial configure batch. After this event the
+        widget has every piece of initial configuration the compositor
+        intends to deliver and may start rendering. Subsequent setting
+        events represent runtime changes.
+      </description>
+    </event>
+
+    <event name="lifecycle">
+      <description summary="widget lifecycle state changed">
+        Emitted whenever the widget's lifecycle state changes. The initial
+        emission immediately after the configure_done batch is always one
+        of the idle states: 'dormant', 'prepared', or 'visible'. The
+        transitional states 'entering' and 'leaving' only appear during
+        an active scene transition, never as a first event.
+
+        Within a scene change the compositor emits a release batch
+        (transitions into 'dormant') and flushes it, then emits the
+        acquire batch (all other transitions) and flushes again. This
+        ordering lets a shared render-target pool be reclaimed before
+        the next acquire and is the only ordering guarantee the
+        compositor makes between batches.
+
+        Permitted transitions (the compositor never emits anything else):
+          dormant   -> prepared | visible | entering
+          prepared  -> dormant | visible | entering
+          visible   -> dormant | prepared | leaving
+          entering  -> visible | prepared | dormant
+          leaving   -> dormant | prepared | visible
+      </description>
+      <arg name="state" type="uint" enum="lifecycle_state"/>
+    </event>
+
+    <event name="shutdown">
+      <description summary="request graceful shutdown">
+        Sent when the widget should shut down gracefully.
+        Widget should clean up and exit.
+      </description>
+    </event>
+
+    <event name="transition_incoming">
+      <description summary="automatic scene transition will show this widget soon">
+        Emitted during automatic scene cycling pre-transition for widgets
+        in the incoming scene. This is a one-shot warm-up instruction:
+        hosts should render one fresh frame if the widget is currently
+        renderable, but must not enable animation frame callbacks for
+        non-visible lifecycle states. Manual scene drags do not emit this
+        event; they are represented only by lifecycle changes.
+      </description>
+    </event>
+
+    <event name="led_request_status">
+      <description summary="status update for an LED request">
+        Lifecycle update for a previous `led_temporary` or `led_endless`
+        request. `request_id` echoes the value the widget supplied.
+
+        Status semantics:
+          - accepted:   the request entered the queue (or was activated
+                        immediately).
+          - rejected:   the compositor refused the request without
+                        running it. Reserved for a future permissions
+                        layer; current implementations only emit
+                        accepted/superseded/expired.
+          - superseded: an endless was displaced from its tier — by
+                        `stop_led`, by another endless landing on the
+                        same tier (the previous holder loses the slot
+                        and will not come back), or by the widget
+                        disconnecting.
+          - expired:    a `led_temporary`'s duration ran out on its
+                        logical-time schedule. Fires whether or not the
+                        strip was showing the effect at the moment.
+
+        `led_endless` requests never receive `expired`; they end with
+        `superseded` once displaced or cancelled.
+      </description>
+      <arg name="request_id" type="uint" summary="echoed widget request id"/>
+      <arg name="status" type="uint" enum="led_request_status"/>
+    </event>
+
+    <!-- Setting events, one per setting.
+         A new setting is a new event after next_alarm,
+         at the raised version deck_widget_manager_v3 describes. -->
+
+    <event name="timezone">
+      <description summary="timezone setting update">
+        Current timezone, IANA identifier (e.g. "Europe/Prague").
+        Sent on connect and whenever the timezone changes.
+      </description>
+      <arg name="value" type="string" summary="IANA timezone identifier"/>
+    </event>
+
+    <event name="night_mode">
+      <description summary="night mode setting update">
+        Whether night mode is active. Sent on connect and on toggle.
+      </description>
+      <arg name="value" type="uint" enum="night_mode_state"/>
+    </event>
+
+    <event name="date_format">
+      <arg name="value" type="uint" enum="date_format"/>
+    </event>
+
+    <event name="time_format">
+      <arg name="value" type="uint" enum="time_format"/>
+    </event>
+
+    <event name="number_format">
+      <arg name="value" type="uint" enum="number_format"/>
+    </event>
+
+    <event name="temperature_unit">
+      <arg name="value" type="uint" enum="temperature_unit"/>
+    </event>
+
+    <event name="first_day_of_week">
+      <arg name="value" type="uint" enum="weekday"/>
+    </event>
+
+    <event name="unit_system">
+      <arg name="value" type="uint" enum="unit_system"/>
+    </event>
+
+    <event name="next_alarm">
+      <description summary="resolved next-to-fire alarm">
+        Soonest upcoming alarm derived host-side from the operator's alarm
+        list. Sent on connect and whenever the next-to-fire entry changes
+        (alarm add/edit/delete/fire/snooze, or timezone change).
+
+        `fire_at_utc_ms_hi` and `fire_at_utc_ms_lo` carry the high and low
+        32 bits of a signed 64-bit milliseconds-since-UNIX-epoch timestamp,
+        matching the hi/lo split pattern from wp_presentation_feedback. Both
+        args are zero when `present` is `absent`.
+      </description>
+      <arg name="present" type="uint" enum="presence"/>
+      <arg name="fire_at_utc_ms_hi" type="int"
+           summary="high 32 bits of the signed 64-bit ms timestamp"/>
+      <arg name="fire_at_utc_ms_lo" type="uint"
+           summary="low 32 bits of the signed 64-bit ms timestamp"/>
+      <arg name="name" type="string"
+           summary="operator-typed display name (max 256 UTF-8 bytes;
+                    compositor truncates over-long inputs with a trailing
+                    '…' on a char boundary). Empty when absent."/>
+    </event>
+
+    <!-- Touch input is handled via standard wl_seat/wl_touch rather than
+         custom protocol events. The compositor performs hit-testing and
+         surface-relative coordinate transformation, and sends wl_touch
+         events to the widget's rendering surface. During compositor-level
+         gestures (e.g. scene navigation), wl_touch.cancel is sent. -->
+
+    <!-- Enums -->
+
+    <enum name="lifecycle_state">
+      <description summary="widget visibility lifecycle">
+        Tracks whether the widget is on-screen, neighbouring an on-screen
+        widget, transitioning in or out under a scene-cycle drag, or
+        completely off-screen. The host runtime uses this to acquire and
+        release render-target buffers and to gate animation ticking.
+      </description>
+      <entry name="dormant"  value="0" summary="off-screen, no render target"/>
+      <entry name="prepared" value="1" summary="immediate neighbour, pre-rendered once"/>
+      <entry name="entering" value="2" summary="transitioning in under a drag"/>
+      <entry name="visible"  value="3" summary="active on-screen"/>
+      <entry name="leaving"  value="4" summary="transitioning out under a drag"/>
+    </enum>
+
+    <enum name="viewport_shape">
+      <description summary="widget viewport shape">
+        Shape of the region the widget renders into. Kept separate from
+        `display_shape` so viewport shapes can evolve independently of
+        panel shapes in future versions of the protocol. Today both
+        enums declare the same two values.
+      </description>
+      <entry name="rectangular" value="0"/>
+      <entry name="round" value="1"/>
+    </enum>
+
+    <enum name="display_shape">
+      <description summary="visible display shape">
+        Shape of the visible display area. Advisory layout metadata; the
+        widget coordinate space stays rectangular regardless of shape.
+      </description>
+      <entry name="rectangular" value="0"/>
+      <entry name="round" value="1"/>
+    </enum>
+
+    <enum name="night_mode_state">
+      <entry name="off" value="0"/>
+      <entry name="on" value="1"/>
+    </enum>
+
+    <enum name="led_effect">
+      <entry name="chase" value="0"/>
+      <entry name="knight_rider" value="1"/>
+      <entry name="scan" value="2"/>
+      <entry name="snake" value="3"/>
+      <entry name="breathe" value="4"/>
+      <entry name="solid" value="5"/>
+    </enum>
+
+    <enum name="led_scope">
+      <entry name="local" value="0" summary="scene-scoped; hidden while the widget's scene is not active"/>
+      <entry name="global" value="1" summary="system-wide; runs when no local effect is active on the strip"/>
+    </enum>
+
+    <enum name="led_request_status">
+      <entry name="accepted" value="0" summary="request entered the queue or became active"/>
+      <entry name="rejected" value="1" summary="reserved; compositor refused the request"/>
+      <entry name="superseded" value="2" summary="endless was displaced from its tier and will not come back"/>
+      <entry name="expired" value="3" summary="led_temporary's duration ran out on its logical-time schedule"/>
+    </enum>
+
+    <enum name="date_format">
+      <entry name="dd_mm_yyyy_dot" value="0" summary="DD.MM.YYYY"/>
+      <entry name="dd_mm_yyyy_slash" value="1" summary="DD/MM/YYYY"/>
+      <entry name="d_m_yyyy_slash" value="2" summary="D/M/YYYY"/>
+      <entry name="m_d_yyyy_slash" value="3" summary="M/D/YYYY"/>
+      <entry name="dd_mm_yyyy_dash" value="4" summary="DD-MM-YYYY"/>
+      <entry name="yyyy_m_d_slash" value="5" summary="YYYY/M/D"/>
+      <entry name="yyyy_mm_dd_dot" value="6" summary="YYYY.MM.DD"/>
+      <entry name="yyyy_mm_dd_dash" value="7" summary="YYYY-MM-DD"/>
+    </enum>
+
+    <enum name="time_format">
+      <entry name="hour12" value="0" summary="12-hour clock"/>
+      <entry name="hour24" value="1" summary="24-hour clock"/>
+    </enum>
+
+    <enum name="number_format">
+      <entry name="space_group_comma_decimal" value="0" summary="1 234 567,89"/>
+      <entry name="comma_group_dot_decimal" value="1" summary="1,234,567.89"/>
+      <entry name="dot_group_comma_decimal" value="2" summary="1.234.567,89"/>
+      <entry name="space_group_dot_decimal" value="3" summary="1 234 567.89"/>
+    </enum>
+
+    <enum name="temperature_unit">
+      <entry name="celsius" value="0"/>
+      <entry name="fahrenheit" value="1"/>
+    </enum>
+
+    <enum name="weekday">
+      <entry name="monday" value="1"/>
+      <entry name="tuesday" value="2"/>
+      <entry name="wednesday" value="3"/>
+      <entry name="thursday" value="4"/>
+      <entry name="friday" value="5"/>
+      <entry name="saturday" value="6"/>
+      <entry name="sunday" value="7"/>
+    </enum>
+
+    <enum name="unit_system">
+      <entry name="metric" value="0"/>
+      <entry name="imperial" value="1"/>
+    </enum>
+
+    <enum name="presence">
+      <entry name="absent" value="0"/>
+      <entry name="present" value="1"/>
+    </enum>
+  </interface>
+</protocol>

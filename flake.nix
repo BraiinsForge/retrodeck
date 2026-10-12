@@ -73,7 +73,7 @@
           ./native/doom
           ./native/src
           ./native/vendor/tamalib-rs
-          ./protocol/deck-widget-v1.xml
+          ./protocol/deck-widget.xml
         ];
       };
       nativeCargoDeps = pkgs.rustPlatform.importCargoLock {

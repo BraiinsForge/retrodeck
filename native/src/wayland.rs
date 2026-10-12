@@ -1,15 +1,15 @@
 use crate::input::TouchReport;
-use crate::protocol::deck_widget::{deck_widget_manager_v1, deck_widget_surface_v1};
+use crate::protocol::deck_widget::{deck_widget_manager_v3, deck_widget_surface_v2};
 use crate::{canvas, controls, polling};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use rustix::fs::{MemfdFlags, ftruncate, memfd_create};
 use rustix::mm::{MapFlags, ProtFlags, mmap, munmap};
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::ffi::c_void;
+use std::ffi::{OsStr, c_void};
 use std::fs::OpenOptions;
 use std::io::ErrorKind;
-use std::os::fd::{AsFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -19,8 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use wayland_client::backend::WaylandError;
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
-    wl_touch,
+    wl_buffer, wl_compositor, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface, wl_touch,
 };
 use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum, delegate_noop};
 
@@ -28,8 +27,7 @@ const BUFFER_COUNT: usize = 3;
 const CONFIGURE_TIMEOUT: Duration = Duration::from_secs(2);
 const GAME_INSET: usize = 16;
 const O_CLOEXEC: i32 = 0o2000000;
-pub const WIDGET_HANDOFF_FD: RawFd = 9;
-pub const WIDGET_HANDOFF_FD_ENV: &str = "RETRO_DECK_WIDGET_FD";
+pub const WIDGET_KEY_ENV: &str = "BMC_WIDGET_KEY";
 static SHM_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 struct Mapping {
@@ -117,8 +115,8 @@ struct State {
     shm: Option<wl_shm::WlShm>,
     seat: Option<wl_seat::WlSeat>,
     touch: Option<wl_touch::WlTouch>,
-    manager: Option<deck_widget_manager_v1::DeckWidgetManagerV1>,
-    widget_surface: Option<deck_widget_surface_v1::DeckWidgetSurfaceV1>,
+    manager: Option<deck_widget_manager_v3::DeckWidgetManagerV3>,
+    widget_surface: Option<deck_widget_surface_v2::DeckWidgetSurfaceV2>,
     surface: Option<wl_surface::WlSurface>,
     configured: bool,
     width: u32,
@@ -134,6 +132,33 @@ struct State {
 }
 
 impl State {
+    fn widget_event(&mut self, event: deck_widget_surface_v2::Event) {
+        use deck_widget_surface_v2::{Event, LifecycleState};
+        match event {
+            Event::Configure { width, height, .. } => {
+                self.width = width;
+                self.height = height;
+            }
+            Event::ConfigureDone => self.configured = frame_size(self.width, self.height).is_ok(),
+            Event::Params { fd, .. }
+            | Event::Credentials { fd, .. }
+            | Event::CredentialSecrets { fd, .. } => {
+                // No params or credential slots are declared in our manifest.
+                // Even unused payloads own an FD, including at runtime.
+                drop(fd);
+            }
+            Event::Lifecycle { state } => {
+                self.visible = !matches!(state, WEnum::Value(LifecycleState::Dormant));
+                if self.visible {
+                    self.refresh_requested = true;
+                }
+            }
+            Event::TransitionIncoming => self.refresh_requested = true,
+            Event::Shutdown => self.shutdown = true,
+            _ => {}
+        }
+    }
+
     fn push_touch(&mut self, pressed: bool, released: bool) {
         let max_x = self.width.saturating_sub(1) as i32;
         let max_y = self.height.saturating_sub(1) as i32;
@@ -150,6 +175,24 @@ impl State {
 struct Widget {
     queue: EventQueue<State>,
     state: State,
+}
+
+fn widget_instance_key(value: Option<&OsStr>) -> Result<String, String> {
+    let value = value
+        .and_then(OsStr::to_str)
+        .ok_or_else(|| "BMC_WIDGET_KEY is unavailable or is not UTF-8".to_owned())?;
+    let canonical = value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+            }
+        });
+    if !canonical {
+        return Err("BMC_WIDGET_KEY must be a canonical configured-widget UUID".to_owned());
+    }
+    Ok(value.to_owned())
 }
 
 fn display_socket_path(display: &Path, runtime_dir: Option<&Path>) -> Result<PathBuf, String> {
@@ -200,51 +243,14 @@ fn connect(display: Option<&Path>) -> Result<(EventQueue<State>, State), String>
     initialize_connection(connection)
 }
 
-fn connect_from_fd(wayland_fd: OwnedFd) -> Result<(EventQueue<State>, State), String> {
-    let stream = unsafe { UnixStream::from_raw_fd(wayland_fd.into_raw_fd()) };
-    let connection = Connection::from_socket(stream)
-        .map_err(|error| format!("cannot connect to the inherited Wayland display: {error}"))?;
-    initialize_connection(connection)
-}
-
-fn take_widget_handoff() -> Result<Option<OwnedFd>, String> {
-    let Some(value) = std::env::var_os(WIDGET_HANDOFF_FD_ENV) else {
-        return Ok(None);
-    };
-    let descriptor = value
-        .to_str()
-        .and_then(|value| value.parse::<RawFd>().ok())
-        .filter(|descriptor| *descriptor == WIDGET_HANDOFF_FD)
-        .ok_or_else(|| "inherited BMC widget descriptor is invalid".to_owned())?;
-    Ok(Some(unsafe { OwnedFd::from_raw_fd(descriptor) }))
-}
-
-/// Open a connection from the registered widget process for a child renderer.
-/// BMC retains the process credentials of this connection after it is passed on.
-pub fn connect_child_widget() -> Result<OwnedFd, String> {
-    let display = std::env::var_os("WAYLAND_DISPLAY")
-        .filter(|display| !display.is_empty())
-        .map(PathBuf::from)
-        .ok_or_else(|| "WAYLAND_DISPLAY is unavailable for BMC widget handoff".to_owned())?;
-    let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
-    let socket_path = display_socket_path(&display, runtime_dir.as_deref())?;
-    let stream = UnixStream::connect(socket_path)
-        .map_err(|error| format!("cannot open BMC widget handoff: {error}"))?;
-    Ok(unsafe { OwnedFd::from_raw_fd(stream.into_raw_fd()) })
-}
-
 impl Widget {
     fn open(display: Option<&Path>) -> Result<Self, String> {
+        let key = widget_instance_key(std::env::var_os(WIDGET_KEY_ENV).as_deref())?;
         let (queue, state) = connect(display)?;
-        Self::finish_open(queue, state)
+        Self::finish_open(queue, state, &key)
     }
 
-    fn open_from_fd(wayland_fd: OwnedFd) -> Result<Self, String> {
-        let (queue, state) = connect_from_fd(wayland_fd)?;
-        Self::finish_open(queue, state)
-    }
-
-    fn finish_open(queue: EventQueue<State>, mut state: State) -> Result<Self, String> {
+    fn finish_open(queue: EventQueue<State>, mut state: State, key: &str) -> Result<Self, String> {
         let qh = queue.handle();
         let compositor = state.compositor.clone().unwrap();
         let manager = state
@@ -252,7 +258,7 @@ impl Widget {
             .clone()
             .ok_or_else(|| "Deck widget protocol is unavailable".to_owned())?;
         let surface = compositor.create_surface(&qh, ());
-        state.widget_surface = Some(manager.get_widget_surface(&surface, &qh, ()));
+        state.widget_surface = Some(manager.get_widget_surface(key.to_owned(), &surface, &qh, ()));
         state.surface = Some(surface.clone());
         surface.commit();
         let mut widget = Self { queue, state };
@@ -570,15 +576,9 @@ pub fn open_widget_at(display: &Path) -> Result<(), String> {
     open_widget_for(Some(display))
 }
 
-/// Open the game's normal BMC widget surface through the descriptor handed
-/// down by the registered dashboard process.
+/// Connect the game to the configured BMC widget instance inherited from its parent.
 pub fn open_game_widget() -> Result<(), String> {
-    close();
-    let handoff = take_widget_handoff()?
-        .ok_or_else(|| "BMC widget handoff is unavailable for gameplay".to_owned())?;
-    let widget = Widget::open_from_fd(handoff)?;
-    WIDGET.with(|current| *current.borrow_mut() = Some(widget));
-    Ok(())
+    open_widget_for(None)
 }
 
 pub fn present_game_xrgb(
@@ -590,10 +590,7 @@ pub fn present_game_xrgb(
         let width = widget.state.width as usize;
         let height = widget.state.height as usize;
         widget.present_frame(|pixels| {
-            fill_gameplay_background(
-                pixels,
-                std::env::var_os("RETRO_DECK_EXIT_HINT").is_some(),
-            );
+            fill_gameplay_background(pixels, std::env::var_os("RETRO_DECK_EXIT_HINT").is_some());
             scale_game_frame(frame, source_width, source_height, pixels, width, height);
         })
     })
@@ -643,10 +640,7 @@ fn scale_game_frame(
 
 fn open_widget_for(display: Option<&Path>) -> Result<(), String> {
     close();
-    let widget = match take_widget_handoff()? {
-        Some(handoff) => Widget::open_from_fd(handoff)?,
-        None => Widget::open(display)?,
-    };
+    let widget = Widget::open(display)?;
     WIDGET.with(|current| *current.borrow_mut() = Some(widget));
     Ok(())
 }
@@ -828,7 +822,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                 "wl_seat" if state.seat.is_none() => {
                     state.seat = Some(registry.bind(name, version.min(7), qh, ()));
                 }
-                "deck_widget_manager_v1" if state.manager.is_none() => {
+                "deck_widget_manager_v3" if state.manager.is_none() => {
                     state.manager = Some(registry.bind(name, 1, qh, ()));
                 }
                 _ => {}
@@ -841,7 +835,7 @@ delegate_noop!(State: ignore wl_compositor::WlCompositor);
 delegate_noop!(State: ignore wl_surface::WlSurface);
 delegate_noop!(State: ignore wl_shm::WlShm);
 delegate_noop!(State: ignore wl_shm_pool::WlShmPool);
-delegate_noop!(State: ignore deck_widget_manager_v1::DeckWidgetManagerV1);
+delegate_noop!(State: ignore deck_widget_manager_v3::DeckWidgetManagerV3);
 
 impl Dispatch<wl_buffer::WlBuffer, usize> for State {
     fn event(
@@ -932,41 +926,87 @@ impl Dispatch<wl_touch::WlTouch, ()> for State {
     }
 }
 
-impl Dispatch<deck_widget_surface_v1::DeckWidgetSurfaceV1, ()> for State {
+impl Dispatch<deck_widget_surface_v2::DeckWidgetSurfaceV2, ()> for State {
     fn event(
         state: &mut Self,
-        _: &deck_widget_surface_v1::DeckWidgetSurfaceV1,
-        event: deck_widget_surface_v1::Event,
+        _: &deck_widget_surface_v2::DeckWidgetSurfaceV2,
+        event: deck_widget_surface_v2::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        match event {
-            deck_widget_surface_v1::Event::Configure { width, height, .. } => {
-                state.width = width;
-                state.height = height;
-            }
-            deck_widget_surface_v1::Event::ConfigureDone => state.configured = true,
-            deck_widget_surface_v1::Event::Lifecycle { state: lifecycle } => {
-                state.visible = lifecycle != 0;
-                // Leaving dormancy reclaims the widget's render target;
-                // without a fresh commit the scene shows black.
-                if lifecycle != 0 {
-                    state.refresh_requested = true;
-                }
-            }
-            deck_widget_surface_v1::Event::TransitionIncoming => {
-                state.refresh_requested = true;
-            }
-            deck_widget_surface_v1::Event::Shutdown => state.shutdown = true,
-            _ => {}
-        }
+        state.widget_event(event);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accepts_only_canonical_configured_widget_keys() {
+        use std::os::unix::ffi::OsStrExt;
+        let key = "77c5424d-8dc4-4b22-a14b-d9ee90a2af76";
+        assert_eq!(widget_instance_key(Some(OsStr::new(key))).unwrap(), key);
+        assert!(widget_instance_key(None).is_err());
+        for value in [
+            "",
+            "retro-deck",
+            "77C5424D-8DC4-4B22-A14B-D9EE90A2AF76",
+            "77c5424d8dc44b22a14bd9ee90a2af76",
+            "77c5424d-8dc4-4b22-a14b-d9ee90a2af7g",
+        ] {
+            assert!(widget_instance_key(Some(OsStr::new(value))).is_err());
+        }
+        assert!(widget_instance_key(Some(OsStr::from_bytes(&[0xff]))).is_err());
+    }
+
+    #[test]
+    fn waits_for_the_complete_configuration_batch_and_replays_lifecycle() {
+        use deck_widget_surface_v2::{Event, LifecycleState, ViewportShape};
+        let mut state = State::default();
+        state.widget_event(Event::Configure {
+            width: 1280,
+            height: 480,
+            viewport_shape: WEnum::Value(ViewportShape::Rectangular),
+            token: "test-instance".into(),
+        });
+        assert!(!state.configured);
+        state.widget_event(Event::ConfigureDone);
+        assert!(state.configured);
+        state.widget_event(Event::Lifecycle {
+            state: WEnum::Value(LifecycleState::Dormant),
+        });
+        assert!(!state.visible);
+        state.widget_event(Event::Lifecycle {
+            state: WEnum::Value(LifecycleState::Prepared),
+        });
+        assert!(state.visible && state.refresh_requested);
+        state.refresh_requested = false;
+        state.widget_event(Event::TransitionIncoming);
+        assert!(state.refresh_requested);
+        state.widget_event(Event::Shutdown);
+        assert!(state.shutdown);
+    }
+
+    #[test]
+    fn closes_unused_configuration_and_credential_descriptors() {
+        use deck_widget_surface_v2::Event;
+        use std::io::Read;
+        let events: [fn(OwnedFd) -> Event; 3] = [
+            |fd| Event::Params { fd, size: 2 },
+            |fd| Event::Credentials { fd, size: 2 },
+            |fd| Event::CredentialSecrets { fd, size: 2 },
+        ];
+        let mut state = State::default();
+        for event in events {
+            let (descriptor, mut peer) = UnixStream::pair().unwrap();
+            peer.set_read_timeout(Some(Duration::from_millis(100)))
+                .unwrap();
+            state.widget_event(event(descriptor.into()));
+            assert_eq!(peer.read(&mut [0]).unwrap(), 0);
+        }
+    }
 
     #[test]
     fn resolves_explicit_display_paths() {
