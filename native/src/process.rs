@@ -673,7 +673,7 @@ mod tests {
         let helper = helper_script(body);
         let result = run_helper(&helper, input);
         std::fs::remove_file(helper).unwrap();
-        assert_eq!(result.phase, expected.0);
+        assert_eq!(result.phase, expected.0, "{result:?}");
         assert_eq!(result.exit_code, expected.1);
         assert_eq!(result.signal, expected.2);
         assert_eq!(result.error.is_some(), expected.3);
@@ -686,7 +686,7 @@ mod tests {
         let helper = helper_script(&body);
         let input = b"test net\nsecret!9\n";
         let result = run_helper(&helper, input);
-        assert_eq!(result.phase, Complete);
+        assert_eq!(result.phase, Complete, "{result:?}");
         assert_eq!(result.exit_code, Some(0));
         assert_eq!(std::fs::read(&capture).unwrap(), input);
         std::fs::remove_file(&capture).unwrap();
