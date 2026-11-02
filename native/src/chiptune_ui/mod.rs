@@ -757,7 +757,17 @@ mod tests {
 
     #[test]
     fn final_block_waits_for_output_before_automatic_navigation() {
-        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/chiptune-fixtures");
+        let fixtures = crate::test_support::fixture_directory("chiptune-final-block");
+        std::fs::write(
+            fixtures.join("mono-44100.ogg"),
+            include_bytes!("../chiptune-fixtures/mono-44100.ogg"),
+        )
+        .unwrap();
+        std::fs::write(
+            fixtures.join("stereo-44100.ogg"),
+            include_bytes!("../chiptune-fixtures/stereo-44100.ogg"),
+        )
+        .unwrap();
         let mut state = PlayerState::new(
             vec![
                 fixtures.join("mono-44100.ogg"),
@@ -790,11 +800,15 @@ mod tests {
         assert!(session.generate(&mut state, 3 * BLOCK_NS));
         assert!(state.pending.is_none() && !state.pending_end);
         assert_eq!(state.file_index, 1);
+        drop(state);
+        std::fs::remove_dir_all(fixtures).unwrap();
     }
 
     #[test]
     fn failed_reopen_releases_ownership_and_resumes_muted_pacing() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../chiptunes/crazy.ogg");
+        let directory = crate::test_support::fixture_directory("chiptune-reopen");
+        let path = directory.join("crazy.ogg");
+        std::fs::write(&path, include_bytes!("../../../chiptunes/crazy.ogg")).unwrap();
         let mut state = PlayerState::new(vec![path], 1, String::new());
         assert!(state.open_index(0));
         let mut session = Session {
@@ -819,11 +833,15 @@ mod tests {
         session.set_volume(0);
         assert!(session.audio_owned);
         assert_eq!(session.volume, 0);
+        drop(state);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
     fn real_ogg_navigation_and_muted_pacing() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../chiptunes/crazy.ogg");
+        let directory = crate::test_support::fixture_directory("chiptune-navigation");
+        let path = directory.join("crazy.ogg");
+        std::fs::write(&path, include_bytes!("../../../chiptunes/crazy.ogg")).unwrap();
         let mut state = PlayerState::new(vec![path], 1, String::new());
         assert!(state.open_index(0));
         assert_eq!(state.metadata.as_ref().unwrap().title, "crazy");
@@ -850,5 +868,7 @@ mod tests {
         assert!(session.apply(&mut state, &[Command::Back, Command::Pause, Command::Mode]));
         assert!(state.paused);
         assert_eq!(state.mode, Mode::Shuffle);
+        drop(state);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }
