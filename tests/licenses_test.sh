@@ -58,12 +58,12 @@ for notice in \
     '===== axum-0.8.8/LICENSE =====' \
     '===== percent-encoding-2.3.2/LICENSE-MIT =====' \
     '===== serde_urlencoded-0.7.1/LICENSE-APACHE =====' \
-    '===== tokio-1.49.0/LICENSE =====' \
+    '===== tokio-1.53.3/LICENSE =====' \
     '===== cc-1.4.0/LICENSE-MIT =====' \
     '===== miniz_oxide-0.8.9/LICENSE-MIT.md =====' \
     '===== simd-adler32-0.3.10/LICENSE.md =====' \
     '===== windows-sys-0.61.2/license-mit =====' \
-    '===== zip-2.4.2/LICENSE ====='; do
+    '===== zip-9.0.0/LICENSE ====='; do
   grep -Fq "$notice" \
     "$runtime/share/licenses/runtime/Rust-crates-NOTICES.txt"
 done

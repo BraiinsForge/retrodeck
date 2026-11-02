@@ -43,8 +43,6 @@ pkgs.runCommand "retro-deck-runtime-licenses" {
     append_rust_notice adler2-2.0.1 LICENSE-APACHE
     append_rust_notice adler2-2.0.1 LICENSE-MIT
     append_rust_notice aho-corasick-1.1.5 LICENSE-MIT
-    append_rust_notice arbitrary-1.5.0 LICENSE-APACHE
-    append_rust_notice arbitrary-1.5.0 LICENSE-MIT
     append_rust_notice atomic-waker-1.1.2 LICENSE-APACHE
     append_rust_notice atomic-waker-1.1.2 LICENSE-MIT
     append_rust_notice atomic-waker-1.1.2 LICENSE-THIRD-PARTY
@@ -57,12 +55,6 @@ pkgs.runCommand "retro-deck-runtime-licenses" {
     append_rust_notice core_detect-1.0.0 LICENSE-MIT
     append_rust_notice crc32fast-1.5.2 LICENSE-APACHE
     append_rust_notice crc32fast-1.5.2 LICENSE-MIT
-    append_rust_notice crossbeam-utils-0.8.23 LICENSE-APACHE
-    append_rust_notice crossbeam-utils-0.8.23 LICENSE-MIT
-    append_rust_notice derive_arbitrary-1.5.0 LICENSE-APACHE
-    append_rust_notice derive_arbitrary-1.5.0 LICENSE-MIT
-    append_rust_notice displaydoc-0.2.7 LICENSE-APACHE
-    append_rust_notice displaydoc-0.2.7 LICENSE-MIT
     append_rust_notice encoding_rs-0.8.42 LICENSE-APACHE
     append_rust_notice encoding_rs-0.8.42 LICENSE-MIT
     append_rust_notice encoding_rs-0.8.42 LICENSE-WHATWG
@@ -128,24 +120,21 @@ pkgs.runCommand "retro-deck-runtime-licenses" {
     append_rust_notice socket2-0.6.5 LICENSE-APACHE
     append_rust_notice socket2-0.6.5 LICENSE-MIT
     append_rust_notice spin-0.9.9 LICENSE
-    append_rust_notice syn-2.0.119 LICENSE-APACHE
-    append_rust_notice syn-2.0.119 LICENSE-MIT
     append_rust_notice syn-3.0.9 LICENSE-APACHE
     append_rust_notice syn-3.0.9 LICENSE-MIT
     append_rust_notice sync_wrapper-1.0.2 LICENSE
-    append_rust_notice thiserror-2.0.21 LICENSE-APACHE
-    append_rust_notice thiserror-2.0.21 LICENSE-MIT
-    append_rust_notice thiserror-impl-2.0.21 LICENSE-APACHE
-    append_rust_notice thiserror-impl-2.0.21 LICENSE-MIT
-    append_rust_notice tokio-1.49.0 LICENSE
-    append_rust_notice tokio-macros-2.6.1 LICENSE
+    append_rust_notice tokio-1.53.3 LICENSE
+    append_rust_notice tokio-macros-2.7.2 LICENSE
     append_rust_notice tower-0.5.3 LICENSE
     append_rust_notice tower-layer-0.3.3 LICENSE
     append_rust_notice tower-service-0.3.3 LICENSE
+    append_rust_notice typed-path-0.12.4 LICENSE-APACHE
+    append_rust_notice typed-path-0.12.4 LICENSE-MIT
     append_rust_notice wasi-0.11.1+wasi-snapshot-preview1 LICENSE-APACHE
     append_rust_notice wasi-0.11.1+wasi-snapshot-preview1 LICENSE-Apache-2.0_WITH_LLVM-exception
     append_rust_notice wasi-0.11.1+wasi-snapshot-preview1 LICENSE-MIT
-    append_rust_notice zip-2.4.2 LICENSE
+    append_rust_notice zip-9.0.0 LICENSE
+    append_rust_notice zlib-rs-0.6.8 LICENSE
   append_rust_notice zopfli-0.8.4 COPYING
   append_rust_notice cc-1.4.0 LICENSE-APACHE
   append_rust_notice cc-1.4.0 LICENSE-MIT

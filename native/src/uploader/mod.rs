@@ -681,13 +681,16 @@ fn decode_upload(name: &str, filename: &str, bytes: &[u8]) -> Result<Vec<u8>> {
     let mut file = archive
         .by_index(files[0])
         .map_err(|_| "the ZIP contains an unsafe or encrypted member")?;
-    if file.name().contains(['/', '\\'])
+    let member_name = file
+        .name()
+        .map_err(|_| "the ZIP contains an unsafe or encrypted member")?;
+    if member_name.contains(['/', '\\'])
         || file.unix_mode().is_some_and(|m| m & 0o170000 == 0o120000)
         || file.encrypted()
     {
         return Err("the ZIP contains an unsafe or encrypted member".into());
     }
-    if extension(file.name()) != spec.extension
+    if extension(member_name.as_ref()) != spec.extension
         || file.size() == 0
         || file.size() > spec.maximum as u64
     {
