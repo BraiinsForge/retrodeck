@@ -431,9 +431,6 @@ pub fn touch(
     }
     None
 }
-pub fn render(s: &State) -> Vec<DrawOp> {
-    render_with_network(s, &crate::network::NetworkStatus::default())
-}
 
 fn pixel_panel(ops: &mut Vec<DrawOp>, r: Rect, inside: u32, border: u32) {
     const CUT: u32 = 4;

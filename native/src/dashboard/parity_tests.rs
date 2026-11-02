@@ -113,7 +113,7 @@ mod tests {
     #[test]
     fn settings_and_wifi_geometry_match_lisp_oracle() {
         let state = settings::State::new(42, 60, "us");
-        let ops = settings::render(&state);
+        let ops = settings::render_with_network(&state, &Default::default());
         assert!(matches!(
             ops.first(),
             Some(settings::DrawOp::Clear(0x000000))
