@@ -76,6 +76,9 @@ verify_package ten-seconds-deck bin/ten-seconds-deck
 build_flake .#checks.x86_64-linux.ten-seconds-smoke >/dev/null
 verify_package chiptune-deck bin/chiptune-deck
 build_flake .#checks.x86_64-linux.chiptune-smoke >/dev/null
+verify_package tamagotchi-deck bin/tamagotchi-deck
+build_flake .#checks.x86_64-linux.tamagotchi-smoke >/dev/null
+echo "tamagotchi-smoke: OK"
 verify_package nes-deck bin/nes-deck
 verify_package gb-deck bin/gb-deck
 verify_package zx-deck bin/zx-deck

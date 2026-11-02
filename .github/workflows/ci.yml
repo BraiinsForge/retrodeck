@@ -44,11 +44,25 @@ jobs:
             ops/deploy.sh \
             ops/deploy/activate.sh \
             ops/provision-deck.sh \
+            ops/lib/install-stock-widget.sh \
+            ops/deck-wifi/deck-wifi-profile-add \
+            ops/deck-wifi/deck-wifi-select \
+            ops/deck-wifi/deck-wifi-watch \
+            ops/deck-wifi/deck-wifi.init \
+            deploy/ecl \
+            deploy/terminal/retro-terminal \
+            deploy/widget/retro-deck \
+            deploy/menu/fetch-covers \
+            deploy/menu/node-mode \
+            deploy/menu/deck-keyboard-quirks \
+            deploy/menu/nes-deck-keyboard.hotplug \
+            deploy/menu/nes-deck.init \
             deploy/menu/deck-menu-launcher \
             deploy/menu/nes-deck-swap.init \
             deploy/uploader/nes-deck-uploader.init \
             tests/nes_deck_swap_test.sh \
             tests/run-host-tests.sh \
+            tests/native_hosts_test.sh \
             tests/verify-arm-builds.sh
 
       - name: Run host regression suite

@@ -18,6 +18,8 @@ fail() {
 	exit 1
 }
 
+# Called by the exit/signal trap after acquiring the lock.
+# shellcheck disable=SC2329
 cleanup() {
 	rm -f "${TEMP_PROFILE:-}" 2>/dev/null || :
 	rm -f "${TEMP_PREFERRED:-}" 2>/dev/null || :
@@ -54,7 +56,7 @@ profile_hex() {
 
 IFS= read -r ssid || fail
 IFS= read -r passphrase || fail
-IFS= read -r extra && fail
+IFS= read -r _ && fail
 
 valid_length "$ssid" 1 32 || fail
 valid_length "$passphrase" 8 63 || fail

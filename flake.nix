@@ -1038,6 +1038,24 @@ PATCH
           touch $out
         '';
 
+        tamagotchi-smoke = pkgs.runCommand "tamagotchi-smoke" { } ''
+          binary=${self.packages.${system}.tamagotchi-deck}/bin/tamagotchi-deck
+          ${pkgs.binutils}/bin/readelf -h "$binary" | grep -q 'Machine:.*ARM'
+          ! ${pkgs.binutils}/bin/readelf -l "$binary" | grep -q INTERP
+          ! ${pkgs.binutils}/bin/readelf -d "$binary" | grep -q NEEDED
+          status=0
+          ${pkgs.qemu-user}/bin/qemu-arm "$binary" >run.log 2>&1 || status=$?
+          test "$status" -eq 1
+          grep -q 'usage:' run.log
+          # Exercise firmware rejection before any display, audio, or save access.
+          printf '\000' >invalid.b
+          status=0
+          ${pkgs.qemu-user}/bin/qemu-arm "$binary" invalid.b >run.log 2>&1 || status=$?
+          test "$status" -eq 1
+          grep -q 'firmware' run.log
+          touch $out
+        '';
+
         chiptune-smoke = pkgs.runCommand "chiptune-smoke" { } ''
           binary=${self.packages.${system}.chiptune-deck}/bin/chiptune-deck
           ${pkgs.binutils}/bin/readelf -h "$binary" | grep -q 'Machine:.*ARM'

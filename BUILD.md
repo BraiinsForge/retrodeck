@@ -78,6 +78,7 @@ nix build --no-link --print-out-paths .#gb-deck
 nix build --no-link --print-out-paths .#zx-deck
 nix build --no-link --print-out-paths .#gba-deck
 nix build --no-link --print-out-paths .#doom-deck
+nix build --no-link --print-out-paths .#tamagotchi-deck
 nix build --no-link --print-out-paths .#fbterm-deck
 nix build --no-link --print-out-paths .#rlwrap-deck
 nix build --no-link --print-out-paths .#lua-deck
@@ -98,6 +99,7 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 | `gb-deck` | `bin/gb-deck` |
 | `zx-deck` | `bin/zx-deck` |
 | `gba-deck` | `bin/gba-deck` |
+| `tamagotchi-deck` | `bin/tamagotchi-deck`, Tamagotchi P1 host |
 | `fbterm-deck` | `bin/{fbterm,loadkeys}` plus font and keymaps |
 | `rlwrap-deck` | `bin/rlwrap` |
 | `lua-deck` | `bin/lua` |
@@ -119,6 +121,10 @@ Build and inspect the complete deployable matrix with:
 ```sh
 tests/verify-arm-builds.sh
 ```
+
+The Tamagotchi gate includes ARM/static/reference checks and a QEMU startup
+probe with missing arguments and malformed synthetic firmware. No owner firmware
+or device is needed for that probe.
 
 The matrix checks static ARM executables and empty runtime reference closures,
 then runs application CLI and configuration probes under QEMU. It includes the

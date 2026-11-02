@@ -292,6 +292,8 @@ profile_ssid() {
 	esac
 }
 
+# Called by the exit/signal trap after acquiring the lock.
+# shellcheck disable=SC2329
 cleanup() {
 	[ -n "${SCAN_DIR:-}" ] && rm -rf "$SCAN_DIR" 2>/dev/null || true
 	[ -n "${UCI_WORK:-}" ] && rm -rf "$UCI_WORK" 2>/dev/null || true

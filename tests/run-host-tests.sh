@@ -22,6 +22,7 @@ trap 'rm -rf "$work"' EXIT INT TERM HUP
 
 CARGO_TARGET_DIR="$work/cargo-target" \
   "$cargo" test --manifest-path native/Cargo.toml --locked --lib
+CARGO_TARGET_DIR="$work/cargo-target" tests/native_hosts_test.sh
 CARGO_TARGET_DIR="$work/cargo-target" \
   "$cargo" build --manifest-path native/Cargo.toml --locked --bin rom-uploader
 tests/uploader-rust-http.sh "$work/cargo-target/debug/rom-uploader"
