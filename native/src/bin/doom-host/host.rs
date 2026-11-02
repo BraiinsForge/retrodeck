@@ -117,8 +117,10 @@ pub extern "C" fn retrodeck_doom_present(pixels: *const u32, width: c_int, heigh
     let shed = PRESENT_SKIP.swap(false, Ordering::Relaxed);
     if !shed {
         let pitch = width as usize * 4;
-        if let Err(error) =
+        // The DOOM bridge supplies width * height XRGB pixels for this call.
+        if let Err(error) = unsafe {
             retrodeck_native::game_video::present(pixels.cast(), width, height, pitch, false)
+        }
         {
             eprintln!("{NAME}: {error}");
             QUIT.store(true, Ordering::Relaxed);

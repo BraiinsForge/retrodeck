@@ -255,7 +255,8 @@ pub fn with_pixels<T>(callback: impl FnOnce(&[u8]) -> T) -> T {
     CANVAS.with(|canvas| callback(canvas.borrow().pixmap.data()))
 }
 
-pub fn rgb565_hash() -> u64 {
+#[cfg(test)]
+pub(crate) fn rgb565_hash() -> u64 {
     with_pixels(|pixels| {
         let mut hash = 0xcbf29ce484222325_u64;
         for color in pixels.chunks_exact(4) {

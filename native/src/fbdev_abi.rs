@@ -76,3 +76,66 @@ const _: [(); 160] = [(); std::mem::size_of::<FbVariableScreenInfo>()];
 const _: [(); 80] = [(); std::mem::size_of::<FbFixedScreenInfo>()];
 #[cfg(target_pointer_width = "32")]
 const _: [(); 68] = [(); std::mem::size_of::<FbFixedScreenInfo>()];
+
+pub(super) struct Geometry {
+    pub(super) stride: usize,
+    pub(super) map_size: usize,
+}
+
+pub(super) fn validate_rgb565_geometry(
+    variable: &FbVariableScreenInfo,
+    fixed: &FbFixedScreenInfo,
+) -> Result<Geometry, String> {
+    let rows = if variable.yres_virtual == 0 {
+        variable.yres
+    } else {
+        variable.yres_virtual
+    } as usize;
+    let stride = fixed.line_length as usize;
+    let required = stride
+        .checked_mul(rows)
+        .ok_or_else(|| "framebuffer geometry overflows the address space".to_owned())?;
+    let map_size = fixed.smem_len as usize;
+
+    if variable.xres != 600
+        || variable.yres != 1280
+        || variable.bits_per_pixel != 16
+        || variable.xoffset != 0
+        || variable.yoffset != 0
+        || rows < 1280
+        || fixed.kind != FB_TYPE_PACKED_PIXELS
+        || fixed.visual != FB_VISUAL_TRUECOLOR
+        || stride < 600 * 2
+        || !stride.is_multiple_of(2)
+        || map_size < required
+        || variable.red.offset != 11
+        || variable.red.length != 5
+        || variable.red.msb_right != 0
+        || variable.green.offset != 5
+        || variable.green.length != 6
+        || variable.green.msb_right != 0
+        || variable.blue.offset != 0
+        || variable.blue.length != 5
+        || variable.blue.msb_right != 0
+        || variable.transparency.length != 0
+    {
+        return Err(
+            "unsupported framebuffer; expected 600x1280 RGB565 with a valid stride".to_owned(),
+        );
+    }
+    Ok(Geometry { stride, map_size })
+}
+
+/// Query the Linux framebuffer ABI without imposing a consumer's format policy.
+pub(super) fn query_geometry(
+    fd: std::os::fd::RawFd,
+) -> std::io::Result<(FbVariableScreenInfo, FbFixedScreenInfo)> {
+    let mut variable = FbVariableScreenInfo::default();
+    let mut fixed = FbFixedScreenInfo::default();
+    if unsafe { libc::ioctl(fd, FBIOGET_VSCREENINFO, &mut variable) } != 0
+        || unsafe { libc::ioctl(fd, FBIOGET_FSCREENINFO, &mut fixed) } != 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok((variable, fixed))
+}

@@ -1,10 +1,9 @@
 use crate::canvas;
 #[cfg(test)]
 use crate::fbdev_abi::FbBitfield;
-use crate::fbdev_abi::{
-    FB_BLANK_UNBLANK, FB_TYPE_PACKED_PIXELS, FB_VISUAL_TRUECOLOR, FBIOBLANK, FBIOGET_FSCREENINFO,
-    FBIOGET_VSCREENINFO, FbFixedScreenInfo, FbVariableScreenInfo,
-};
+use crate::fbdev_abi::{FB_BLANK_UNBLANK, FBIOBLANK, FbFixedScreenInfo, FbVariableScreenInfo};
+#[cfg(test)]
+use crate::fbdev_abi::{FB_TYPE_PACKED_PIXELS, FB_VISUAL_TRUECOLOR};
 use rustix::mm::{MapFlags, ProtFlags, mmap, munmap};
 use std::cell::RefCell;
 use std::ffi::{c_int, c_ulong, c_void};
@@ -25,54 +24,20 @@ unsafe extern "C" {
     fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
 }
 
-struct Geometry {
-    stride: usize,
-    map_size: usize,
-}
+use crate::fbdev_abi::{Geometry, query_geometry};
 
 fn validate_geometry(
     variable: &FbVariableScreenInfo,
     fixed: &FbFixedScreenInfo,
 ) -> Result<Geometry, String> {
-    let rows = if variable.yres_virtual == 0 {
-        variable.yres
-    } else {
-        variable.yres_virtual
-    } as usize;
-    let stride = fixed.line_length as usize;
-    let required = stride
-        .checked_mul(rows)
-        .ok_or_else(|| "framebuffer geometry overflows the address space".to_owned())?;
-    let map_size = fixed.smem_len as usize;
-
-    if variable.xres != PHYSICAL_WIDTH as u32
-        || variable.yres != PHYSICAL_HEIGHT as u32
-        || variable.bits_per_pixel != 16
-        || variable.xoffset != 0
-        || variable.yoffset != 0
-        || rows < PHYSICAL_HEIGHT
-        || fixed.kind != FB_TYPE_PACKED_PIXELS
-        || fixed.visual != FB_VISUAL_TRUECOLOR
-        || fixed.line_length > c_int::MAX as u32
-        || stride < PHYSICAL_WIDTH * 2
-        || !stride.is_multiple_of(2)
-        || map_size < required
-        || variable.red.offset != 11
-        || variable.red.length != 5
-        || variable.red.msb_right != 0
-        || variable.green.offset != 5
-        || variable.green.length != 6
-        || variable.green.msb_right != 0
-        || variable.blue.offset != 0
-        || variable.blue.length != 5
-        || variable.blue.msb_right != 0
-        || variable.transparency.length != 0
-    {
+    let geometry = crate::fbdev_abi::validate_rgb565_geometry(variable, fixed)?;
+    // The dashboard's scanout path also passes strides through a C int.
+    if fixed.line_length > c_int::MAX as u32 {
         return Err(
             "unsupported framebuffer; expected 600x1280 RGB565 with a valid stride".to_owned(),
         );
     }
-    Ok(Geometry { stride, map_size })
+    Ok(geometry)
 }
 
 fn validate_console_geometry(
@@ -152,28 +117,8 @@ impl Framebuffer {
             .write(true)
             .open(path)
             .map_err(|error| format!("cannot open {}: {error}", path.display()))?;
-        let mut variable = FbVariableScreenInfo::default();
-        let mut fixed = FbFixedScreenInfo::default();
-        if unsafe {
-            ioctl(
-                file.as_raw_fd(),
-                FBIOGET_VSCREENINFO,
-                &mut variable as *mut FbVariableScreenInfo,
-            )
-        } != 0
-            || unsafe {
-                ioctl(
-                    file.as_raw_fd(),
-                    FBIOGET_FSCREENINFO,
-                    &mut fixed as *mut FbFixedScreenInfo,
-                )
-            } != 0
-        {
-            return Err(format!(
-                "cannot query framebuffer geometry: {}",
-                io::Error::last_os_error()
-            ));
-        }
+        let (variable, fixed) = query_geometry(file.as_raw_fd())
+            .map_err(|error| format!("cannot query framebuffer geometry: {error}"))?;
         let geometry = validate_geometry(&variable, &fixed)?;
         let mapping = Mapping::new(
             &file,
@@ -195,11 +140,6 @@ impl Framebuffer {
             pixels: vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT],
             frame: vec![0; geometry.map_size / 2],
         })
-    }
-
-    fn present_solid(&mut self, color: u32) -> Result<(), String> {
-        self.pixels.fill(rgb565(color));
-        self.publish()
     }
 
     fn present_rgba(&mut self, rgba: &[u8]) -> Result<(), String> {
@@ -301,28 +241,8 @@ pub fn read_console_scanout() -> Result<Vec<u16>, String> {
         .read(true)
         .open("/dev/fb0")
         .map_err(|error| format!("cannot open console framebuffer: {error}"))?;
-    let mut variable = FbVariableScreenInfo::default();
-    let mut fixed = FbFixedScreenInfo::default();
-    if unsafe {
-        ioctl(
-            file.as_raw_fd(),
-            FBIOGET_VSCREENINFO,
-            &mut variable as *mut FbVariableScreenInfo,
-        )
-    } != 0
-        || unsafe {
-            ioctl(
-                file.as_raw_fd(),
-                FBIOGET_FSCREENINFO,
-                &mut fixed as *mut FbFixedScreenInfo,
-            )
-        } != 0
-    {
-        return Err(format!(
-            "cannot query console framebuffer: {}",
-            io::Error::last_os_error()
-        ));
-    }
+    let (variable, fixed) = query_geometry(file.as_raw_fd())
+        .map_err(|error| format!("cannot query console framebuffer: {error}"))?;
     let geometry = validate_console_geometry(&variable, &fixed)?;
     let mapping = Mapping::new(
         &file,
@@ -357,15 +277,6 @@ pub fn close() {
     FRAMEBUFFER.with(|slot| *slot.borrow_mut() = None);
 }
 
-pub fn present_solid(color: u32) -> Result<(), String> {
-    FRAMEBUFFER.with(|slot| {
-        slot.borrow_mut()
-            .as_mut()
-            .ok_or_else(|| "fbdev display is not open".to_owned())?
-            .present_solid(color)
-    })
-}
-
 pub fn present_rgba(rgba: &[u8]) -> Result<(), String> {
     FRAMEBUFFER.with(|slot| {
         slot.borrow_mut()
@@ -387,7 +298,6 @@ pub fn size() -> Option<(u32, u32)> {
 mod tests {
     use super::*;
     use crate::test_support::fnv1a;
-    use std::mem;
 
     fn canvas_hash(canvas: &[u16]) -> u64 {
         fnv1a(canvas.iter().flat_map(|pixel| pixel.to_le_bytes()))
@@ -424,12 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn matches_linux_framebuffer_layout_and_geometry() {
-        assert_eq!(mem::size_of::<FbVariableScreenInfo>(), 160);
-        assert_eq!(
-            mem::size_of::<FbFixedScreenInfo>(),
-            if usize::BITS == 64 { 80 } else { 68 }
-        );
+    fn accepts_native_and_console_geometry() {
         let (variable, fixed) = valid_geometry();
         let geometry = validate_geometry(&variable, &fixed).unwrap();
         assert_eq!(geometry.stride, 1200);
@@ -448,6 +353,22 @@ mod tests {
         let (variable, mut fixed) = valid_geometry();
         fixed.line_length = 1198;
         assert!(validate_geometry(&variable, &fixed).is_err());
+
+        let (mut variable, mut fixed) = valid_geometry();
+        variable.xoffset = 1;
+        variable.red.offset = 10;
+        assert!(validate_geometry(&variable, &fixed).is_err());
+        assert!(validate_console_geometry(&variable, &fixed).is_ok());
+
+        variable.xoffset = 0;
+        variable.red.offset = 11;
+        variable.yres_virtual = 0;
+        fixed.line_length = 1216;
+        fixed.smem_len = 1216 * 1280;
+        assert_eq!(validate_geometry(&variable, &fixed).unwrap().stride, 1216);
+        fixed.smem_len -= 1;
+        assert!(validate_geometry(&variable, &fixed).is_err());
+        assert!(validate_console_geometry(&variable, &fixed).is_err());
     }
 
     #[test]

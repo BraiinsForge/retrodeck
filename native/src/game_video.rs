@@ -1,10 +1,7 @@
 //! Emulator video: integer nearest-neighbour scaling into the rotated Deck
 //! framebuffer, the normal BMC widget surface, or a headless test target.
 
-use crate::fbdev_abi::{
-    FB_TYPE_PACKED_PIXELS, FB_VISUAL_TRUECOLOR, FBIOGET_FSCREENINFO, FBIOGET_VSCREENINFO,
-    FbFixedScreenInfo, FbVariableScreenInfo,
-};
+use crate::fbdev_abi::{query_geometry, validate_rgb565_geometry};
 use std::ffi::c_void;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::sync::Mutex;
@@ -14,15 +11,15 @@ const LOGICAL_WIDTH: usize = 1280;
 const LOGICAL_HEIGHT: usize = 480;
 const SAFE_INSET: usize = 16;
 
-pub struct Layout {
-    pub x: usize,
-    pub y: usize,
-    pub width: usize,
-    pub height: usize,
-    pub scale: usize,
+struct Layout {
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+    scale: usize,
 }
 
-pub fn compute_scaled_layout(source_width: usize, source_height: usize) -> Option<Layout> {
+fn compute_scaled_layout(source_width: usize, source_height: usize) -> Option<Layout> {
     let usable_width = LOGICAL_WIDTH - 2 * SAFE_INSET;
     let usable_height = LOGICAL_HEIGHT - 2 * SAFE_INSET;
     if source_width == 0
@@ -80,7 +77,7 @@ struct Video {
 
 static VIDEO: Mutex<Option<Video>> = Mutex::new(None);
 
-pub fn rgb888_to_565(color: u32) -> u16 {
+fn rgb888_to_565(color: u32) -> u16 {
     let red = (color >> 16) & 0xff;
     let green = (color >> 8) & 0xff;
     let blue = color & 0xff;
@@ -96,45 +93,13 @@ fn open_fb() -> Result<FbTarget, String> {
         ));
     }
     let fd = unsafe { OwnedFd::from_raw_fd(raw) };
-    let mut var = FbVariableScreenInfo::default();
-    let mut fix = FbFixedScreenInfo::default();
-    if unsafe { libc::ioctl(fd.as_raw_fd(), FBIOGET_VSCREENINFO, &mut var) } != 0
-        || unsafe { libc::ioctl(fd.as_raw_fd(), FBIOGET_FSCREENINFO, &mut fix) } != 0
-    {
-        return Err(format!(
-            "cannot query /dev/fb0: {}",
-            std::io::Error::last_os_error()
-        ));
-    }
-    let rows = if var.yres_virtual != 0 {
-        var.yres_virtual
-    } else {
-        var.yres
-    } as usize;
-    let line_length = fix.line_length as usize;
-    let supported = var.xres == 600
-        && var.yres == 1280
-        && var.bits_per_pixel == 16
-        && var.xoffset == 0
-        && var.yoffset == 0
-        && rows >= 1280
-        && fix.kind == FB_TYPE_PACKED_PIXELS
-        && fix.visual == FB_VISUAL_TRUECOLOR
-        && line_length >= 1200
-        && line_length % 2 == 0
-        && line_length != 0
-        && rows <= usize::MAX / line_length
-        && fix.smem_len as usize >= line_length * rows
-        && (var.red.offset, var.red.length, var.red.msb_right) == (11, 5, 0)
-        && (var.green.offset, var.green.length, var.green.msb_right) == (5, 6, 0)
-        && (var.blue.offset, var.blue.length, var.blue.msb_right) == (0, 5, 0)
-        && var.transparency.length == 0;
-    if !supported {
-        return Err(
-            "unsupported framebuffer; expected 600x1280 RGB565 with a valid stride".to_owned(),
-        );
-    }
-    let map_bytes = fix.smem_len as usize;
+    let (var, fix) = query_geometry(fd.as_raw_fd())
+        .map_err(|error| format!("cannot query /dev/fb0: {error}"))?;
+    let geometry = validate_rgb565_geometry(&var, &fix).map_err(|_| {
+        "unsupported framebuffer; expected 600x1280 RGB565 with a valid stride".to_owned()
+    })?;
+    let map_bytes = geometry.map_size;
+    let line_length = geometry.stride;
     let memory = unsafe {
         libc::mmap(
             std::ptr::null_mut(),
@@ -320,7 +285,13 @@ pub fn open(headless: bool) -> Result<(), String> {
     Ok(())
 }
 
-pub fn present(
+/// Present a frame synchronously without retaining its source buffer.
+///
+/// # Safety
+/// `data` must point to initialized, readable memory covering every row's
+/// `width` pixels at the supplied byte `pitch`, for the duration of this call.
+/// The buffer must not be mutated concurrently. Pixels need not be aligned.
+pub unsafe fn present(
     data: *const c_void,
     width: u32,
     height: u32,
@@ -329,9 +300,20 @@ pub fn present(
 ) -> Result<(), String> {
     let width = width as usize;
     let height = height as usize;
-    let minimum_pitch = if rgb565 { width * 2 } else { width * 4 };
+    let minimum_pitch = width
+        .checked_mul(if rgb565 { 2 } else { 4 })
+        .ok_or_else(|| "video frame dimensions overflow".to_owned())?;
     if pitch < minimum_pitch {
         return Err("video frame pitch is too small".to_owned());
+    }
+    let bytes = height
+        .saturating_sub(1)
+        .checked_mul(pitch)
+        .and_then(|offset| offset.checked_add(minimum_pitch))
+        .filter(|bytes| *bytes <= isize::MAX as usize)
+        .ok_or_else(|| "video frame dimensions overflow".to_owned())?;
+    if bytes != 0 && data.is_null() {
+        return Err("video frame data is null".to_owned());
     }
     let mut guard = VIDEO.lock().expect("video lock");
     let video = guard

@@ -533,6 +533,7 @@ impl Widget {
         Ok(())
     }
 
+    #[cfg(test)]
     fn present_solid(&mut self, color: u32) -> Result<(), String> {
         self.present_frame(|pixels| pixels.fill(0xff00_0000 | (color & 0x00ff_ffff)))
     }
@@ -682,10 +683,6 @@ pub(crate) fn dispatch_inputs(timeout_ms: u32) -> Result<polling::InputDispatch,
     })
 }
 
-pub fn present_solid(color: u32) -> Result<(), String> {
-    with_widget(|widget| widget.present_solid(color))
-}
-
 pub fn present_rgba(rgba: &[u8]) -> Result<(), String> {
     with_widget(|widget| widget.present_rgba(rgba))
 }
@@ -709,15 +706,6 @@ pub fn size() -> Option<(u32, u32)> {
             .borrow()
             .as_ref()
             .map(|widget| (widget.state.width, widget.state.height))
-    })
-}
-
-pub fn visible() -> bool {
-    WIDGET.with(|current| {
-        current
-            .borrow()
-            .as_ref()
-            .is_some_and(|widget| widget.state.renderable())
     })
 }
 

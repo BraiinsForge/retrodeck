@@ -337,7 +337,9 @@ unsafe extern "C" fn video_callback(
         return;
     }
     let rgb565 = PIXEL_FORMAT.load(Ordering::Relaxed) == PIXEL_FORMAT_RGB565;
-    let result = retrodeck_native::game_video::present(data, width, height, pitch, rgb565);
+    // libretro keeps the callback's frame buffer readable until we return.
+    let result =
+        unsafe { retrodeck_native::game_video::present(data, width, height, pitch, rgb565) };
     if let Err(error) = result {
         eprintln!("{}: video error: {error}", config().frontend_name);
         VIDEO_FAILED.store(true, Ordering::Relaxed);
