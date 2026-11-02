@@ -128,7 +128,7 @@ mod tests {
         );
 
         let wifi_state = wifi::State::default();
-        let wifi_ops = wifi::render(&wifi_state);
+        let wifi_ops = wifi::render_with_network(&wifi_state, &Default::default());
         assert!(matches!(
             wifi_ops.first(),
             Some(settings::DrawOp::Clear(0x000000))

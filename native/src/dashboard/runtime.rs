@@ -516,20 +516,20 @@ impl Runtime {
         &mut self,
         app: &mut App,
         event: Event,
-        trace: &mut Vec<&'static str>,
+        outcome: &mut StepOutcome,
     ) -> Result<(), String> {
         let effects = app.reduce(event, self.layout.as_ref())?;
         for effect in effects {
-            trace.push(effect_name(&effect));
+            outcome.discard_touch |= matches!(effect, Effect::DiscardTouch);
             if let Some(completion) = self.effect(&effect, app)? {
-                self.step(app, completion, trace)?;
+                self.step(app, completion, outcome)?;
             }
         }
         Ok(())
     }
     fn iteration(&mut self, app: &mut App) -> Result<(), String> {
         self.now = now_ms();
-        let mut trace = Vec::new();
+        let mut outcome = StepOutcome::default();
         let rescan = std::mem::take(&mut self.rescan);
         self.step(
             app,
@@ -538,7 +538,7 @@ impl Runtime {
                 wayland: self.widget(),
                 rescan,
             },
-            &mut trace,
+            &mut outcome,
         )?;
         let poll = polling::dispatch(self.widget(), app.poll_timeout(now_ms()))?;
         self.now = now_ms();
@@ -567,14 +567,14 @@ impl Runtime {
             self.present()?;
         }
         self.rescan |= poll.rescan;
-        self.step(app, Event::Tick(self.now), &mut trace)?;
+        self.step(app, Event::Tick(self.now), &mut outcome)?;
         if poll.ready {
             if poll.touch_lost {
                 if self.touch_owned {
                     input::close_touch();
                     self.touch_owned = false;
                 }
-                self.step(app, Event::TouchLost, &mut trace)?;
+                self.step(app, Event::TouchLost, &mut outcome)?;
             }
             let (gamepad, keyboard) = super::app::collect_actions(&control_reports);
             self.step(
@@ -585,9 +585,9 @@ impl Runtime {
                     keyboard,
                     quarantined: self.sound_active || self.now < self.input_until,
                 },
-                &mut trace,
+                &mut outcome,
             )?;
-            if !poll.touch_lost && !trace.contains(&"discard-touch") {
+            if !poll.touch_lost && !outcome.discard_touch {
                 for report in reports {
                     self.step(
                         app,
@@ -595,15 +595,14 @@ impl Runtime {
                             now: self.now,
                             report,
                         },
-                        &mut trace,
+                        &mut outcome,
                     )?;
                 }
             }
             if matches!(app.pending, Some(Pending::Launch(_))) {
                 let effect = Effect::PrepareLaunch;
-                trace.push(effect_name(&effect));
                 if let Some(event) = self.effect(&effect, app)? {
-                    self.step(app, event, &mut trace)?;
+                    self.step(app, event, &mut outcome)?;
                 }
             }
         }
@@ -616,30 +615,9 @@ impl Runtime {
         Ok(())
     }
 }
-fn effect_name(effect: &Effect) -> &'static str {
-    match effect {
-        Effect::Render => "render",
-        Effect::Present => "present",
-        Effect::Cue(_) => "cue",
-        Effect::VolumeCue => "volume-cue",
-        Effect::StopSound => "stop-sound",
-        Effect::FinishSound => "finish-sound",
-        Effect::ReapSound => "reap-sound",
-        Effect::ScanControls => "scan-controls",
-        Effect::CloseControls => "close-controls",
-        Effect::ReconnectTouch => "reconnect-touch",
-        Effect::OpenPresentation => "open-presentation",
-        Effect::DiscardTouch => "discard-touch",
-        Effect::ControllerSuspended => "controller-suspended",
-        Effect::ControllerResumed => "controller-resumed",
-        Effect::SettingsAction(_) => "settings-action",
-        Effect::WifiAction => "wifi-action",
-        Effect::NetworkAction => "network-action",
-        Effect::PrepareLaunch => "prepare-launch",
-        Effect::Launch => "launch",
-        Effect::ReloadVolume => "reload-volume",
-        Effect::StopLoop => "stop-loop",
-    }
+#[derive(Default)]
+struct StepOutcome {
+    discard_touch: bool,
 }
 pub fn main(arguments: impl IntoIterator<Item = String>) -> i32 {
     let options = match cli::parse(arguments) {

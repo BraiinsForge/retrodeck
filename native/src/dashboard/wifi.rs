@@ -174,6 +174,25 @@ pub fn apply(s: &mut State, t: Target) {
         s.status.clear();
     }
 }
+// Keep raster and hit-test rectangles identical, including inter-key gaps.
+fn keys(mode: Mode) -> impl Iterator<Item = (char, Rect)> {
+    rows(mode).iter().enumerate().flat_map(|(row, line)| {
+        let n = line.chars().count() as i32;
+        let width = (1280 - 32 - 6 * (n - 1)) / n;
+        let left = (1280 - (n * width + 6 * (n - 1))) / 2;
+        line.chars().enumerate().map(move |(column, key)| {
+            (
+                key,
+                Rect::new(
+                    left + column as i32 * (width + 6),
+                    86 + row as i32 * 68,
+                    width as u32,
+                    62,
+                ),
+            )
+        })
+    })
+}
 pub fn target_at_mode(mode: Mode, x: i32, y: i32) -> Option<Target> {
     if Rect::new(16, 10, 120, 62).contains(x, y) {
         return Some(Target::Back);
@@ -199,42 +218,11 @@ pub fn target_at_mode(mode: Mode, x: i32, y: i32) -> Option<Target> {
     if Rect::new(1060, 364, 204, 66).contains(x, y) {
         return Some(Target::Delete);
     }
-    let ys = [86, 154, 222, 290];
-    for (row, line) in rows(mode).iter().enumerate() {
-        let n = line.chars().count() as i32;
-        let w = (1280 - 32 - 6 * (n - 1)) / n;
-        let left = (1280 - (n * w + 6 * (n - 1))) / 2;
-        if y >= ys[row] && y < ys[row] + 62 {
-            let i = ((x - left) / (w + 6)) as usize;
-            if i < line.chars().count() && x < left + (i as i32) * (w + 6) + w {
-                return Some(Target::Key(line.chars().nth(i).unwrap()));
-            }
-        }
-    }
-    None
-}
-pub fn target_at(x: i32, y: i32) -> Option<Target> {
-    target_at_mode(Mode::Alphabet, x, y)
-}
-pub fn touch(s: &mut State, x: i32, y: i32, pressed: bool, released: bool) {
-    let t = target_at_mode(s.mode, x, y);
-    if pressed {
-        s.pressed = t
-    }
-    if released {
-        let old = s.pressed.take();
-        if old.is_some() && old == t {
-            apply(s, t.unwrap())
-        }
-    }
+    keys(mode).find_map(|(key, rect)| rect.contains(x, y).then_some(Target::Key(key)))
 }
 pub fn helper_input(ssid: &str, password: &str) -> String {
     format!("{ssid}\n{password}\n")
 }
-pub fn render(s: &State) -> Vec<DrawOp> {
-    render_with_network(s, &NetworkStatus::default())
-}
-
 pub fn render_with_network(s: &State, network: &NetworkStatus) -> Vec<DrawOp> {
     let mut o = vec![DrawOp::Clear(ui::color("background"))];
     let white = ui::color("white");
@@ -306,24 +294,13 @@ pub fn render_with_network(s: &State, network: &NetworkStatus) -> Vec<DrawOp> {
         });
     }
     button(&mut o, Rect::new(990, 10, 274, 62), "SAVE NETWORK", false);
-    for (row, line) in rows(s.mode).iter().enumerate() {
-        let n = line.chars().count() as i32;
-        let w = (1280 - 32 - 6 * (n - 1)) / n;
-        let left = (1280 - (n * w + 6 * (n - 1))) / 2;
-        for (i, c) in line.chars().enumerate() {
-            let r = Rect::new(
-                left + i as i32 * (w + 6),
-                86 + row as i32 * 68,
-                w as u32,
-                62,
-            );
-            let ch = if s.uppercase && s.mode == Mode::Alphabet {
-                c.to_ascii_uppercase()
-            } else {
-                c
-            };
-            button(&mut o, r, &ch.to_string(), false);
-        }
+    for (c, r) in keys(s.mode) {
+        let ch = if s.uppercase && s.mode == Mode::Alphabet {
+            c.to_ascii_uppercase()
+        } else {
+            c
+        };
+        button(&mut o, r, &ch.to_string(), false);
     }
     button(
         &mut o,
@@ -412,6 +389,31 @@ pub fn render_frame(s: &State, network: &NetworkStatus) -> super::settings::Layo
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn keyboard_hit_bounds_match_rendered_keys() {
+        for mode in [Mode::Alphabet, Mode::Symbols] {
+            let state = State {
+                mode,
+                ..State::default()
+            };
+            let rendered = render_with_network(&state, &NetworkStatus::default());
+            for (key, rect) in super::keys(mode) {
+                assert!(
+                    rendered
+                        .iter()
+                        .any(|op| matches!(op, DrawOp::Fill(r, _) if *r == rect))
+                );
+                assert_eq!(target_at_mode(mode, rect.x, rect.y), Some(Target::Key(key)));
+                assert_eq!(
+                    target_at_mode(mode, rect.x + rect.w as i32 - 1, rect.y + rect.h as i32 - 1),
+                    Some(Target::Key(key))
+                );
+                assert_eq!(target_at_mode(mode, rect.x - 1, rect.y), None);
+                assert_eq!(target_at_mode(mode, rect.x + rect.w as i32, rect.y), None);
+            }
+            assert_eq!(target_at_mode(mode, 15, 86), None);
+        }
+    }
     #[test]
     fn limits() {
         let mut s = State::new("a", "12345678", Field::Ssid);
