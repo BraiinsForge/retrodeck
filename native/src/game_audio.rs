@@ -112,7 +112,12 @@ fn configure(fd: &OwnedFd, source_rate: u32) -> Result<u32, String> {
     // framebuffer updates. The result is deliberately ignored.
     let mut fragment: libc::c_int = (8 << 16) | 10;
     unsafe { libc::ioctl(raw, SNDCTL_DSP_SETFRAGMENT, &mut fragment) };
-    let failure = || format!("cannot configure /dev/dsp: {}", std::io::Error::last_os_error());
+    let failure = || {
+        format!(
+            "cannot configure /dev/dsp: {}",
+            std::io::Error::last_os_error()
+        )
+    };
     let mut format = AFMT_S16_LE;
     if unsafe { libc::ioctl(raw, SNDCTL_DSP_SETFMT, &mut format) } != 0 || format != AFMT_S16_LE {
         return Err(failure());
@@ -123,7 +128,11 @@ fn configure(fd: &OwnedFd, source_rate: u32) -> Result<u32, String> {
     }
     // The 32 kHz hardware stream consumes one application frame per
     // hardware frame while the bridge reports 32768.
-    let mut rate: libc::c_int = if source_rate == 32768 { 32000 } else { source_rate as libc::c_int };
+    let mut rate: libc::c_int = if source_rate == 32768 {
+        32000
+    } else {
+        source_rate as libc::c_int
+    };
     if unsafe { libc::ioctl(raw, SNDCTL_DSP_SPEED, &mut rate) } != 0 || rate <= 0 {
         return Err(failure());
     }
@@ -155,9 +164,7 @@ fn prefill(fd: &OwnedFd) -> Result<bool, String> {
 
 fn write_all(fd: &OwnedFd, mut bytes: &[u8]) -> Result<(), ()> {
     while !bytes.is_empty() {
-        let written = unsafe {
-            libc::write(fd.as_raw_fd(), bytes.as_ptr().cast(), bytes.len())
-        };
+        let written = unsafe { libc::write(fd.as_raw_fd(), bytes.as_ptr().cast(), bytes.len()) };
         if written > 0 {
             bytes = &bytes[written as usize..];
         } else if written < 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR)
@@ -198,8 +205,8 @@ fn writer_thread(fd: OwnedFd, trigger_pending: bool) {
             }
             count = guard.size.min(WRITE_CHUNK_FRAMES);
             let capacity = guard.queue.len();
-            for index in 0..count {
-                output[index] = guard.queue[(guard.head + index) % capacity];
+            for (index, sample) in output[..count].iter_mut().enumerate() {
+                *sample = guard.queue[(guard.head + index) % capacity];
             }
             guard.head = (guard.head + count) % capacity;
             guard.size -= count;
@@ -324,9 +331,7 @@ pub fn write_stereo(samples: &[i16]) {
     }
     player.resampled.clear();
     if frames == 1 || output_frames == 1 {
-        player
-            .resampled
-            .resize(output_frames, player.mono[0]);
+        player.resampled.resize(output_frames, player.mono[0]);
     } else {
         let step = ((frames as u64 - 1) << 32) / (output_frames as u64 - 1);
         let mut position: u64 = 0;
@@ -347,6 +352,13 @@ pub fn write_stereo(samples: &[i16]) {
     let resampled = std::mem::take(&mut player.resampled);
     enqueue(player, &resampled);
     player.resampled = resampled;
+}
+
+/// Drop queued game audio when its widget becomes dormant.
+pub fn discard_pending() {
+    let mut guard = shared().lock().expect("audio queue lock");
+    guard.head = 0;
+    guard.size = 0;
 }
 
 pub fn queued_frames() -> usize {

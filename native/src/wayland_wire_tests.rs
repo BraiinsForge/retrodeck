@@ -1,5 +1,5 @@
 //! In-process wire-contract fixture, not a BMC compositor or hardware test.
-//! Replacement follows upstream e0a5c20's protocol/dispatch.rs: a second
+//! Replacement follows upstream b2c945b's protocol/dispatch.rs: a second
 //! connection with the configured instance key disconnects the first client.
 use super::*;
 use std::io::Read;
@@ -33,13 +33,18 @@ const WAIT: Duration = Duration::from_secs(2);
 
 #[derive(Debug)]
 struct Frame {
-    pixel: u32,
+    pixels: Vec<u8>,
     width: i32,
     height: i32,
+}
+struct Pool {
+    file: Arc<std::fs::File>,
+    size: Mutex<u64>,
 }
 struct Buffer {
     file: Arc<std::fs::File>,
     offset: u64,
+    length: usize,
     width: i32,
     height: i32,
 }
@@ -49,7 +54,7 @@ struct Server {
     active: Option<(ClientId, widget_surface::DeckWidgetSurfaceV2)>,
     frames: mpsc::Sender<Frame>,
     peers: mpsc::Sender<UnixStream>,
-    lifecycle: widget_surface::LifecycleState,
+    lifecycle: Option<widget_surface::LifecycleState>,
 }
 
 impl Server {
@@ -139,8 +144,13 @@ impl Dispatch<manager::DeckWidgetManagerV3, ()> for Server {
             surface.first_day_of_week(widget_surface::Weekday::Monday);
             surface.unit_system(widget_surface::UnitSystem::Metric);
             surface.next_alarm(widget_surface::Presence::Absent, 0, 0, "".to_owned());
+            if surface.version() >= 2 {
+                surface.language(Some("en-GB".to_owned()));
+            }
             surface.configure_done();
-            surface.lifecycle(state.lifecycle);
+            if let Some(lifecycle) = state.lifecycle {
+                surface.lifecycle(lifecycle);
+            }
         }
     }
 }
@@ -176,46 +186,84 @@ impl Dispatch<wl_shm::WlShm, ()> for Server {
         _: &DisplayHandle,
         init: &mut DataInit<'_, Self>,
     ) {
-        if let wl_shm::Request::CreatePool { id, fd, .. } = request {
-            init.init(id, Arc::new(std::fs::File::from(fd)));
+        if let wl_shm::Request::CreatePool { id, fd, size } = request {
+            let file = Arc::new(std::fs::File::from(fd));
+            let size = u64::try_from(size).unwrap();
+            assert!(size > 0 && size <= file.metadata().unwrap().len());
+            init.init(
+                id,
+                Pool {
+                    file,
+                    size: Mutex::new(size),
+                },
+            );
         }
     }
 }
-impl Dispatch<wl_shm_pool::WlShmPool, Arc<std::fs::File>> for Server {
+impl Dispatch<wl_shm_pool::WlShmPool, Pool> for Server {
     fn request(
         _: &mut Self,
         _: &Client,
         _: &wl_shm_pool::WlShmPool,
         request: wl_shm_pool::Request,
-        file: &Arc<std::fs::File>,
+        pool: &Pool,
         _: &DisplayHandle,
         init: &mut DataInit<'_, Self>,
     ) {
-        if let wl_shm_pool::Request::CreateBuffer {
-            id,
-            offset,
-            width,
-            height,
-            stride,
-            format,
-        } = request
-        {
-            assert_eq!(
-                format,
-                wayland_server::WEnum::Value(wl_shm::Format::Xrgb8888)
-            );
-            assert_eq!(stride, width * 4);
-            init.init(
+        match request {
+            wl_shm_pool::Request::CreateBuffer {
                 id,
-                Buffer {
-                    file: file.clone(),
-                    offset: offset as u64,
-                    width,
-                    height,
-                },
-            );
+                offset,
+                width,
+                height,
+                stride,
+                format,
+            } => {
+                assert_eq!(
+                    format,
+                    wayland_server::WEnum::Value(wl_shm::Format::Xrgb8888)
+                );
+                let length =
+                    buffer_length(offset, width, height, stride, *pool.size.lock().unwrap())
+                        .expect("buffer must fit the declared SHM pool");
+                init.init(
+                    id,
+                    Buffer {
+                        file: pool.file.clone(),
+                        offset: offset as u64,
+                        length,
+                        width,
+                        height,
+                    },
+                );
+            }
+            wl_shm_pool::Request::Resize { size } => {
+                let size = u64::try_from(size).unwrap();
+                let mut current = pool.size.lock().unwrap();
+                assert!(size >= *current && size <= pool.file.metadata().unwrap().len());
+                *current = size;
+            }
+            _ => {}
         }
     }
+}
+
+fn buffer_length(
+    offset: i32,
+    width: i32,
+    height: i32,
+    stride: i32,
+    pool_size: u64,
+) -> Option<usize> {
+    let offset = u64::try_from(offset).ok()?;
+    let width = u64::try_from(width).ok()?;
+    let height = u64::try_from(height).ok()?;
+    let stride = u64::try_from(stride).ok()?;
+    if width == 0 || height == 0 || stride != width.checked_mul(4)? {
+        return None;
+    }
+    let length = height.checked_mul(stride)?;
+    (offset.checked_add(length)? <= pool_size).then_some(usize::try_from(length).ok()?)
 }
 impl Dispatch<wl_surface::WlSurface, Surface> for Server {
     fn request(
@@ -232,12 +280,12 @@ impl Dispatch<wl_surface::WlSurface, Surface> for Server {
             wl_surface::Request::Commit => {
                 if let Some(buffer) = data.0.lock().unwrap().take() {
                     let data = buffer.data::<Buffer>().unwrap();
-                    let mut pixel = [0; 4];
-                    data.file.read_exact_at(&mut pixel, data.offset).unwrap();
+                    let mut pixels = vec![0; data.length];
+                    data.file.read_exact_at(&mut pixels, data.offset).unwrap();
                     state
                         .frames
                         .send(Frame {
-                            pixel: u32::from_ne_bytes(pixel),
+                            pixels,
                             width: data.width,
                             height: data.height,
                         })
@@ -258,6 +306,7 @@ impl Dispatch<wl_surface::WlSurface, Surface> for Server {
 enum Command {
     Connect(UnixStream),
     Lifecycle(widget_surface::LifecycleState),
+    Language(Option<String>),
     Payloads,
     Transition,
     Shutdown,
@@ -272,6 +321,15 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
+        Self::with_protocol_version(2)
+    }
+    fn with_protocol_version(version: u32) -> Self {
+        Self::with_initial_lifecycle(version, Some(widget_surface::LifecycleState::Visible))
+    }
+    fn with_initial_lifecycle(
+        version: u32,
+        lifecycle: Option<widget_surface::LifecycleState>,
+    ) -> Self {
         let (commands, incoming) = mpsc::channel();
         let (frames_tx, frames) = mpsc::channel();
         let (peers_tx, peers) = mpsc::channel();
@@ -280,12 +338,12 @@ impl Fixture {
             let mut handle = display.handle();
             handle.create_global::<Server, wl_compositor::WlCompositor, _>(4, ());
             handle.create_global::<Server, wl_shm::WlShm, _>(1, ());
-            handle.create_global::<Server, manager::DeckWidgetManagerV3, _>(1, ());
+            handle.create_global::<Server, manager::DeckWidgetManagerV3, _>(version, ());
             let mut state = Server {
                 active: None,
                 frames: frames_tx,
                 peers: peers_tx,
-                lifecycle: widget_surface::LifecycleState::Visible,
+                lifecycle,
             };
             let deadline = Instant::now() + Duration::from_secs(10);
             let mut clients = Vec::new();
@@ -297,8 +355,14 @@ impl Fixture {
                             clients.push(handle.insert_client(stream, Arc::new(())).unwrap())
                         }
                         Command::Lifecycle(lifecycle) => {
-                            state.lifecycle = lifecycle;
+                            state.lifecycle = Some(lifecycle);
                             state.active.as_ref().unwrap().1.lifecycle(lifecycle);
+                        }
+                        Command::Language(language) => {
+                            let surface = &state.active.as_ref().unwrap().1;
+                            if surface.version() >= 2 {
+                                surface.language(language);
+                            }
                         }
                         Command::Payloads => state.payloads(&state.active.as_ref().unwrap().1),
                         Command::Transition => {
@@ -335,16 +399,22 @@ impl Fixture {
         let (client, server) = UnixStream::pair().unwrap();
         self.commands.send(Command::Connect(server)).unwrap();
         let (queue, state) = initialize_connection(Connection::from_socket(client).unwrap())?;
-        Widget::finish_open(queue, state, key)
+        let mut widget = Widget::finish_open(queue, state, key)?;
+        widget
+            .queue
+            .roundtrip(&mut widget.state)
+            .map_err(|error| error.to_string())?;
+        Ok(widget)
     }
     fn open(&self) -> Widget {
         self.open_key(KEY).unwrap()
     }
-    fn send(&self, command: Command) {
+    fn send(&self, widget: &mut Widget, command: Command) {
         self.commands.send(command).unwrap();
         let (done, received) = mpsc::channel();
         self.commands.send(Command::Barrier(done)).unwrap();
         received.recv_timeout(WAIT).unwrap();
+        widget.queue.roundtrip(&mut widget.state).unwrap();
     }
     fn assert_payloads_closed(&self) {
         for _ in 0..3 {
@@ -359,7 +429,12 @@ impl Fixture {
     fn assert_frame(&self, widget: &mut Widget, color: u32) {
         widget.present_solid(color).unwrap();
         let frame = self.frames.recv_timeout(WAIT).unwrap();
-        assert_eq!(frame.pixel, 0xff00_0000 | color);
+        let expected = (0xff00_0000 | color).to_ne_bytes();
+        assert!(frame.pixels.chunks_exact(4).all(|pixel| pixel == expected));
+        assert_eq!(
+            frame.pixels.len(),
+            canvas::WIDTH as usize * canvas::HEIGHT as usize * 4
+        );
         assert_eq!(
             (frame.width, frame.height),
             (canvas::WIDTH as i32, canvas::HEIGHT as i32)
@@ -409,27 +484,146 @@ fn keyed_wire_runtime_payloads_lifecycle_and_shutdown() {
     let mut widget = fixture.open();
     fixture.assert_payloads_closed();
     widget.state.refresh_requested = false;
-    fixture.send(Command::Lifecycle(widget_surface::LifecycleState::Dormant));
-    widget.dispatch(200).unwrap();
+    fixture.send(
+        &mut widget,
+        Command::Lifecycle(widget_surface::LifecycleState::Dormant),
+    );
     assert!(!widget.state.visible && !widget.state.refresh_requested);
     drop(widget);
     let mut widget = fixture.open();
     assert!(widget.state.configured && !widget.state.visible);
     fixture.assert_payloads_closed();
     widget.state.refresh_requested = false;
-    fixture.send(Command::Payloads);
-    widget.dispatch(200).unwrap();
+    fixture.send(&mut widget, Command::Payloads);
     fixture.assert_payloads_closed();
-    fixture.send(Command::Transition);
-    widget.dispatch(200).unwrap();
+    fixture.send(&mut widget, Command::Transition);
     assert!(widget.state.refresh_requested && !widget.state.visible);
-    fixture.send(Command::Lifecycle(widget_surface::LifecycleState::Visible));
-    widget.dispatch(200).unwrap();
+    fixture.send(
+        &mut widget,
+        Command::Lifecycle(widget_surface::LifecycleState::Visible),
+    );
     assert!(widget.state.visible);
     fixture.assert_frame(&mut widget, 0x112233);
-    fixture.send(Command::Shutdown);
-    widget.dispatch(200).unwrap();
+    fixture.send(&mut widget, Command::Shutdown);
     assert!(widget.state.shutdown);
+}
+
+#[test]
+fn keyed_wire_negotiates_v1_and_v2_with_english_fallback() {
+    for version in [1, 2] {
+        let fixture = Fixture::with_protocol_version(version);
+        let mut widget = fixture.open();
+        assert_eq!(
+            widget.state.widget_surface.as_ref().unwrap().version(),
+            version
+        );
+        fixture.assert_payloads_closed();
+        if version == 2 {
+            fixture.send(&mut widget, Command::Language(Some("cs-CZ".to_owned())));
+            fixture.send(&mut widget, Command::Language(None));
+        }
+        fixture.assert_frame(&mut widget, 0x123456);
+    }
+}
+
+#[test]
+fn keyed_wire_waits_for_delayed_lifecycle_before_allocating_or_drawing() {
+    let fixture = Fixture::with_initial_lifecycle(2, None);
+    let mut widget = fixture.open();
+    assert!(widget.state.configured && !widget.state.visible);
+    fixture.assert_payloads_closed();
+    widget.present_solid(0x123456).unwrap();
+    widget.queue.roundtrip(&mut widget.state).unwrap();
+    assert!(widget.state.slots.is_empty());
+    assert!(fixture.frames.try_recv().is_err());
+    fixture.send(
+        &mut widget,
+        Command::Lifecycle(widget_surface::LifecycleState::Prepared),
+    );
+    fixture.assert_frame(&mut widget, 0x123456);
+    assert!(!widget.state.active && !widget.state.renderable());
+    widget.present_solid(0x654321).unwrap();
+    widget.queue.roundtrip(&mut widget.state).unwrap();
+    assert!(fixture.frames.try_recv().is_err());
+    fixture.send(
+        &mut widget,
+        Command::Lifecycle(widget_surface::LifecycleState::Dormant),
+    );
+    widget.present_solid(0x654321).unwrap();
+    widget.queue.roundtrip(&mut widget.state).unwrap();
+    assert!(fixture.frames.try_recv().is_err());
+    fixture.send(
+        &mut widget,
+        Command::Lifecycle(widget_surface::LifecycleState::Visible),
+    );
+    fixture.assert_frame(&mut widget, 0x654321);
+}
+
+#[test]
+fn keyed_wire_game_wait_resumes_or_stops_on_shutdown_and_disconnect() {
+    for (lifecycle, stop) in [
+        (widget_surface::LifecycleState::Dormant, false),
+        (widget_surface::LifecycleState::Dormant, true),
+        (widget_surface::LifecycleState::Prepared, false),
+        (widget_surface::LifecycleState::Prepared, true),
+    ] {
+        let fixture = Fixture::new();
+        let commands = fixture.commands.clone();
+        let (ready, started) = mpsc::channel();
+        let (done, finished) = mpsc::channel();
+        let client = thread::spawn(move || {
+            let mut widget = fixture.open();
+            fixture.assert_payloads_closed();
+            fixture.send(&mut widget, Command::Lifecycle(lifecycle));
+            WIDGET.with(|slot| *slot.borrow_mut() = Some(widget));
+            let mut hold = Some(Instant::now());
+            ready.send(()).unwrap();
+            let result = crate::game_video::wait_for_widget_activity(&mut hold);
+            assert!(hold.is_none());
+            assert!(result.is_ok());
+            assert_eq!(shutdown_requested(), stop);
+            close();
+            done.send(()).unwrap();
+        });
+        started.recv_timeout(WAIT).unwrap();
+        assert!(matches!(
+            finished.recv_timeout(Duration::from_millis(20)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        commands
+            .send(if stop {
+                Command::Shutdown
+            } else {
+                Command::Lifecycle(widget_surface::LifecycleState::Visible)
+            })
+            .unwrap();
+        finished.recv_timeout(WAIT).unwrap();
+        client.join().unwrap();
+    }
+    let fixture = Fixture::new();
+    let widget = fixture.open();
+    fixture.assert_payloads_closed();
+    WIDGET.with(|slot| *slot.borrow_mut() = Some(widget));
+    drop(fixture);
+    assert!(crate::game_video::wait_for_widget_activity(&mut None).is_err());
+    close();
+}
+
+#[test]
+fn shm_buffer_extent_must_fit_the_declared_pool() {
+    assert_eq!(buffer_length(4, 2, 3, 8, 28), Some(24));
+    for layout in [
+        (-1, 2, 3, 8),
+        (0, 0, 3, 0),
+        (0, 2, -1, 8),
+        (0, 2, 3, 4),
+        (5, 2, 3, 8),
+    ] {
+        assert_eq!(
+            buffer_length(layout.0, layout.1, layout.2, layout.3, 28),
+            None
+        );
+    }
 }
 
 #[test]

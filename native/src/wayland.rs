@@ -122,6 +122,8 @@ struct State {
     width: u32,
     height: u32,
     visible: bool,
+    active: bool,
+    frame_pending: bool,
     refresh_requested: bool,
     shutdown: bool,
     touch_x: i32,
@@ -132,6 +134,9 @@ struct State {
 }
 
 impl State {
+    fn renderable(&self) -> bool {
+        self.visible && (self.active || self.frame_pending)
+    }
     fn widget_event(&mut self, event: deck_widget_surface_v2::Event) {
         use deck_widget_surface_v2::{Event, LifecycleState};
         match event {
@@ -148,7 +153,22 @@ impl State {
                 drop(fd);
             }
             Event::Lifecycle { state } => {
-                self.visible = !matches!(state, WEnum::Value(LifecycleState::Dormant));
+                self.visible = matches!(
+                    state,
+                    WEnum::Value(
+                        LifecycleState::Prepared
+                            | LifecycleState::Entering
+                            | LifecycleState::Visible
+                            | LifecycleState::Leaving
+                    )
+                );
+                self.active =
+                    self.visible && !matches!(state, WEnum::Value(LifecycleState::Prepared));
+                self.frame_pending = self.visible;
+                if !self.active {
+                    self.touch_down = false;
+                    self.touches.clear();
+                }
                 if self.visible {
                     self.refresh_requested = true;
                 }
@@ -221,10 +241,7 @@ fn initialize_connection(connection: Connection) -> Result<(EventQueue<State>, S
     let mut queue = connection.new_event_queue::<State>();
     let qh = queue.handle();
     connection.display().get_registry(&qh, ());
-    let mut state = State {
-        visible: true,
-        ..State::default()
-    };
+    let mut state = State::default();
     queue
         .roundtrip(&mut state)
         .map_err(|error| format!("cannot bind Wayland globals: {error}"))?;
@@ -544,8 +561,11 @@ impl Widget {
         if !self.state.configured {
             return Err("Wayland surface is not configured".to_owned());
         }
-        self.ensure_slots()?;
         let _ = self.dispatch(0)?;
+        if !self.state.renderable() || self.state.shutdown {
+            return Ok(());
+        }
+        self.ensure_slots()?;
         let Some(index) = self.state.slots.iter().position(|slot| !slot.busy) else {
             return Ok(());
         };
@@ -564,6 +584,7 @@ impl Widget {
             self.state.slots[index].busy = false;
             return Err(error);
         }
+        self.state.frame_pending = false;
         Ok(())
     }
 }
@@ -696,7 +717,17 @@ pub fn visible() -> bool {
         current
             .borrow()
             .as_ref()
-            .is_some_and(|widget| widget.state.visible)
+            .is_some_and(|widget| widget.state.renderable())
+    })
+}
+
+/// Whether the widget may run continuously, rather than prepare a static frame.
+pub fn active() -> bool {
+    WIDGET.with(|current| {
+        current
+            .borrow()
+            .as_ref()
+            .is_some_and(|widget| widget.state.active)
     })
 }
 
@@ -823,7 +854,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                     state.seat = Some(registry.bind(name, version.min(7), qh, ()));
                 }
                 "deck_widget_manager_v3" if state.manager.is_none() => {
-                    state.manager = Some(registry.bind(name, 1, qh, ()));
+                    state.manager = Some(registry.bind(name, version.min(2), qh, ()));
                 }
                 _ => {}
             }

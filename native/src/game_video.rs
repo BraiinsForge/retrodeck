@@ -169,7 +169,11 @@ fn open_fb() -> Result<FbTarget, String> {
             std::io::Error::last_os_error()
         ));
     }
-    let rows = if var.yres_virtual != 0 { var.yres_virtual } else { var.yres } as usize;
+    let rows = if var.yres_virtual != 0 {
+        var.yres_virtual
+    } else {
+        var.yres
+    } as usize;
     let line_length = fix.line_length as usize;
     let supported = var.xres == 600
         && var.yres == 1280
@@ -345,7 +349,9 @@ fn convert_to_xrgb(
                 let red = u32::from((pixel >> 11) & 0x1f);
                 let green = u32::from((pixel >> 5) & 0x3f);
                 let blue = u32::from(pixel & 0x1f);
-                0xff00_0000 | ((red * 255 / 31) << 16) | ((green * 255 / 63) << 8)
+                0xff00_0000
+                    | ((red * 255 / 31) << 16)
+                    | ((green * 255 / 63) << 8)
                     | (blue * 255 / 31)
             } else {
                 let pixel = unsafe { source.add(y * pitch + x * 4).cast::<u32>().read_unaligned() };
@@ -460,11 +466,7 @@ fn update_exit_hold(
     y: i32,
     now: Instant,
 ) -> bool {
-    let inside = down
-        && x >= 0
-        && x < LOGICAL_WIDTH as i32
-        && y >= 0
-        && y < LOGICAL_HEIGHT as i32;
+    let inside = down && x >= 0 && x < LOGICAL_WIDTH as i32 && y >= 0 && y < LOGICAL_HEIGHT as i32;
     if !inside {
         *started = None;
         return false;
@@ -473,7 +475,7 @@ fn update_exit_hold(
     now.duration_since(*began) >= Duration::from_secs(2)
 }
 
-/// Check the BMC widget surface for the console/DOOM return hold.
+/// Pause dormant games and check for shutdown, disconnection or the return hold.
 ///
 /// The game owns the normal widget surface, so its parent dashboard cannot
 /// receive this touch stream after BMC switches the render surface.
@@ -482,16 +484,19 @@ pub fn exit_requested() -> bool {
     let Some(video) = guard.as_mut() else {
         return false;
     };
-    if !video.exit_hint || !matches!(&video.target, Target::Widget { .. }) {
+    if !matches!(&video.target, Target::Widget { .. }) {
         return false;
     }
-    if let Err(error) = crate::wayland::dispatch(0) {
-        eprintln!("retrodeck: game widget input unavailable: {error}");
-        video.exit_hold_started = None;
-        return false;
-    }
-    if crate::wayland::shutdown_requested() {
+    if let Err(error) = wait_for_widget_activity(&mut video.exit_hold_started) {
+        eprintln!("retrodeck: game widget unavailable: {error}");
         return true;
+    }
+    if crate::wayland::shutdown_requested() || crate::process::shutdown_requested() {
+        return true;
+    }
+    if !video.exit_hint {
+        while crate::wayland::next_touch().is_some() {}
+        return false;
     }
     let now = Instant::now();
     let mut complete = false;
@@ -508,6 +513,21 @@ pub fn exit_requested() -> bool {
         || video
             .exit_hold_started
             .is_some_and(|started| now.duration_since(started) >= Duration::from_secs(2))
+}
+
+pub(crate) fn wait_for_widget_activity(exit_hold: &mut Option<Instant>) -> Result<(), String> {
+    crate::wayland::dispatch(0)?;
+    if !crate::wayland::active() {
+        *exit_hold = None;
+        crate::game_audio::discard_pending();
+    }
+    while !crate::wayland::active()
+        && !crate::wayland::shutdown_requested()
+        && !crate::process::shutdown_requested()
+    {
+        crate::wayland::dispatch(100)?;
+    }
+    Ok(())
 }
 
 pub fn frame_hash() -> u64 {
@@ -533,6 +553,7 @@ pub struct FrameClock {
     frame_number: i64,
 }
 
+#[allow(clippy::unnecessary_cast, reason = "timespec fields are 32-bit on ARM")]
 fn monotonic_now() -> i64 {
     let mut time = libc::timespec {
         tv_sec: 0,
@@ -563,8 +584,7 @@ impl FrameClock {
         if self.frame_nanoseconds <= 0 {
             return 0;
         }
-        let deadline =
-            self.start_nanoseconds + (self.frame_number + 1) * self.frame_nanoseconds;
+        let deadline = self.start_nanoseconds + (self.frame_number + 1) * self.frame_nanoseconds;
         monotonic_now() - deadline
     }
 
@@ -619,7 +639,13 @@ mod tests {
         for (sw, sh, scale, x, y, w, h) in cases {
             let layout = compute_scaled_layout(sw, sh).unwrap();
             assert_eq!(
-                (layout.scale, layout.x, layout.y, layout.width, layout.height),
+                (
+                    layout.scale,
+                    layout.x,
+                    layout.y,
+                    layout.width,
+                    layout.height
+                ),
                 (scale, x, y, w, h)
             );
         }
