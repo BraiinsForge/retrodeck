@@ -400,9 +400,12 @@ where
 {
     let mut command = Command::new(executable);
     command.args(arguments).envs(environment.iter().cloned());
-    // signal(2) and setpgid(2) are async-signal-safe; the hook only reports errno.
+    // Capture before fork: checking only getppid() in the child would miss a
+    // dashboard death between fork and installation of the parent-death signal.
+    let parent_pid = unsafe { libc::getpid() };
+    // The hook uses only libc calls and errno-based errors, with no allocation.
     unsafe {
-        command.pre_exec(reset_child_process);
+        command.pre_exec(move || reset_child_process(parent_pid));
     }
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -477,7 +480,15 @@ where
     result
 }
 
-fn reset_child_process() -> io::Result<()> {
+fn reset_child_process(parent_pid: libc::pid_t) -> io::Result<()> {
+    // A vanished dashboard cannot supervise a graceful exit. SIGKILL also stops
+    // apps that ignore SIGTERM; normal shutdown still uses the TERM/KILL grace.
+    if unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if unsafe { libc::getppid() } != parent_pid {
+        return Err(io::Error::from_raw_os_error(libc::ESRCH));
+    }
     for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGPIPE] {
         if unsafe { libc::signal(signal, libc::SIG_DFL) } == libc::SIG_ERR {
             return Err(io::Error::last_os_error());
@@ -581,6 +592,29 @@ mod tests {
                     libc::pause();
                 }
             },
+            "death-wait" => {
+                unsafe {
+                    libc::signal(libc::SIGTERM, libc::SIG_IGN);
+                }
+                std::fs::write(
+                    env::var_os("RETRODECK_PROCESS_PIDS").unwrap(),
+                    std::process::id().to_string(),
+                )
+                .unwrap();
+                loop {
+                    unsafe { libc::pause() };
+                }
+            }
+            "supervisor" => {
+                let extra = [(
+                    OsString::from("RETRODECK_PROCESS_PIDS"),
+                    env::var_os("RETRODECK_PROCESS_PIDS").unwrap(),
+                )];
+                let (executable, arguments, environment) = fixture_command("death-wait", &extra);
+                let result =
+                    supervise_fixture(&executable, &arguments, &environment, StopRequest::None);
+                panic!("parent-death fixture exited before supervisor was killed: {result:?}");
+            }
             "leader-exits" => wait_with_grandchild(false),
             "group" => wait_with_grandchild(true),
             other => panic!("unknown fixture {other}"),
@@ -789,6 +823,66 @@ mod tests {
         );
         assert!(!result.started);
         assert!(result.error.unwrap().starts_with("cannot start terminal:"));
+    }
+
+    #[test]
+    fn rejects_a_parent_that_changed_before_the_pre_exec_hook() {
+        let (executable, arguments, environment) = fixture_command("clean", &[]);
+        let mut command = Command::new(executable);
+        command.args(arguments).envs(environment);
+        unsafe {
+            command.pre_exec(|| reset_child_process(0));
+        }
+        let error = command.spawn().expect_err("stale parent must prevent exec");
+        assert_eq!(error.raw_os_error(), Some(libc::ESRCH));
+    }
+
+    #[test]
+    fn kills_native_child_when_its_supervisor_is_sigkilled() {
+        let path = temporary_path("parent-death-pid");
+        let extra = [(
+            OsString::from("RETRODECK_PROCESS_PIDS"),
+            path.clone().into(),
+        )];
+        let (executable, arguments, environment) = fixture_command("supervisor", &extra);
+        let mut supervisor = Command::new(executable)
+            .args(arguments)
+            .envs(environment)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let child_pid = loop {
+            if let Ok(pid) = std::fs::read_to_string(&path)
+                && let Ok(pid) = pid.parse::<libc::pid_t>()
+            {
+                break Some(pid);
+            }
+            if Instant::now() >= deadline {
+                break None;
+            }
+            thread::sleep(Duration::from_millis(5));
+        };
+        // Always stop and reap the intermediate supervisor, including startup
+        // failure. Its child deliberately ignores TERM to exercise SIGKILL.
+        supervisor.kill().unwrap();
+        let status = supervisor.wait().unwrap();
+        let stopped = child_pid.is_some_and(|pid| {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while process_alive(pid) && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(5));
+            }
+            let stopped = !process_alive(pid);
+            if !stopped {
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+            }
+            stopped
+        });
+        let _ = std::fs::remove_file(path);
+        assert_eq!(status.signal(), Some(libc::SIGKILL));
+        assert!(child_pid.is_some(), "child did not publish readiness");
+        assert!(stopped, "child survived its supervisor's SIGKILL");
     }
 
     #[test]
