@@ -17,14 +17,15 @@ details for development.
 
 ## Prerequisites
 
-Install Nix with flakes enabled. Host tests require Rust, Bash, curl, zip,
-Python 3, and coreutils.
+Install Nix with flakes enabled. Host tests require Rust, a C/C++ compiler, Bash,
+curl, zip, Python 3, coreutils, pkg-config, and GME, PNG and Vorbis development headers.
 
 On Debian or Ubuntu:
 
 ```sh
 sudo apt-get install \
-  cargo rustc curl zip python3 coreutils
+  cargo rustc build-essential curl zip python3 coreutils pkg-config \
+  libgme-dev libpng-dev libvorbis-dev
 ```
 
 Then clone the private repository:

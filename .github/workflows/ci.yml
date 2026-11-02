@@ -33,7 +33,8 @@ jobs:
       - name: Install host dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libpng-dev pkg-config
+          sudo apt-get install --no-install-recommends -y \
+            libgme-dev libpng-dev libvorbis-dev pkg-config
 
       - name: Check shell scripts
         run: |
