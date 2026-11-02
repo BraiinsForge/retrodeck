@@ -16,30 +16,9 @@ pub const MAXIMUM_CATALOG_BYTES: usize = 65_536;
 const MAXIMUM_DEPTH: usize = 32;
 const MAXIMUM_NODES: usize = 4096;
 const MAXIMUM_GAMES: usize = 64;
-pub const PALETTE_ROLES: &[&str] = &[
-    "background",
-    "text-dark",
-    "field",
-    "surface",
-    "inactive-border",
-    "control-border",
-    "footer",
-    "inactive-text",
-    "text",
-    "white",
-    "title",
-    "volume-off",
-    "volume-on",
-    "selected",
-    "wifi-active",
-    "wifi-focus",
-    "wifi-active-border",
-    "field-label",
-    "accent",
-    "active",
-    "control-surface",
-    "muted",
-];
+#[path = "catalog_metadata.rs"]
+pub(crate) mod metadata;
+pub use metadata::PALETTE_ROLES;
 
 #[derive(Debug)]
 pub struct CatalogError(String);
@@ -349,15 +328,9 @@ fn game(form: &Form) -> Result<Game> {
     let Form::Keyword(system) = values["system"] else {
         return Err(invalid("game :system must be a keyword"));
     };
-    let suffix = match system.as_str() {
-        "nes" => ".nes",
-        "gb" => ".gb",
-        "gbc" => ".gbc",
-        "gba" => ".gba",
-        "zx" => ".tap",
-        "deck" => "",
-        _ => return Err(invalid("unsupported game :system")),
-    };
+    let suffix = metadata::System::parse(system)
+        .ok_or_else(|| invalid("unsupported game :system"))?
+        .rom_suffix();
     let rom = text(values["rom"], 512, "game :rom")?;
     let prefix = if system == "deck" {
         "/mnt/data/nes-deck/games/".to_owned()
@@ -369,9 +342,10 @@ fn game(form: &Form) -> Result<Game> {
         || !rom
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b))
-        || rom.contains("//")
-        || rom.contains("/./")
-        || rom.contains("/../")
+        // Check the lexical tail: Path::components discards empty and `.` segments.
+        || rom[prefix.len()..]
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
     {
         return Err(invalid(format!(
             "game :rom must be a normalized {suffix} path below {prefix}"
@@ -672,6 +646,36 @@ mod tests {
             "/mnt/data/nes-deck/games/doom/example.wad",
         );
         assert!(parse_catalog(&catalog_with_games(&deck)).is_ok());
+        for tail in ["ten-seconds", "doom/example.wad", "custom/app.bin"] {
+            let path = format!("/mnt/data/nes-deck/games/{tail}");
+            assert!(
+                parse_catalog(&catalog_with_games(
+                    &deck.replace("/mnt/data/nes-deck/games/doom/example.wad", &path)
+                ))
+                .is_ok(),
+                "{path}"
+            );
+        }
+        for tail in [
+            "",
+            ".",
+            "..",
+            "app/",
+            "app/.",
+            "app/..",
+            "app//bin",
+            "app/./bin",
+            "app/../bin",
+        ] {
+            let path = format!("/mnt/data/nes-deck/games/{tail}");
+            assert!(
+                parse_catalog(&catalog_with_games(
+                    &deck.replace("/mnt/data/nes-deck/games/doom/example.wad", &path)
+                ))
+                .is_err(),
+                "accepted {path}"
+            );
+        }
         for path in [
             "/tmp/example.nes",
             "/mnt/data/roms/gb/example.nes",

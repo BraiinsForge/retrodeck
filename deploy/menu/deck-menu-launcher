@@ -252,11 +252,24 @@ esac
 manifest=$FALLBACK_MANIFEST
 palette=$FALLBACK_PALETTE
 catalog_cache_current=false
+# Record whether the generated palette included an override, including its deletion.
+override_state=absent
+if [ -e "$PALETTE_OVERRIDE" ]; then
+	override_state=present
+fi
+override_stamp=$GENERATED_PALETTE.override-state
+cached_override_state=
+if [ -f "$override_stamp" ] && [ ! -L "$override_stamp" ]; then
+	IFS= read -r cached_override_state < "$override_stamp" || cached_override_state=
+fi
 if [ -r "$GENERATED_MANIFEST" ] && [ -s "$GENERATED_MANIFEST" ] &&
 	[ ! -L "$GENERATED_MANIFEST" ] &&
 	[ -r "$GENERATED_PALETTE" ] && [ -s "$GENERATED_PALETTE" ] &&
 	[ ! -L "$GENERATED_PALETTE" ]; then
 	catalog_cache_current=true
+	if [ "$cached_override_state" != "$override_state" ]; then
+		catalog_cache_current=false
+	fi
 	for input in "$CATALOG" "$COMPILER"; do
 		if [ -e "$input" ] &&
 			{ [ "$input" -nt "$GENERATED_MANIFEST" ] ||
@@ -285,6 +298,8 @@ if [ "$catalog_cache_current" = true ]; then
 	log_message "using current generated manifest and dashboard palette"
 elif [ -x "$COMPILER" ] && [ -r "$CATALOG" ]; then
 	log_message "validating menu catalog with Rust"
+	# A failed or interrupted compilation must not certify an older cache pair.
+	rm -f "$override_stamp"
 	if "$COMPILER" "$CATALOG" \
 		"$GENERATED_MANIFEST" "$GENERATED_PALETTE" "$PALETTE_OVERRIDE" \
 		>> "$LOG_FILE" 2>&1 &&
@@ -292,6 +307,9 @@ elif [ -x "$COMPILER" ] && [ -r "$CATALOG" ]; then
 		[ -r "$GENERATED_PALETTE" ] && [ -s "$GENERATED_PALETTE" ]; then
 		manifest=$GENERATED_MANIFEST
 		palette=$GENERATED_PALETTE
+		if ! write_state "$override_stamp" "$override_state"; then
+			log_message "cannot record generated palette override state"
+		fi
 		log_message "using generated manifest and dashboard palette"
 	else
 		log_message "catalog generation failed; using checked-in manifest and palette"

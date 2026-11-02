@@ -69,9 +69,11 @@ fi
 
 # Exercise only the launcher's catalog-selection block, with local fixtures.
 # The launcher itself also performs device setup and is not executed here.
+sed -n '/^write_state() {$/,/^}$/p' \
+  "$root/deploy/menu/deck-menu-launcher" >"$fixture/catalog-selection.sh"
 sed -n '/^manifest=\$FALLBACK_MANIFEST$/,/^if \[ -s "\$UPLOAD_MANIFEST"/p' \
   "$root/deploy/menu/deck-menu-launcher" | sed '$d' \
-  >"$fixture/catalog-selection.sh"
+  >>"$fixture/catalog-selection.sh"
 [ -s "$fixture/catalog-selection.sh" ] || fail 'catalog selection block missing'
 printf '#!/bin/sh\ntest -s "$2"\n' >"$fixture/menu-validator"
 chmod +x "$fixture/menu-validator"
@@ -98,6 +100,24 @@ generated=$(printf '%s\t%s' "$fixture/cached-games.tsv" "$fixture/cached-palette
   fail 'Rust compilation did not select generated TSVs'
 [ "$(select_catalog "$fixture/no-compiler")" = "$generated" ] ||
   fail 'valid cache required a compiler'
+# Apply an override, reuse its cache, then delete it and select again.
+# Compare the actual selected palette, not just the launcher's path.
+{
+  printf '(:version 2 :palette ('
+  awk -F '\t' '{ printf ":%s \"#123456\" ", $1 }' "$root/deploy/menu/palette.tsv"
+  printf '))\n'
+} >"$fixture/no-override.sexp"
+[ "$(select_catalog)" = "$generated" ] || fail 'override compilation failed'
+awk -F '\t' '$2 != "#123456" { exit 1 }' "$fixture/cached-palette.tsv" ||
+  fail 'appearance override was not applied'
+[ "$(select_catalog "$fixture/no-compiler")" = "$generated" ] ||
+  fail 'override cache was not reusable'
+rm "$fixture/no-override.sexp"
+[ "$(select_catalog "$fixture/no-compiler")" = "$fallback" ] ||
+  fail 'deleted override reused a stale palette without a compiler'
+[ "$(select_catalog)" = "$generated" ] || fail 'override deletion compilation failed'
+cmp -s "$fixture/cached-palette.tsv" "$root/deploy/menu/palette.tsv" ||
+  fail 'override deletion did not restore the catalog palette'
 cp "$fixture/cached-games.tsv" "$fixture/cached-games-before.tsv"
 cp "$fixture/cached-palette.tsv" "$fixture/cached-palette-before.tsv"
 touch -t 200001010000 "$fixture/cached-games.tsv" "$fixture/cached-palette.tsv"

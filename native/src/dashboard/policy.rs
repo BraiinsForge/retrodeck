@@ -6,27 +6,8 @@ pub const DEFAULT_PALETTE: &str = "/mnt/data/nes-deck/menu/palette.tsv";
 pub const MAX_MANIFEST_BYTES: usize = 65_536;
 pub const MAX_PALETTE_BYTES: usize = 4_096;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum System {
-    Nes,
-    Gb,
-    Gbc,
-    Gba,
-    Zx,
-    Deck,
-}
+pub use crate::catalog::metadata::System;
 impl System {
-    pub fn parse(s: &str) -> Option<Self> {
-        Some(match s {
-            "nes" => Self::Nes,
-            "gb" => Self::Gb,
-            "gbc" => Self::Gbc,
-            "gba" => Self::Gba,
-            "zx" => Self::Zx,
-            "deck" => Self::Deck,
-            _ => return None,
-        })
-    }
     pub const fn label(self) -> &'static str {
         match self {
             Self::Nes => "NES",
@@ -88,30 +69,7 @@ pub const VOLUME_STEP: u8 = 5;
 pub const BRIGHTNESS_MINIMUM: u8 = 10;
 pub const BRIGHTNESS_STEP: u8 = 10;
 pub const CONTROLLER_BURST_LIMIT: usize = 12;
-pub const DEFAULT_PALETTE_VALUES: &[(&str, u32)] = &[
-    ("background", 0),
-    ("text-dark", 0x121212),
-    ("field", 0x121212),
-    ("surface", 0x1c1c1c),
-    ("inactive-border", 0x5f5f5f),
-    ("control-border", 0x6c6c6c),
-    ("footer", 0xbcbcbc),
-    ("inactive-text", 0xdadada),
-    ("text", 0xeeeeee),
-    ("white", 0xffffff),
-    ("title", 0xffffaf),
-    ("volume-off", 0xaf8787),
-    ("volume-on", 0x87af87),
-    ("selected", 0xecb6e7),
-    ("wifi-active", 0x5f87af),
-    ("wifi-focus", 0x87afff),
-    ("wifi-active-border", 0xafafff),
-    ("field-label", 0xafafaf),
-    ("accent", 0xfe6c27),
-    ("active", 0x503311),
-    ("control-surface", 0x303030),
-    ("muted", 0x949494),
-];
+pub use crate::catalog::metadata::DEFAULT_PALETTE_VALUES;
 fn builtin(id: &str, title: &str, rom: &str, color: u32, mode: Option<&str>) -> Game {
     Game {
         id: id.into(),
