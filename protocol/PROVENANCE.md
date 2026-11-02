@@ -16,4 +16,5 @@ fallback for every device language.
 The configured widget UUID comes from `BMC_WIDGET_KEY`. The dashboard and every
 widget-presented child use that same instance key. Configuration payload FDs are
 closed without reading them because RetroDeck declares no params or credentials.
-Wait for `configure_done` before committing the first frame.
+Wait for `configure_done` and the separately delivered renderable lifecycle before
+committing the first frame. Prepared allows one static frame; Dormant allows none.

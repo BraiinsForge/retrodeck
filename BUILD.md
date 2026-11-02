@@ -145,17 +145,20 @@ configuration.
 contract against a host binary. ARM/QEMU checks validate the deployed password
 parser and verifier.
 
-Run shell checks on deployment code with:
+Run warning/error checks on deployment code with the pinned ShellCheck. The
+launcher targets the Deck's BusyBox ash dialect:
 
 ```sh
-nix shell nixpkgs#shellcheck -c shellcheck -x \
-  ops/lib/deck-config.sh ops/check-deck.sh ops/configure-deck.sh ops/deploy.sh \
-  ops/deploy/activate.sh ops/provision-deck.sh \
+nix shell --inputs-from . nixpkgs#shellcheck -c shellcheck --severity=warning -x \
+  ops/lib/deck-config.sh ops/lib/install-stock-widget.sh \
+  ops/check-deck.sh ops/configure-deck.sh ops/deploy.sh \
+  ops/deploy/activate.sh ops/provision-deck.sh deploy/widget/retro-deck \
   deploy/menu/nes-deck-swap.init \
   tests/run-host-tests.sh tests/deploy_config_test.sh \
   tests/deploy_activation_test.sh tests/check_deck_test.sh \
-  tests/nes_deck_swap_test.sh \
-  tests/verify-arm-builds.sh
+  tests/nes_deck_swap_test.sh tests/verify-arm-builds.sh
+nix shell --inputs-from . nixpkgs#shellcheck -c shellcheck \
+  --severity=warning --shell=busybox -x deploy/menu/deck-menu-launcher
 ```
 
 ## Validate language and music runtimes on a Deck
@@ -186,8 +189,9 @@ guessing.
 
 ## Stock BMC installation
 
-The supported compositor baseline is unpatched `BraiinsForge/bmc-main` master
-`e0a5c20ceac406ef22f361671516ce5e83e00de8`. Deploy with:
+The source compatibility target is unpatched `BraiinsForge/bmc-main` master
+`b2c945b5f7a8ea3a7d38a8410a1ca64e8b69b9af`, fetched on 2026-11-02. Physical
+acceptance on that revision is pending. Deploy with:
 
 ```sh
 ops/deploy.sh --config deck.conf --presentation stock-bmc
@@ -197,22 +201,26 @@ ops/deploy.sh --config deck.conf --presentation stock-bmc
 
 - An initialized and mounted Nix store, an active BMC profile at
   `/run/current-profile`, and stock `/etc/init.d/bmc-compositor`.
-- `nix-store` and `bmc-nix-cli` in the active profile or system PATH.
+- `nix-store`, `bmc-nix-cli` and `readlink` in the active profile or system PATH.
 - A migrated version-2 configuration at `/etc/bmc/config.json`. If the file
   is still version 0 or 1, use BMC's configuration migration first.
 
-Build `.#retro-deck-widget` for the manifest and `/bin/sh` wrapper in
-`lib/bmc-widgets/retro-deck`. Deployment exports and imports this reference-free
-package, then runs stock `bmc-nix-cli add-packages` against the current profile.
+Build `.#retro-deck-widget` for the manifest, wrapper, static ARM dashboard/catalog
+compiler, immutable menu resources and license notices under
+`lib/bmc-widgets/retro-deck`. Deployment imports this reference-free package,
+checks the imported runtime, and runs stock `bmc-nix-cli add-packages --base current`.
 The profile merge preserves other installed packages and uses upstream activation
-hooks. Its discovery path is `/run/current-profile/lib/bmc-widgets`; the
-application payload lives separately under `/mnt/data/nes-deck`.
+hooks. BMC discovers it at `/run/current-profile/lib/bmc-widgets`. The wrapper
+resolves the immutable package root through profile symlinks; the launcher uses
+its bundled binaries/resources. Application runtimes and owner catalogs,
+settings, saves and history live separately under `/mnt/data/nes-deck`.
 
-Deployment stops the compositor before adding one fullscreen Retro Deck scene.
-It preserves existing scenes, settings, configured instance UUIDs and disabled
-instances. The original file is backed up once as
-`/etc/bmc/config.json.retro-deck.bak`. The private 64 MiB swapfile is enabled
-before the compositor starts; existing swapfiles are never reformatted.
+After successful profile activation, deployment adds one fullscreen Retro Deck
+scene and restarts BMC so it reads the new configuration. Existing scenes,
+settings, configured instance UUIDs and disabled instances are preserved. The
+original file is backed up once as `/etc/bmc/config.json.retro-deck.bak`. The
+private 64 MiB swapfile is enabled before the compositor starts; existing
+swapfiles are never reformatted.
 
 Stock BMC supplies `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR` and `BMC_WIDGET_KEY`
 to the wrapper. The key is the configured widget instance UUID, not the

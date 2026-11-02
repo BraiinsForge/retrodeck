@@ -13,7 +13,7 @@ RetroDeck is an exact migration, not a redesign. First-party dashboard,
 uploader, timer, chiptunes, and catalog code use standalone Rust executables.
 The Common Lisp REPL is a separate ECL app.
 Reuse the existing native mechanisms and preserve visual and interaction parity.
-The upstream migration plan is in =docs/upstream-rust-migration.md=.
+Native widget compatibility is documented in =docs/upstream-rust-migration.md=.
 
 Repository work uses small imperative title-only commits and an immediate push.
 Stage exact paths so owner-supplied ROMs, firmware images, and unrelated work are
@@ -29,8 +29,8 @@ never swept into a migration commit.
   =refs/remotes/github/master=, record its full SHA, and read that revision
   with =git show= when auditing forks. Preserve existing branches and worktrees.
 - Scope and location: Project workflow note; no active-image mutation.
-- Verification: On 2026-10-12 the GitHub API and fetched ref both resolved to
-  =e0a5c20ceac406ef22f361671516ce5e83e00de8=.
+- Verification: On 2026-11-02 a fresh GitHub fetch resolved master to
+  =b2c945b5f7a8ea3a7d38a8410a1ca64e8b69b9af=; protocol v2 was re-audited.
 - Removal condition: Remove after the local upstream remotes and comparison
   workflow use GitHub directly.
 

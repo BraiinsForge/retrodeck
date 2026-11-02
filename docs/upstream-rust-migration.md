@@ -1,310 +1,145 @@
-# RetroDeck: minimum upstream and Rust UI migration
+# Native widget compatibility
 
-Audit date: 2026-10-12. Compatibility implementation: 2026-10-13. First-party
-Lisp retirement is complete in source and deployment packaging. No device
-deployment was performed.
+Source target: [BraiinsForge/bmc-main master, 2026-11-02](https://github.com/BraiinsForge/bmc-main/tree/b2c945b5f7a8ea3a7d38a8410a1ca64e8b69b9af),
+`b2c945b5f7a8ea3a7d38a8410a1ca64e8b69b9af`.
 
-## Decision
+RetroDeck is a native ARM widget. Its first-party dashboard, uploader, catalog
+compiler, timer and chiptune UI are Rust executables. ECL Common Lisp, Chibi
+Scheme, Lua and MicroPython are separate language applications.
 
-Target current [BraiinsForge/bmc-main](https://github.com/BraiinsForge/bmc-main)
-master and a pure Rust first-party RetroDeck UI. Keep the Common Lisp REPL app.
-Preserve the current visuals, interaction, game routing, saves, and application
-behavior; reuse the existing Rust mechanisms and external emulators.
+## Required BMC additions
 
-The minimum migration is primarily RetroDeck work:
+None for native discovery, process spawning, keyed surface replacement, package
+installation or scene registration at the source target. Use the stock widget
+package/profile and version-2 configuration contracts below. Hardware acceptance
+is separate from this source compatibility assessment.
 
-1. Update the Wayland widget protocol and configured-instance identity.
-2. Package RetroDeck through the current widget installation path and provision
-   its scene through the current BMC configuration/control plane.
-3. Replace the Lisp dashboard, settings, credits, Wi-Fi editor, 10 Seconds, and
-   chiptune UI with Rust over the existing native library.
-4. Replace the Lisp uploader/web UI and catalog compiler, then remove ECL from
-   UI binaries and startup. Keep ECL and its terminal route for the REPL.
-5. Measure gameplay, pixel sampling, swipes, memory, and resource ownership on
-   current master before selecting compositor patches to upstream.
-
-No unconditional compositor/protocol patch is established as necessary by this
-source audit. Several fork features have no master equivalent, but current
-RetroDeck does not consume them. Hardware parity and foreground resource
-ownership are release acceptance gates, not outcomes proved by reading source.
-
-## Compared revisions
-
-The GitHub API and fetched Git ref agreed on the upstream SHA below. The local
-GitLab `origin/master` at `dabfe8a7` was stale and is not the comparison target.
-The source checkout branches and the existing nearest-filter edit were preserved.
-
-| Repository/ref | Revision | Fork-only commits against current master |
-| --- | --- | ---: |
-| RetroDeck `master` | `758ec9e` | Application baseline |
-| BMC GitHub `master`, fetched as `github/master` | `e0a5c20ceac406ef22f361671516ce5e83e00de8` | Upstream baseline, 2026-10-12 |
-| `feature/retro-dashboard-wayland` | `7860917be276bbca31f8fedfd864d4560e517689` | 8 |
-| `feature/retro-deck-widget` | `4455b48a3883f8f705e490287b638acbc9cf0de8` | 43 |
-| `lho/retrodeck-widget-rate` | `78cc8c7ed0a122f49a742b17ef8c88d7b7dd8c3f` | 1 |
-
-The first two forks share merge base `79aaeb349f5aa4d2d4203eff5e1e754bf299e51c`.
-Five rendering/discovery fixes occur as equivalent patches in both forks, so
-these counts must not be added as distinct features. `git cherry github/master`
-reported every fork commit as `+`: no identical patch is already upstream.
-Semantic replacements in newer master still need separate source comparison.
-
-BMC paths below refer to the pinned GitHub revision unless a fork is named.
-Historical RetroDeck audit paths refer to `758ec9e`; implemented sections describe
-the current codebase.
-
-## Mandatory compatibility work in RetroDeck
-
-### Widget protocol and launch identity: implemented
-
-RetroDeck generates bindings from the unmodified current-master
-`protocol/deck-widget.xml`, using `deck_widget_manager_v3` and
-`deck_widget_surface_v2`. `protocol/PROVENANCE.md` records the upstream revision.
-The old compact fork protocol is deleted.
-
-- Validate the canonical lowercase configured-widget UUID in `BMC_WIDGET_KEY`.
-  The dashboard and widget-presented children inherit and bind the same key.
-- Close unused `params`, `credentials` and `credential_secrets` FDs explicitly,
-  including runtime updates. RetroDeck declares no parameter or credential slots.
-- Wait for `configure_done` before rendering, and replay lifecycle, incoming
-  transition and shutdown events through the shared client.
-
-Current master accepts connections by configured-widget key, without the fork's
-parent-process credential check. Game clients therefore connect through normal
-`WAYLAND_DISPLAY`/`XDG_RUNTIME_DIR` discovery. The FD-9 socket transfer, its
-pre-exec descriptor setup and inherited-FD client code are deleted. Process-group
-cleanup and terminal restoration use the existing native process mechanisms.
-
-When a child attaches for the same instance, master closes the previous client's
-entire connection. During the child session, the dashboard suspends dispatch,
-touch supervision and rendering for that connection. On return it discards the
-replaced client and reconnects, including the initial configuration/lifecycle
-batch, before drawing the dashboard again. Terminal mirroring uses the dashboard
-surface rather than a replacement widget client.
-
-Host tests cover canonical keys, configuration ordering, descriptor ownership,
-lifecycle replay, child key propagation and parent suspension. Full-frame UI
-references are unchanged. Live repeated dashboard/game/dashboard acceptance on
-stock BMC is pending; unit and QEMU checks do not certify device interaction.
-
-Evidence: [current protocol XML](https://github.com/BraiinsForge/bmc-main/blob/e0a5c20ceac406ef22f361671516ce5e83e00de8/bmc-widget-protocol/protocol/deck-widget.xml),
-`bmc-widget-protocol/src/lib.rs`, `bmc/src/widget/spawner.rs` and
-`bmc-openwrt/src/compositor/protocol/dispatch.rs`/`state.rs` at the pinned revision.
-
-### Package, manifest, and scene installation: implemented
-
-`.#retro-deck-widget` packages the validated manifest and shell launcher under
-`lib/bmc-widgets/retro-deck`. It has no Nix runtime references. Deployment exports
-and imports its NAR, then uses stock `bmc-nix-cli add-packages` to merge it into
-the current profile without replacing other packages. Master discovers it at
-`/run/current-profile/lib/bmc-widgets`; the static application payload and
-persistent data use the existing `/mnt/data/nes-deck` layout.
-
-Deployment defaults to `stock-bmc` and validates the compositor service, mounted
-Nix store, active profile, stock CLI and version-2 `/etc/bmc/config.json` before
-stopping services. Persist a migrated BMC configuration first if its on-disk
-schema is older. The legacy `/etc/bmc_config.json` is a BMC migration input,
-not RetroDeck's runtime configuration target.
-
-With the compositor stopped, activate the package before registering the
-fullscreen rectangular scene. An import or profile failure leaves the scene
-configuration untouched. Scene registration preserves existing scenes, settings,
-instance UUIDs and disabled instances, and backs up the original configuration
-once. The manifest UID, instance UUID and scene UUID are distinct. Enable swap
-before profile activation, then start the compositor through its stock service.
-The separate ECL, Scheme, Lua and Python apps, saves and history keep their
-existing routes and data paths.
-
-Direct framebuffer installation requires an explicit `--presentation framebuffer`
-on a system without the compositor service. Health checks use the recorded mode,
-active-profile widget and configured instance keys rather than the fork's
-persistent widget scan. Physical startup, game-return and swipe acceptance on
-stock BMC is pending.
-
-Relevant upstream implementation: `nix/widget.nix`, `bmc-nix/src/bin/cli.rs`,
-`bmc/src/widget/{registry,manager}.rs`, `bmc/src/startup.rs`,
-`bmc/src/web/grpc/scene_management.rs`, and `bmc-openwrt/src/main.rs` at the pinned
-revision. Offline installation tests cover configuration preservation, idempotence,
-package command order, failed activation and health checks.
-
-## Fork feature disposition
-
-These features are concentrated in `feature/retro-deck-widget`. They are useful
-building blocks for a different integration architecture, but are not all
-prerequisites for the current RetroDeck client.
-
-| Feature and fork commits | Current master alternative or gap | Minimum disposition |
+| Capability | Stock BMC contract | RetroDeck implementation |
 | --- | --- | --- |
-| Persistent widget discovery: `34e94c3f` / `d32fff0a` | Profile packages and explicit `--widgets-path` already work; persistent data is not a default scan path. | Use standard packaging or the existing CLI. Upstream the default only if persistent sideloading is the chosen product contract. |
-| External native widget/application packaging: `84ff26a2`, `3f1f6c1b`, `3e26be3a`, `615dc57a` | Native widget packaging exists. External-workspace helpers and associated managed-app bundles do not have the same master API. | Package RetroDeck and its current child binaries together. Add only a narrowly needed build integration, rather than the complete fork framework. |
-| Managed applications, ownership and process groups: `dc4897c1`, `39e1fe21`, `f07e662c`, `bf4004e3` | No equivalent application registry/supervisor. Master supervises widgets; RetroDeck already supervises its own children. | Reuse `native/src/process.rs`. This feature set becomes required only if BMC must launch/manage individual games. |
-| Launch/stop application and system-settings actions: `1897ee20`, `aa082ece` | Master has widget sound/LED action handling and separate system settings interfaces, but not the fork's managed-app requests. | Keep RetroDeck launch/return and settings behavior local. New generic actions are optional interoperability. |
-| Renderer tree/state/assets exports and font embedding: `35977ee2`, `c5936066`, `e9d43376`, `ec8b19dc`, `628d0ff6`, `7e168250` | Master has its current renderer/widget APIs and packaged assets, not necessarily the fork's exact exports. RetroDeck already has its own pixel canvas, font, raster and projection mechanisms. | Reuse the RetroDeck renderer for visual parity. These exports are needed only if selecting the fork renderer as the new UI foundation. |
-| Wayland keyboard and post-startup input discovery: `d648e791`, `53319488` | Master does not route keyboard input to widgets; its compositor keyboard event path is unused. | Keep RetroDeck's existing evdev keyboard path, with lifecycle/focus checks. Upstream routing only for a deliberate shared-input architecture. |
-| Focused gamepad protocol/discovery: `dff76272`, `105b46f5`, `7aa74686`, `a4bd82e6`, `27c0ca8a`, `89ca1aef` | No `deck-gamepad-v1` on master. Current RetroDeck uses its own evdev/gamepad mechanisms. | Keep that implementation for the minimum port. Compositor-scoped gamepad transport is optional. |
-| Physical audio serialization and managed PCM: `2d1ba9a3`, `043ab04c`, `7ad44d60`, `9d625402`, `5a0292b1`, `c788b808`, `7ed993b8`, `2484d1fd`, `a5d0e7dd`, `7109deb6` | Master supports system/widget sounds, not this generic foreground PCM application transport. RetroDeck currently uses direct OSS audio. | Keep current audio mechanisms for initial compatibility. Decide and test system-wide audio ownership before release; require a focused upstream service only if local ownership cannot meet that contract. |
-| Public scheduler dependency: `6c914c16` | Current master contains its public `bmc-scheduler` implementation. | Use current master dependencies. No scheduler transplant. |
+| Native execution | Execute the manifest's `binary` directly | Static ARM dashboard and catalog compiler |
+| Discovery | `/run/current-profile/lib/bmc-widgets` | `.#retro-deck-widget` package and stock profile merge |
+| Instance identity | `BMC_WIDGET_KEY` configured-widget UUID | Dashboard and game children use the same key |
+| Surface handoff | Same-key attachment closes the old client's connection | Suspend dashboard dispatch during a game; reconnect on return |
+| Supervision | Restart on supervised process exit | Keep dashboard alive during games; supervise child groups locally |
+| Configuration | Persisted `/etc/bmc/config.json`, version 2 | Validate and provision one fullscreen scene atomically |
 
-Evidence for master alternatives: `nix/widget.nix`,
-`bmc/src/widget/{discovery,registry,spawner}.rs`,
-`bmc/src/widget/action_handler.rs:118-332`,
-`bmc-openwrt/src/compositor/egl_compositor.rs` keyboard handling,
-and the absence of `deck-gamepad-v1`, `deck-audio-v1`, and
-`bmc/src/application/{registry,supervisor}.rs` in the pinned tree.
-Current RetroDeck consumers are `native/src/{controls,joypad,game_audio,process}.rs`.
+Evidence at the pinned revision:
+`bmc/src/widget/{spawner,manager,discovery}.rs`,
+`bmc-openwrt/src/compositor/protocol/{dispatch,state}.rs`,
+`bmc-openwrt/src/compositor/egl_compositor.rs`,
+`bmc-nix/src/bin/cli.rs`, and `bmc/src/config.rs`.
 
-## Rendering and performance disposition
+## Package and installation
 
-| Fork change | Current master alternative or gap | Upstream decision |
-| --- | --- | --- |
-| Teardown diagnostics: `a6f45811` / `f2e003a7` | Master has host teardown/error paths; the exact extra warning context is absent. | Observability improvement, not a migration dependency. |
-| DMA-BUF descriptor recovery/cache ownership: `2b5e710d`, `88657444` / `3806cd2d`, `76ac088e` | Master still caches and duplicates DMA-BUF fds in `bmc-widget/src/egl.rs:778-797`; the fork recovery/ownership changes are absent. | Candidate correctness fixes with a reproducible descriptor failure. RetroDeck sends SHM, so these are not direct client API requirements. Stock widgets may still benefit. |
-| Prepared buffers: `445c3f9d` / `42dba1f3` | Master has newer prepared/two-buffer lifecycle handling in `bmc-wasm-host/src/render_target.rs:57-65,312-345,416-431`. | Use current lifecycle handling and test swipe parity before porting the older replacement. |
-| Idle scene release and neighbor preparation: `8d770442`, `52c04beb`, `4455b48a` | Master has dormant/prepared lifecycle and later readiness fixes, including `5bae7460a` and `7a7970666`. These are semantic alternatives, not identical patches. | Measure RAM and scene readiness. Select a current-master fix only for a demonstrated gap. |
-| Reuse SHM textures: `5a23aed6` | Master reimports widget SHM textures through `ShmImport::Always` in `scene_renderer.rs:640-707`; the reuse optimization is absent. | Performance candidate if texture import/allocation limits measured gameplay. Preserve repaint/damage correctness. |
-| Defer GPU lock release to page flip: `b77f5a1c` | Master retains explicit fence/finish completion waits and has newer GPU/render-lock work. | Separate synchronization/performance review, driven by current-master traces. |
-| Direct gameplay scanout: `7860917b` | Master retains composited output and optional `ScanoutSwizzler`, now also used for platform color adjustment. | Separate optimization. Validate format, rotation, capture, color adjustment and damage before selecting it. |
-| Remove frame-callback cap: `78cc8c7e` | Master still has the 32 ms per-widget callback cap (`state.rs:87-100,680-690`). RetroDeck never requests `wl_surface.frame`. | No minimum change for the existing self-paced client. Revisit if choosing a callback-paced client that needs native game rates. |
-| Global nearest-neighbor patch: `patches/bmc-nearest-neighbor-filter.patch` | No compositor per-widget filter selector was found. Integer scaling in the client already exists; current-master pixel parity is untested. | Check actual sampling on Deck. If a change is needed, propose a scoped pixel-art filter choice rather than making every system widget nearest-neighbor. |
+The package contains the manifest, launcher, static dashboard/compiler, credits,
+palette, settings icon and runtime license notices under
+`lib/bmc-widgets/retro-deck`. It has no runtime Nix store references. The wrapper
+resolves its immutable package through profile symlinks and passes that root to
+the packaged launcher.
 
-The initial upstream queue therefore contains no compulsory bulk cherry-pick.
-The first candidates to investigate are pixel-art sampling, SHM texture reuse,
-then measured GPU/scanout bottlenecks. Descriptor correctness is a separate
-small bugfix series when its failure is reproduced.
+Deploy application runtimes and persistent content separately under
+`/mnt/data/nes-deck`. Owner catalogs, uploads, covers, settings, saves and REPL
+history use the persistent paths. Console media belongs under
+`/mnt/data/roms/<system>`; DOOM saves belong under `/mnt/data/doom`.
+Owner media is excluded from the widget package.
 
-## Implementation progress
+Before stopping services, deployment validates:
 
-The first-party Rust migration is complete. Keyed-widget protocol and
-current-master package/scene migration are separate work, described below.
+- The mounted, initialized Nix store and active `/run/current-profile`.
+- Stock `/etc/init.d/bmc-compositor`, `nix-store`, `bmc-nix-cli` and `readlink`.
+- A persisted version-2 `/etc/bmc/config.json`. Complete BMC's configuration
+  migration first if the on-disk version is older.
 
-`deck-menu` now owns the dashboard, settings, Wi-Fi editor, credits, input policy
-and application launch/return. It calls the existing native library directly.
-All 37 dashboard reference frames match: 19 menu, eight settings, four Wi-Fi and
-six credits. Menu transcripts and their provenance are kept under
-`native/src/dashboard/oracles/`.
+Deployment imports the NAR, checks the imported ARM executable, merges it with
+`bmc-nix-cli add-packages --base current`, activates the profile, and verifies the
+resolved active package. Only then does it register the scene and restart BMC.
+This final restart accounts for activation hooks that start BMC before the new
+scene is written. Existing scenes, settings, UUIDs and disabled instances are
+preserved; the original configuration is backed up once.
 
-`rom-uploader` now serves the uploader HTTP and HTML interfaces. Eight unit tests
-and the real HTTP suite cover authentication, password configuration, limits,
-archives, catalog activation and upload responses. The HTTP suite also passes
-against the static ARM executable under QEMU.
+The manifest type UUID, configured widget UUID and scene UUID are distinct.
+BMC exports the configured instance UUID as `BMC_WIDGET_KEY`. A rejected or
+inactive key is not an invitation to invent a new instance.
 
-Deployment installs standalone Rust executables and removes the former installed
-Lisp UI/uploader trees. The first-party `lisp/` sources, ECL-driven Rust entrypoint,
-Lisp image build, uploader Lisp dependencies and obsolete test harnesses are
-deleted. Unused ABI-era tone, waveform, terminal, chiptune singleton and Wi-Fi
-helper wrappers are removed.
+Use explicit `--presentation framebuffer` only on a Deck without the compositor
+service. See [BUILD.md](../BUILD.md#stock-bmc-installation) for deployment commands.
 
-Verification: 147 native tests and the full host suite pass; all deployable ARM
-payloads are static and closure-free, with QEMU app/password/catalog/timer/player,
-DOOM, libretro and network-ECL checks passing. The dependency audit reports no
-vulnerabilities or warnings; runtime license coverage passes.
+## Protocol, lifecycle and process ownership
 
-ECL is packaged only for the separate Common Lisp app, including its network
-support. Common Lisp, Scheme, Lua and Python programs, persistent data and history
-are preserved. Hardware interaction/audio and current-master protocol acceptance
-have not been performed.
-10 Seconds now uses a standalone Rust executable built without ECL.
-`native/src/ten_seconds.rs` owns timing, input priority, cues and pixel rendering.
-Deployment installs the binary and removes the old Lisp timer source.
-Five Rust tests pass, including all five reference RGB565 frame hashes; the
-static ARM binary passes its QEMU usage check. Physical Deck acceptance is pending.
+Bindings are generated from the unmodified upstream XML; see
+[protocol provenance](../protocol/PROVENANCE.md). Negotiate manager/surface
+version 2, with version 1 compatibility. Optional language events use the
+protocol's English fallback. RetroDeck declares no params or credentials and
+closes their payload FDs, including runtime updates.
 
-Catalog generation now uses `compile-catalog`, a Rust executable without ECL.
-The launcher calls it directly and retains the generated-cache and fallback TSV
-selection. The Lisp compiler is deleted. Twelve Rust tests cover bounded parsing,
-schema/palette validation and output handling; generated TSV bytes match the
-checked-in files on the host and under ARM QEMU.
+`configure_done` completes geometry/settings configuration. Initial lifecycle
+arrives separately. Do not draw before both configuration and a renderable
+lifecycle. Prepared permits one static frame; Entering, Visible and Leaving
+permit continuous rendering. Dormant and unknown states do not render.
 
-Chiptunes now use `chiptune-deck`, a standalone Rust GME/Vorbis player.
-The Lisp player, scanner/display policy, entrypoint and compilation are deleted.
-Five Rust tests cover scanning, input, playback transitions and muted pacing;
-both reference frame hashes match. The static ARM entrypoint passes QEMU.
-Physical input and audio acceptance is pending.
+Game clients connect through ordinary `WAYLAND_DISPLAY`/`XDG_RUNTIME_DIR`
+discovery. There is no FD-9 transfer or extra native registration handshake.
+During game ownership, the dashboard does not dispatch its replaced connection.
+After the child exits or crashes, it discards that connection and reopens the
+configured instance. Terminal mirroring uses the dashboard's surface.
 
-## Historical Rust-only UI inventory
+The stock manager supervises the dashboard process, not its entire process tree.
+RetroDeck applies its normal TERM/KILL grace to child groups and installs a
+race-checked Linux parent-death signal for directly launched executables.
+Arbitrary descendants and credential-changing execs need separate process-tree
+supervision if introduced.
 
-This inventory records the audited `48f66a1` baseline, before the replacements above.
-`ops/deploy.sh:120-123` links `deck-menu`, `ten-seconds-deck`, and the shared host;
-`native/src/main.rs:1471-1472` calls `RETRODECK:MAIN`.
-`lisp/startup.lisp:773-803` dispatches dashboard, 10 Seconds, and chiptunes and
-loads their implementation files. The ARM build also supports the compiled
-`lisp-image` feature (`flake.nix:554-565`).
+Console and DOOM loops pause in Prepared/Dormant, discard queued game audio and
+reset the return hold. They resume with active lifecycle and terminate on
+shutdown or compositor loss. Framebuffer and headless execution use their normal
+pacing. Touch comes from Wayland in widget mode; the direct Goodix grab belongs
+to framebuffer mode. USB controllers and keyboard fallback use local input.
 
-| Baseline source (retired) | Implemented Rust replacement scope |
+## Optional upstream work
+
+| Addition | When it is justified |
 | --- | --- |
-| `lisp/ui.lisp`, `lisp/dashboard.lisp` | Layout, covers, tabs/carousel, rendering, reducer/runtime loop, status and launch/return. |
-| `lisp/policy.lisp`, `lisp/process.lisp` | Routing, input/modal priority, timers, cue/ownership policy and child recovery. Call existing Rust process mechanisms directly. |
-| `lisp/settings.lisp`, `lisp/wifi.lisp`, `lisp/credits.lisp` | Settings persistence/effects, exact Wi-Fi editor/helper contract, credits rendering and interaction. |
-| `lisp/timer.lisp`, `lisp/chiptune.lisp` | 10 Seconds and the chiptune player UI/runtime. Keep existing Rust audio/decoder mechanisms. |
-| `lisp/startup.lisp`, `native/src/main.rs`, `nix/lisp-image.nix` | Replace the ECL-driven UI bootstrap/FFI with normal Rust entrypoints and direct library calls. |
-| `deploy/menu/compile-catalog.lisp` and launcher ECL invocation | Implement catalog/palette validation and compilation in Rust with the existing input/output contracts. |
-| `lisp/uploader.lisp`, `deploy/uploader/run.lisp` | Replace the first-party uploader HTTP service and HTML UI with Rust. Preserve upload/authentication/catalog activation behavior. |
+| PCM mixing/audio focus | Required if native `/dev/dsp` cannot coexist with alarms and system sounds under the agreed policy; stock named sounds are not a PCM stream API |
+| Mediated keyboard/gamepad focus | Required if local input cannot meet foreground ownership and hotplug requirements; stock compositor forwards touch, not keyboard/gamepad input |
+| Scoped nearest-neighbor filtering | Only if physical pixel-edge comparisons fail; the global local patch is an experiment, not an installation dependency |
+| Process-tree/cgroup supervision | Useful for generic descendant cleanup beyond RetroDeck's directly supervised native children |
+| SHM import reuse or direct scanout | Only after profiling; preserve damage, rotation, color adjustment and capture correctness |
 
-At that baseline, the nine UI/policy implementation files contain 5,807 lines;
-startup adds 803, the uploader 563 and the catalog compiler 414.
-not a Rust line-count estimate. The 1,649-line native entrypoint is largely the
-ECL/primitive boundary, not an existing Rust dashboard to enable.
+Fork-only persistent discovery, application registries, rendering exports and
+custom gamepad/audio protocols are not prerequisites for the current package.
+Keep any demonstrated upstream fix small and independent rather than merging a
+historical RetroDeck fork wholesale.
 
-Reuse `native/src/lib.rs` modules for Wayland, canvas/font/raster/projection,
-input/gamepads, audio/chiptunes, process control, settings files, network and
-framebuffer fallback. Keep `retro-host`, `doom-host`, `tamagotchi-host`, external
-emulator cores, fbterm and mature decoder/runtime dependencies.
+## Verification and physical acceptance
 
-Keep catalog S-expressions as data if useful. Rust can parse the existing schema
-without evaluating Lisp. Preserve generated TSV/palette/credits formats and
-fallback behavior during the port. Port the compiler/uploader when removing
-runtime Lisp outside the REPL, rather than changing file formats and UI at once.
+Automated coverage includes full-frame UI references, catalog validation and
+exact output, uploader HTTP/authentication, configuration/profile transactions,
+canonical keys, payload FD closure, full SHM frame contents/bounds/releases,
+v1/v2 negotiation, delayed lifecycle, Prepared/Dormant pause/resume,
+shutdown/disconnect, repeated same-key replacement/reconnection, rejected keys,
+and dashboard-death child termination. ARM/QEMU checks cover the native package,
+application hosts and separate language runtimes.
 
-The separate REPL route is `deploy/terminal/retro-terminal` in `lisp` mode with
-ECL, its persistent `/mnt/data/langs/lisp` directory and history. Its interpreter
-and user programs are independent of the UI Lisp tree. Keep that app when removing
-UI source installation and ECL linkage from dashboard/game/player binaries.
+```sh
+cargo clippy --manifest-path native/Cargo.toml --locked --all-targets --no-deps -- -D warnings
+cargo test --manifest-path native/Cargo.toml --locked --all-targets
+tests/run-host-tests.sh
+tests/verify-arm-builds.sh
+nix build --no-link .#checks.x86_64-linux.libretro-host-smoke
+```
 
-## Migration sequence
+The local Wayland fixture is not the BMC manager/coordinator. On 2026-11-02,
+7 actual stock socket-pair tests in `compositor::state::compositor_protocol_test`
+and 23 state tests in `compositor::protocol::state::tests` passed. They cover
+admission, language, replacement, retained registration and stale attachments.
+They ran from a private archive of the pinned revision using its `.#local` dev
+shell and Git LFS assets. This is not a supervised RetroDeck/stock-compositor
+integration run.
 
-1. **Current-master bridge.** Update protocol bindings, `BMC_WIDGET_KEY`, memfd
-   payload handling and child identity propagation in the shared Rust library.
-   Exercise a small Rust widget and game launch/return against current master.
-   Update all widget-presented child hosts together. This establishes protocol
-   compatibility independently of rewriting dashboard policy.
-2. **Installable package.** Produce the native widget package, validate the
-   manifest, and replace legacy scene/config provisioning. Include current game
-   hosts and REPL runtimes. Prove install/update/removal without requiring the
-   fork's application supervisor.
-3. **Rust dashboard: complete.** Standalone `deck-menu` implements rendering,
-   settings, Wi-Fi, credits, input policy, cues and launch/return over the existing
-   native library. Differential frame fixtures preserve the original visuals.
-4. **Rust app UI and supporting services: complete.** Standalone 10 Seconds,
-   chiptune player, catalog compiler and uploader preserve the existing formats,
-   authentication, catalog outputs and state/save paths.
-5. **Remove the UI Lisp bootstrap: complete.** Production build/deploy entrypoints
-   use Rust executables. UI ECL linkage, Lisp images, installed first-party Lisp
-   sources and obsolete glue/harnesses are removed; the ECL REPL is separate.
-6. **Evidence-backed upstream series.** Run the acceptance matrix on unmodified
-   current master. Upstream only gaps demonstrated there, as independent changes
-   rebased onto master, rather than merging either July fork wholesale.
-
-Steps 3-5 are complete. Steps 1-2 establish the separate path to current master.
-Package/protocol work can proceed without choosing the fork's renderer, managed
-applications, gamepad transport or managed PCM architecture.
-
-## Verification and release decisions
-
-- Host differential frames/state transitions for dashboard, modals, credits,
-  timer and player; catalog accepted/rejected inputs and exact generated bytes.
-- Current protocol integration: configured UUID, configure/memfd events,
-  lifecycle/disconnect, repeated dashboard/game/dashboard handoff, child crashes,
-  shutdown, and scene swiping. Include the inherited parent socket path.
-- ARM build and QEMU startup for Rust UI and each host; separate ECL REPL launch.
-- Package install, update, scene creation, uninstall and rollback using current
-  BMC paths/APIs, preserving saves and user programs.
-- Physical Deck frames, pixel edges, keyboard/THEGamepad hotplug and touch,
-  audible cues, input during sound, terminal/REPL return, native game pacing,
-  RAM/swap and coexistence with normal system widgets.
-- Explicit audio/input focus contract: verify background scenes do not react to
-  raw input or retain unintended audio ownership, and alarms/system sounds have
-  the agreed behavior during games. This may justify generic upstream ownership
-  mechanisms even though the present client can run without the fork protocols.
-
-Hardware acceptance has not been performed against `e0a5c20c`. The source audit
-separates mandatory client incompatibilities from optional features and measured
-performance work; it does not certify release readiness.
+No device deployment or physical acceptance was performed for this revision.
+Before release, test repeated dashboard/game/dashboard handoff and scene
+activation/deactivation on stock BMC, including compositor restart, failed exec,
+child crash, install/update/uninstall and rollback. Check pixel edges, pacing,
+RAM/swap, swipes, touch, keyboard/THEGamepad hotplug, audible cues and terminal/REPL
+return. Confirm that off-screen apps ignore input and that `/dev/dsp` access and
+alarm/system-sound contention meet the agreed audio policy.

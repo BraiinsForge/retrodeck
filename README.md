@@ -1,9 +1,9 @@
 # Retro Deck
 
 Retro Deck turns a Braiins Forge Deck into a persistent touch-first game and
-program launcher. It runs as a fullscreen BMC scene when `bmc-compositor` is
-installed and retains a direct-framebuffer mode for Decks without BMC. The
-dashboard provides NES, Game Boy, Game Boy Color, ZX Spectrum,
+program launcher. It runs as a native fullscreen BMC widget and supports a
+direct-framebuffer mode for Decks without BMC. The dashboard provides NES,
+Game Boy, Game Boy Color, ZX Spectrum,
 utilities, language REPLs, and a chiptune player. Two Retro Games THEGamepad
 controllers work as stable Player 1 and Player 2 devices.
 
@@ -13,6 +13,8 @@ You need:
 
 - a Braiins Forge Deck reachable as `root` over SSH
 - a mounted `/mnt/data` partition on the Deck
+- stock BMC master with an initialized Nix store/profile and persisted version-2
+  `/etc/bmc/config.json`, as described in [BUILD.md](BUILD.md#stock-bmc-installation)
 - a Linux development machine with Nix flakes, an OpenSSH client, tar, gzip,
   standard GNU utilities, and `xxd`
 - this private repository, including the owner-supplied `roms/` library
@@ -79,8 +81,12 @@ last 20 dashboard log lines, and exits unsuccessfully when a required component
 is missing.
 
 To update an already-provisioned Deck, pull the repository and run
-`./ops/deploy.sh --config PATH`. A positional `root@DECK-IP` temporarily
-overrides that configuration's SSH target.
+`./ops/deploy.sh --config PATH`. This defaults to stock BMC, installs the widget
+through the current profile, and preserves configured scene identities. A positional
+`root@DECK-IP` temporarily overrides that configuration's SSH target.
+
+For a Deck without BMC, provision networking with `--network-only`, then deploy
+with `./ops/deploy.sh --config PATH --presentation framebuffer`.
 
 If Nix is not installed, follow the
 [official installation instructions](https://nixos.org/download/). Detailed
