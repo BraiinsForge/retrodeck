@@ -94,6 +94,7 @@ struct PlayerState {
     visual: Vec<i16>,
     position: i32,
     pending: Option<Vec<u8>>,
+    pending_end: bool,
     status: String,
 }
 
@@ -110,6 +111,7 @@ impl PlayerState {
             visual: Vec::new(),
             position: 0,
             pending: None,
+            pending_end: false,
             status,
         }
     }
@@ -120,6 +122,7 @@ impl PlayerState {
         self.visual.clear();
         self.position = 0;
         self.pending = None;
+        self.pending_end = false;
     }
 
     fn open_index(&mut self, index: usize) -> bool {
@@ -215,6 +218,7 @@ impl PlayerState {
         self.player = None;
         self.metadata = None;
         self.pending = None;
+        self.pending_end = false;
         self.visual.clear();
         self.status = format!("PLAYBACK ERROR: {reason}");
     }
@@ -439,11 +443,16 @@ impl Session {
                     }
                 }
             }
-            Err(error) => eprintln!("chiptune-deck: cannot change volume: {error}"),
+            Err(error) => {
+                // Opening replaces the old stream even when the replacement fails.
+                self.audio_owned = false;
+                self.dirty = true;
+                eprintln!("chiptune-deck: cannot change volume: {error}");
+            }
         }
     }
 
-    fn flush(&self, state: &mut PlayerState, pcm: Vec<u8>) -> bool {
+    fn flush(&mut self, state: &mut PlayerState, pcm: Vec<u8>) -> bool {
         if self.audio_owned && self.volume > 0 {
             match audio::write_chiptune_pcm(&pcm) {
                 Ok(audio::PcmWriteOutcome::Queued) => {}
@@ -453,8 +462,8 @@ impl Session {
                 }
                 Err(error) => {
                     eprintln!("chiptune-deck: {error}");
-                    state.pending = Some(pcm);
-                    return false;
+                    self.audio_owned = false;
+                    let _ = audio::close_chiptune_pcm();
                 }
             }
         }
@@ -467,7 +476,14 @@ impl Session {
             return false;
         }
         if let Some(pcm) = state.pending.take() {
-            return self.flush(state, pcm);
+            if !self.flush(state, pcm) {
+                return false;
+            }
+            if state.pending_end {
+                state.pending_end = false;
+                state.advance();
+            }
+            return true;
         }
         if !(self.audio_owned && self.volume > 0) && now < self.next_block {
             return false;
@@ -489,8 +505,9 @@ impl Session {
             .iter()
             .flat_map(|sample| sample.to_le_bytes())
             .collect();
-        self.flush(state, pcm);
-        if block.ended {
+        state.pending_end = block.ended;
+        if self.flush(state, pcm) && state.pending_end {
+            state.pending_end = false;
             state.advance();
         }
         self.next_block = self.next_block.saturating_add(BLOCK_NS).max(now);
@@ -736,6 +753,72 @@ mod tests {
 
         assert_eq!(scan_files(&directory), vec![track]);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn final_block_waits_for_output_before_automatic_navigation() {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/chiptune-fixtures");
+        let mut state = PlayerState::new(
+            vec![
+                fixtures.join("mono-44100.ogg"),
+                fixtures.join("stereo-44100.ogg"),
+            ],
+            1,
+            String::new(),
+        );
+        assert!(state.open_index(0));
+        let mut session = Session {
+            widget: false,
+            io_owned: false,
+            audio_owned: false,
+            volume: 50,
+            volume_state: None,
+            next_block: 0,
+            next_render: 0,
+            dirty: false,
+        };
+        assert!(session.generate(&mut state, 0));
+        assert!(session.generate(&mut state, BLOCK_NS));
+        // No PCM stream is open, so the final block gets Busy.
+        session.audio_owned = true;
+        assert!(session.generate(&mut state, 2 * BLOCK_NS));
+        assert!(state.pending.is_some() && state.pending_end);
+        assert_eq!(state.file_index, 0);
+        assert!(!session.generate(&mut state, 3 * BLOCK_NS));
+        assert_eq!(state.file_index, 0);
+        session.audio_owned = false;
+        assert!(session.generate(&mut state, 3 * BLOCK_NS));
+        assert!(state.pending.is_none() && !state.pending_end);
+        assert_eq!(state.file_index, 1);
+    }
+
+    #[test]
+    fn failed_reopen_releases_ownership_and_resumes_muted_pacing() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../chiptunes/crazy.ogg");
+        let mut state = PlayerState::new(vec![path], 1, String::new());
+        assert!(state.open_index(0));
+        let mut session = Session {
+            widget: false,
+            io_owned: false,
+            audio_owned: true,
+            volume: 50,
+            volume_state: None,
+            next_block: BLOCK_NS,
+            next_render: 0,
+            dirty: false,
+        };
+        // Invalid volume deterministically exercises the destructive reopen error
+        // without opening a sound device.
+        session.set_volume(-1);
+        assert!(!session.audio_owned);
+        state.pending = Some(vec![0; chiptune::FRAMES_PER_TICK * 4]);
+        assert!(session.generate(&mut state, 0));
+        assert!(state.pending.is_none());
+        assert!(!session.generate(&mut state, BLOCK_NS - 1));
+        assert!(session.generate(&mut state, BLOCK_NS));
+        session.set_volume(0);
+        assert!(session.audio_owned);
+        assert_eq!(session.volume, 0);
     }
 
     #[test]

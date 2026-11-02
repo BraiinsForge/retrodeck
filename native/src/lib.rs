@@ -16,6 +16,7 @@ pub mod input;
 pub mod joypad;
 pub mod nes_sram;
 pub mod network;
+mod oss;
 pub mod polling;
 pub mod process;
 mod projection;

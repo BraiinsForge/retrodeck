@@ -8,10 +8,6 @@ use std::ptr::NonNull;
 
 pub const FRAMES_PER_TICK: usize = 735;
 const MAXIMUM_FILE_SIZE: u64 = 16 * 1024 * 1024;
-// The pinned libvorbisfile 1.3.7 OggVorbis_File is 944 bytes on the host and
-// 720 bytes on ARM. calloc supplies its required alignment; keep oversized
-// private storage here rather than adding a first-party C shim.
-const VORBIS_STATE_BYTES: usize = 8192;
 
 #[repr(C)]
 struct VorbisInfo {
@@ -65,6 +61,7 @@ unsafe extern "C" {
 #[link(name = "vorbis")]
 #[link(name = "ogg")]
 unsafe extern "C" {
+    fn retrodeck_vorbis_alloc() -> *mut c_void;
     fn ov_open(
         file: *mut libc::FILE,
         state: *mut c_void,
@@ -91,11 +88,11 @@ unsafe extern "C" {
 
 pub struct OggPlayer {
     state: NonNull<c_void>,
-    channels: usize,
     length_ms: i32,
     title: Vec<u8>,
     artist: Vec<u8>,
     samples: Vec<i16>,
+    pending_mono: Option<i16>,
 }
 
 pub struct DecodeBlock {
@@ -112,13 +109,6 @@ pub struct Metadata {
     pub length_ms: i32,
     pub track_count: i32,
     pub track_index: i32,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct Probe {
-    pub tracks: usize,
-    pub samples: usize,
-    pub peak: i32,
 }
 
 impl OggPlayer {
@@ -142,7 +132,7 @@ impl OggPlayer {
             unsafe { libc::close(descriptor) };
             return Err(format!("cannot open chiptune stream: {error}"));
         }
-        let state = unsafe { libc::calloc(1, VORBIS_STATE_BYTES) };
+        let state = unsafe { retrodeck_vorbis_alloc() };
         let Some(state) = NonNull::new(state) else {
             unsafe { libc::fclose(stream) };
             return Err("cannot allocate Ogg Vorbis state".to_owned());
@@ -153,6 +143,12 @@ impl OggPlayer {
                 libc::free(state.as_ptr());
             }
             return Err("cannot decode Ogg Vorbis file".to_owned());
+        }
+        // libvorbisfile 1.3.7 can finish indexing a short chain past its first
+        // link. Start decoding from PCM time zero, not that indexing position.
+        if unsafe { ov_time_seek(state.as_ptr(), 0.0) } != 0 {
+            close_state(state);
+            return Err("cannot seek to the start of Ogg Vorbis file".to_owned());
         }
 
         let info = unsafe { ov_info(state.as_ptr(), -1).as_ref() };
@@ -168,7 +164,6 @@ impl OggPlayer {
         let comments = unsafe { ov_comment(state.as_ptr(), -1) };
         Ok(Self {
             state,
-            channels: info.channels as usize,
             length_ms: if duration >= 0.0 {
                 (duration * 1000.0) as i32
             } else {
@@ -177,27 +172,29 @@ impl OggPlayer {
             title: comment(comments, b"TITLE\0"),
             artist: comment(comments, b"ARTIST\0"),
             samples: vec![0; FRAMES_PER_TICK * 2],
+            pending_mono: None,
         })
     }
 
     pub fn decode(&mut self) -> Result<DecodeBlock, String> {
         self.samples.fill(0);
-        let mut mono = [0_i16; FRAMES_PER_TICK];
-        let mut frames = 0;
+        let mut decoded_samples = [0_i16; FRAMES_PER_TICK];
+        let mut frames = if let Some(sample) = self.pending_mono.take() {
+            self.samples[..2].fill(sample);
+            1
+        } else {
+            0
+        };
         while frames < FRAMES_PER_TICK {
             let remaining = FRAMES_PER_TICK - frames;
-            let destination = if self.channels == 2 {
-                self.samples[frames * 2..].as_mut_ptr()
-            } else {
-                mono[frames..].as_mut_ptr()
-            };
-            let frame_bytes = self.channels * size_of::<i16>();
+            // Leave room for one stereo frame even at the end of a tick.
+            // A mono link can then produce one extra frame; retain it below.
             let mut bitstream = 0;
             let amount = unsafe {
                 ov_read(
                     self.state.as_ptr(),
-                    destination.cast(),
-                    (remaining * frame_bytes) as c_int,
+                    decoded_samples.as_mut_ptr().cast(),
+                    (remaining.max(2) * size_of::<i16>()) as c_int,
                     0,
                     2,
                     1,
@@ -213,17 +210,30 @@ impl OggPlayer {
                     frames,
                 });
             }
+            // ov_read reports the logical link that produced these samples. A
+            // chained stream can change channels or rate at any read boundary.
+            let info = unsafe { ov_info(self.state.as_ptr(), bitstream).as_ref() }
+                .ok_or_else(|| "Ogg Vorbis stream has no format information".to_owned())?;
+            if info.rate != 44100 || !(info.channels == 1 || info.channels == 2) {
+                return Err("Ogg Vorbis file must be 44.1 kHz mono or stereo".to_owned());
+            }
+            let channels = info.channels as usize;
+            let frame_bytes = channels * size_of::<i16>();
             if amount as usize % frame_bytes != 0 {
                 return Err("Ogg Vorbis decoder returned a partial frame".to_owned());
             }
             let decoded = amount as usize / frame_bytes;
-            if self.channels == 1 {
-                for (index, sample) in mono[frames..frames + decoded].iter().enumerate() {
-                    self.samples[(frames + index) * 2] = *sample;
-                    self.samples[(frames + index) * 2 + 1] = *sample;
-                }
+            for (index, frame) in decoded_samples[..decoded.min(remaining) * channels]
+                .chunks_exact(channels)
+                .enumerate()
+            {
+                self.samples[(frames + index) * 2] = frame[0];
+                self.samples[(frames + index) * 2 + 1] = frame[channels - 1];
             }
-            frames += decoded;
+            if decoded > remaining {
+                self.pending_mono = Some(decoded_samples[remaining]);
+            }
+            frames += decoded.min(remaining);
         }
         Ok(DecodeBlock {
             ended: false,
@@ -233,6 +243,7 @@ impl OggPlayer {
 
     pub fn rewind(&mut self) -> Result<(), String> {
         if unsafe { ov_time_seek(self.state.as_ptr(), 0.0) } == 0 {
+            self.pending_mono = None;
             Ok(())
         } else {
             Err("cannot restart Ogg Vorbis track".to_owned())
@@ -468,55 +479,6 @@ fn read_chiptune_bytes(path: &Path) -> Result<Vec<u8>, String> {
         .ok_or_else(|| format!("chiptune does not exist: {}", path.display()))
 }
 
-pub fn probe(path: &Path) -> Result<Probe, String> {
-    match Player::open(path)? {
-        Player::Ogg(mut player) => {
-            let mut peak = 0;
-            for _ in 0..60 {
-                let block = player.decode()?;
-                peak = peak.max(
-                    player
-                        .samples()
-                        .iter()
-                        .map(|sample| i32::from(*sample).abs())
-                        .max()
-                        .unwrap_or(0),
-                );
-                if block.ended {
-                    player.rewind()?;
-                }
-            }
-            Ok(Probe {
-                tracks: 1,
-                samples: 60 * FRAMES_PER_TICK * 2,
-                peak,
-            })
-        }
-        Player::Gme(player) => {
-            let mut samples = vec![0_i16; 44100 * 2];
-            let result = unsafe {
-                gme_play(
-                    player.emulator.as_ptr(),
-                    samples.len() as c_int,
-                    samples.as_mut_ptr(),
-                )
-            };
-            if !result.is_null() {
-                return Err(gme_error(result, "cannot play track"));
-            }
-            Ok(Probe {
-                tracks: player.track_count as usize,
-                samples: samples.len(),
-                peak: samples
-                    .iter()
-                    .map(|sample| i32::from(*sample).abs())
-                    .max()
-                    .unwrap_or(0),
-            })
-        }
-    }
-}
-
 fn comment(comments: *mut c_void, tag: &[u8]) -> Vec<u8> {
     if comments.is_null() {
         return Vec::new();
@@ -539,6 +501,60 @@ fn close_state(state: NonNull<c_void>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn decode_all(path: &Path) -> Result<Vec<i16>, String> {
+        let mut player = OggPlayer::open(path)?;
+        let mut pcm = Vec::new();
+        loop {
+            let block = player.decode()?;
+            pcm.extend_from_slice(&player.samples()[..block.frames * 2]);
+            if block.ended {
+                return Ok(pcm);
+            }
+        }
+    }
+
+    #[test]
+    fn chained_links_preserve_pcm_across_channel_changes_and_reject_rate_changes() {
+        let directory = crate::test_support::fixture_directory("chiptune-chains");
+        let mono = include_bytes!("chiptune-fixtures/mono-44100.ogg");
+        let stereo = include_bytes!("chiptune-fixtures/stereo-44100.ogg");
+        let other_rate = include_bytes!("chiptune-fixtures/mono-48000.ogg");
+        let mono_path = directory.join("mono.ogg");
+        let stereo_path = directory.join("stereo.ogg");
+        let chain_path = directory.join("chain.ogg");
+        std::fs::write(&mono_path, mono).unwrap();
+        std::fs::write(&stereo_path, stereo).unwrap();
+        let mono_pcm = decode_all(&mono_path).unwrap();
+        let stereo_pcm = decode_all(&stereo_path).unwrap();
+        assert!(mono_pcm.len() > FRAMES_PER_TICK * 2);
+        assert!(mono_pcm.chunks_exact(2).all(|frame| frame[0] == frame[1]));
+        for (first, second, first_pcm, second_pcm) in [
+            (mono.as_slice(), stereo.as_slice(), &mono_pcm, &stereo_pcm),
+            (stereo.as_slice(), mono.as_slice(), &stereo_pcm, &mono_pcm),
+        ] {
+            std::fs::write(&chain_path, [first, second].concat()).unwrap();
+            let expected = [first_pcm.as_slice(), second_pcm.as_slice()].concat();
+            let actual = decode_all(&chain_path).unwrap();
+            let mismatch = actual
+                .iter()
+                .zip(&expected)
+                .position(|(actual, expected)| actual != expected);
+            assert_eq!((actual.len(), mismatch), (expected.len(), None));
+            let mut player = OggPlayer::open(&chain_path).unwrap();
+            while !player.decode().unwrap().ended {}
+            player.rewind().unwrap();
+            player.decode().unwrap();
+            assert_eq!(player.samples(), &expected[..FRAMES_PER_TICK * 2]);
+        }
+        std::fs::write(
+            &chain_path,
+            [mono.as_slice(), other_rate.as_slice()].concat(),
+        )
+        .unwrap();
+        assert!(decode_all(&chain_path).is_err());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     fn fixture() -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../chiptunes/crazy.ogg")
@@ -592,23 +608,16 @@ mod tests {
             (block.frames, player.samples().len()),
             (FRAMES_PER_TICK, 1470)
         );
+        assert!(player.samples().iter().all(|sample| *sample == 0));
+        for _ in 1..60 {
+            assert_eq!(player.decode().unwrap().frames, FRAMES_PER_TICK);
+            assert!(player.samples().iter().all(|sample| *sample == 0));
+        }
         assert!(player.position_ms() > 0);
         assert_eq!(player.start_track(1).unwrap().track_index, 1);
         assert!(player.start_track(2).is_err());
         player.rewind().unwrap();
         assert_eq!(player.position_ms(), 0);
-    }
-
-    #[test]
-    fn matches_cpp_gme_probe() {
-        assert_eq!(
-            probe(&nsf_fixture()).unwrap(),
-            Probe {
-                tracks: 2,
-                samples: 88200,
-                peak: 0,
-            }
-        );
     }
 
     #[test]
@@ -619,15 +628,21 @@ mod tests {
     }
 
     #[test]
-    fn matches_cpp_ogg_probe() {
-        assert_eq!(
-            probe(&fixture()).unwrap(),
-            Probe {
-                tracks: 1,
-                samples: 88200,
-                peak: 4432,
-            }
-        );
+    fn matches_cpp_ogg_pcm_peak() {
+        let mut player = Player::open(&fixture()).unwrap();
+        let mut peak = 0;
+        for _ in 0..60 {
+            assert_eq!(player.decode().unwrap().frames, FRAMES_PER_TICK);
+            peak = peak.max(
+                player
+                    .samples()
+                    .iter()
+                    .map(|sample| i32::from(*sample).abs())
+                    .max()
+                    .unwrap(),
+            );
+        }
+        assert_eq!(peak, 4432);
     }
 
     #[test]

@@ -17,29 +17,15 @@ const SIG_DFL: usize = 0;
 const WNOHANG: c_int = 1;
 const ECHILD: c_int = 10;
 
-const AFMT_S16_LE: c_int = 0x10;
-const SNDCTL_DSP_SYNC: c_ulong = 0x5001;
-const SNDCTL_DSP_SPEED: c_ulong = 0xc0045002;
-const SNDCTL_DSP_SETFMT: c_ulong = 0xc0045005;
-const SNDCTL_DSP_CHANNELS: c_ulong = 0xc0045006;
-const SNDCTL_DSP_SETFRAGMENT: c_ulong = 0xc004500a;
-const SNDCTL_DSP_GETOSPACE: c_ulong = 0x8010500c;
-const SNDCTL_DSP_SETTRIGGER: c_ulong = 0x40045010;
-const PCM_ENABLE_OUTPUT: c_int = 0x2;
+use crate::oss::{
+    AudioBufferInfo, PCM_ENABLE_OUTPUT, SNDCTL_DSP_GETOSPACE, SNDCTL_DSP_SETTRIGGER,
+    SNDCTL_DSP_SYNC,
+};
 const CHIPTUNE_PCM_BYTES: usize = 735 * 2 * mem::size_of::<i16>();
 // Six blocks (~100 ms) plus the ~93 ms prefilled kernel buffer absorb the
 // worst decode-loop stalls while keeping pause/volume/track controls snappy;
 // the decoder loop keeps this queue full and is paced by its backpressure.
 const CHIPTUNE_QUEUE_BLOCKS: usize = 6;
-
-#[repr(C)]
-#[derive(Default)]
-struct AudioBufferInfo {
-    fragments: c_int,
-    fragment_total: c_int,
-    fragment_size: c_int,
-    bytes: c_int,
-}
 
 #[derive(Clone, Copy)]
 pub struct Tone {
@@ -284,23 +270,10 @@ fn pcm_player() -> MutexGuard<'static, Option<PcmPlayer>> {
 }
 
 fn configure_chiptune_pcm(fd: c_int) -> Result<bool, String> {
-    let mut fragment: c_int = (8 << 16) | 10;
-    let mut format = AFMT_S16_LE;
-    let mut channels: c_int = 1;
-    let mut rate: c_int = 44100;
-    unsafe {
-        ioctl(fd, SNDCTL_DSP_SETFRAGMENT, &mut fragment as *mut c_int);
-    }
-    let configured = unsafe {
-        ioctl(fd, SNDCTL_DSP_SETFMT, &mut format as *mut c_int) == 0
-            && format == AFMT_S16_LE
-            && ioctl(fd, SNDCTL_DSP_CHANNELS, &mut channels as *mut c_int) == 0
-            && channels == 1
-            && ioctl(fd, SNDCTL_DSP_SPEED, &mut rate as *mut c_int) == 0
-            && rate == 44100
-    };
-    if !configured {
-        return Err(os_error("cannot configure /dev/dsp for chiptune audio"));
+    let rate = crate::oss::configure_mono(fd, (8 << 16) | 10, 44100)
+        .map_err(|error| format!("cannot configure /dev/dsp for chiptune audio: {error}"))?;
+    if rate != 44100 {
+        return Err("chiptune audio requires a 44.1 kHz device".to_owned());
     }
 
     let mut trigger = 0;
@@ -432,24 +405,8 @@ fn play_blocking(tones: &[Tone], volume_percent: c_int) -> Result<(), String> {
     }
 
     let result = (|| {
-        let mut fragment: c_int = (4 << 16) | 9;
-        let mut format = AFMT_S16_LE;
-        let mut channels: c_int = 1;
-        let mut rate: c_int = 44100;
-        unsafe {
-            ioctl(fd, SNDCTL_DSP_SETFRAGMENT, &mut fragment as *mut c_int);
-        }
-        let configured = unsafe {
-            ioctl(fd, SNDCTL_DSP_SETFMT, &mut format as *mut c_int) == 0
-                && format == AFMT_S16_LE
-                && ioctl(fd, SNDCTL_DSP_CHANNELS, &mut channels as *mut c_int) == 0
-                && channels == 1
-                && ioctl(fd, SNDCTL_DSP_SPEED, &mut rate as *mut c_int) == 0
-                && rate > 0
-        };
-        if !configured {
-            return Err(os_error("cannot configure menu sound"));
-        }
+        let rate = crate::oss::configure_mono(fd, (4 << 16) | 9, 44100)
+            .map_err(|error| format!("cannot configure menu sound: {error}"))?;
 
         let samples = render_tones(tones, rate, volume_percent)?;
         let bytes = unsafe {

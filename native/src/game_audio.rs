@@ -11,22 +11,7 @@ const QUEUE_FRAMES: usize = 16384;
 const CUSHION_FRAMES: usize = 1024;
 const WRITE_CHUNK_FRAMES: usize = 2048;
 
-const SNDCTL_DSP_SETFMT: libc::c_ulong = 0xc0045005;
-const SNDCTL_DSP_CHANNELS: libc::c_ulong = 0xc0045006;
-const SNDCTL_DSP_SPEED: libc::c_ulong = 0xc0045002;
-const SNDCTL_DSP_SETFRAGMENT: libc::c_ulong = 0xc004500a;
-const SNDCTL_DSP_SETTRIGGER: libc::c_ulong = 0x40045010;
-const SNDCTL_DSP_GETOSPACE: libc::c_ulong = 0x8010500c;
-const AFMT_S16_LE: libc::c_int = 0x10;
-const PCM_ENABLE_OUTPUT: libc::c_int = 2;
-
-#[repr(C)]
-struct AudioBufferInfo {
-    fragments: libc::c_int,
-    fragstotal: libc::c_int,
-    fragsize: libc::c_int,
-    bytes: libc::c_int,
-}
+use crate::oss::{AudioBufferInfo, PCM_ENABLE_OUTPUT, SNDCTL_DSP_GETOSPACE, SNDCTL_DSP_SETTRIGGER};
 
 struct Shared {
     queue: Vec<i16>,
@@ -107,48 +92,22 @@ fn scale_sample(sample: i32, percent: i32) -> i16 {
 }
 
 fn configure(fd: &OwnedFd, source_rate: u32) -> Result<u32, String> {
-    let raw = fd.as_raw_fd();
-    // Eight 1 KiB fragments; smaller rings audibly underran during
-    // framebuffer updates. The result is deliberately ignored.
-    let mut fragment: libc::c_int = (8 << 16) | 10;
-    unsafe { libc::ioctl(raw, SNDCTL_DSP_SETFRAGMENT, &mut fragment) };
-    let failure = || {
-        format!(
-            "cannot configure /dev/dsp: {}",
-            std::io::Error::last_os_error()
-        )
-    };
-    let mut format = AFMT_S16_LE;
-    if unsafe { libc::ioctl(raw, SNDCTL_DSP_SETFMT, &mut format) } != 0 || format != AFMT_S16_LE {
-        return Err(failure());
-    }
-    let mut channels: libc::c_int = 1;
-    if unsafe { libc::ioctl(raw, SNDCTL_DSP_CHANNELS, &mut channels) } != 0 || channels != 1 {
-        return Err(failure());
-    }
-    // The 32 kHz hardware stream consumes one application frame per
-    // hardware frame while the bridge reports 32768.
-    let mut rate: libc::c_int = if source_rate == 32768 {
+    // Preserve the bridge's 32 kHz hardware correction and 8 x 1 KiB ring.
+    let requested_rate = if source_rate == 32768 {
         32000
     } else {
         source_rate as libc::c_int
     };
-    if unsafe { libc::ioctl(raw, SNDCTL_DSP_SPEED, &mut rate) } != 0 || rate <= 0 {
-        return Err(failure());
-    }
-    Ok(rate as u32)
+    crate::oss::configure_mono(fd.as_raw_fd(), (8 << 16) | 10, requested_rate)
+        .map(|rate| rate as u32)
+        .map_err(|error| format!("cannot configure /dev/dsp: {error}"))
 }
 
 fn prefill(fd: &OwnedFd) -> Result<bool, String> {
     let raw = fd.as_raw_fd();
     let mut trigger: libc::c_int = 0;
     let trigger_pending = unsafe { libc::ioctl(raw, SNDCTL_DSP_SETTRIGGER, &mut trigger) } == 0;
-    let mut space = AudioBufferInfo {
-        fragments: 0,
-        fragstotal: 0,
-        fragsize: 0,
-        bytes: 0,
-    };
+    let mut space = AudioBufferInfo::default();
     if unsafe { libc::ioctl(raw, SNDCTL_DSP_GETOSPACE, &mut space) } == 0
         && space.bytes > 0
         && space.bytes <= 1024 * 1024

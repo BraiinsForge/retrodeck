@@ -70,6 +70,7 @@
         fileset = pkgs.lib.fileset.unions [
           ./native/Cargo.lock
           ./native/Cargo.toml
+          ./native/build.rs
           ./native/doom
           ./native/src
           ./native/vendor/tamalib-rs
