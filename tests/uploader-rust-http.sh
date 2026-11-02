@@ -165,11 +165,11 @@ request 422 -b "$work/cookies" -H "Origin: $origin" \
 request 400 -b "$work/cookies" -H "Origin: $origin" \
   -F "csrf=$csrf" -F system=zx -F 'title=Two Files' \
   -F "rom=@$work/raw-game.tap" -F "rom=@$work/zip-game.tap" "$origin/upload"
-head -c 10485761 /dev/zero > "$work/too-big.gba"
+head -c 33554433 /dev/zero > "$work/too-big.gba"
 request 422 -b "$work/cookies" -H "Origin: $origin" \
   -F "csrf=$csrf" -F system=gba -F 'title=Oversize Raw' \
   -F "rom=@$work/too-big.gba" "$origin/upload"
-head -c 12582913 /dev/zero > "$work/too-big-request.gba"
+head -c 37748737 /dev/zero > "$work/too-big-request.gba"
 request 400 -b "$work/cookies" -H "Origin: $origin" \
   -F "csrf=$csrf" -F system=gba -F 'title=Oversize Request' \
   -F "rom=@$work/too-big-request.gba" "$origin/upload"
@@ -214,6 +214,13 @@ request 200 -b "$work/cookies" -H "Origin: $origin" \
 request 200 -b "$work/cookies" "$origin/"
 base_background=$(awk -F '\t' '$1 == "background" { print $2 }' "$work/data/nes-deck/menu/palette.tsv")
 grep -q "name=\"background\" value=\"$base_background\"" "$work/response.body"
+# A full-size GBA image must fit both multipart intake and ROM validation.
+head -c 33554432 /dev/zero > "$work/full-size.gba"
+request 200 -b "$work/cookies" -H "Origin: $origin" \
+  -F "csrf=$csrf" -F system=gba -F 'title=Full Size GBA' \
+  -F "rom=@$work/full-size.gba" "$origin/upload"
+cmp "$work/full-size.gba" "$work/data/roms/gba/full-size-gba.gba"
+grep -q 'upload-gba-full-size-gba' "$work/data/nes-deck/uploads/games.tsv"
 # Saving succeeds independently of an init-script restart failure.
 printf '#!/bin/sh\nexit 7\n' > "$work/restart-helper"
 request 422 -b "$work/cookies" -H "Origin: $origin" \

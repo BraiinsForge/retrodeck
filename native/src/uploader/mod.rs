@@ -31,8 +31,9 @@ use subtle::ConstantTimeEq;
 use tokio::sync::Semaphore;
 
 type Result<T> = std::result::Result<T, String>;
-const UPLOAD_LIMIT: usize = 10 * 1024 * 1024;
-const MULTIPART_LIMIT: usize = 12 * 1024 * 1024;
+// Allow a full-size GBA image, including ZIP overhead and multipart fields.
+const UPLOAD_LIMIT: usize = 34 * 1024 * 1024;
+const MULTIPART_LIMIT: usize = UPLOAD_LIMIT + 2 * 1024 * 1024;
 const SESSION_SECONDS: u64 = 28_800;
 const LABELS: &[&str] = &[
     "Background",
@@ -508,7 +509,25 @@ fn ensure_directory(directory: &Path) -> Result<()> {
     }
     fs::create_dir_all(directory).map_err(|e| e.to_string())
 }
-fn install(path: &Path, bytes: &[u8], overwrite: bool) -> Result<()> {
+/// An error means publication did not happen. Directory sync failures are
+/// reported separately because rename/link has already made the file visible.
+#[derive(Debug)]
+enum Publication {
+    Durable,
+    Uncertain(String),
+}
+fn sync_directory(directory: &Path) -> std::io::Result<()> {
+    File::open(directory)?.sync_all()
+}
+fn install(path: &Path, bytes: &[u8], overwrite: bool) -> Result<Publication> {
+    install_with_sync(path, bytes, overwrite, &sync_directory)
+}
+fn install_with_sync(
+    path: &Path,
+    bytes: &[u8],
+    overwrite: bool,
+    sync: &impl Fn(&Path) -> std::io::Result<()>,
+) -> Result<Publication> {
     let directory = path.parent().ok_or("missing storage directory")?;
     ensure_directory(directory)?;
     let temporary = directory.join(format!(".uploader-{}", token()?));
@@ -536,10 +555,13 @@ fn install(path: &Path, bytes: &[u8], overwrite: bool) -> Result<()> {
                 }
             })?;
         }
-        File::open(directory)
-            .and_then(|d| d.sync_all())
-            .map_err(|e| e.to_string())?;
-        Ok(())
+        Ok(match sync(directory) {
+            Ok(()) => Publication::Durable,
+            Err(e) => Publication::Uncertain(format!(
+                "{} was published, but its directory could not be synced: {e}. Durability after power loss is uncertain.",
+                path.display()
+            )),
+        })
     })();
     let _ = fs::remove_file(&temporary);
     result
@@ -651,7 +673,7 @@ fn validate_zip_envelope(bytes: &[u8]) -> Result<()> {
 fn decode_upload(name: &str, filename: &str, bytes: &[u8]) -> Result<Vec<u8>> {
     let spec = system(name)?;
     if bytes.len() > UPLOAD_LIMIT {
-        return Err("the upload exceeds 10 MiB".into());
+        return Err("the upload exceeds 34 MiB".into());
     }
     if extension(filename) == spec.extension {
         validate_rom(name, bytes)?;
@@ -740,7 +762,7 @@ fn read_catalog(path: &Path, missing_ok: bool) -> Result<Vec<Entry>> {
     if let Some(text) = read_text(path, 65536, missing_ok)? {
         for line in text.lines() {
             if line.len() > 4095 {
-                return Err("bufio.Scanner: token too long".into());
+                return Err("catalog line exceeds 4095 bytes".into());
             }
             if line.is_empty() || line.starts_with('#') {
                 continue;
@@ -763,6 +785,16 @@ fn add_rom(
     title: &str,
     filename: &str,
     upload: &[u8],
+) -> Result<Option<String>> {
+    add_rom_with_sync(app, name, title, filename, upload, &sync_directory)
+}
+fn add_rom_with_sync(
+    app: &App,
+    name: &str,
+    title: &str,
+    filename: &str,
+    upload: &[u8],
+    sync: &impl Fn(&Path) -> std::io::Result<()>,
 ) -> Result<Option<String>> {
     let _storage = app.storage.lock().unwrap();
     if !title_valid(title) {
@@ -802,7 +834,12 @@ fn add_rom(
     {
         return Err("a game with this title is already cataloged".into());
     }
-    install(&destination, &bytes, false)?;
+    let mut warnings = Vec::new();
+    if let Publication::Uncertain(warning) = install_with_sync(&destination, &bytes, false, sync)? {
+        // The ROM is visible. Continue catalog publication instead of leaving
+        // an unreported orphan or pretending the no-clobber install rolled back.
+        warnings.push(warning);
+    }
     uploads.push([
         identifier,
         title.into(),
@@ -815,11 +852,26 @@ fn add_rom(
         .iter()
         .map(|e| format!("{}\n", e.join("\t")))
         .collect::<String>();
-    if let Err(e) = install(&catalog_path, text.as_bytes(), true) {
-        let _ = fs::remove_file(destination);
-        return Err(format!("save upload catalog: {e}"));
+    match install_with_sync(&catalog_path, text.as_bytes(), true, sync) {
+        Ok(Publication::Durable) => {}
+        Ok(Publication::Uncertain(warning)) => warnings.push(warning),
+        Err(e) => {
+            // Only a pre-publication catalog error permits ROM rollback.
+            let rollback =
+                fs::remove_file(&destination).and_then(|_| sync(destination.parent().unwrap()));
+            return Err(match rollback {
+                Ok(()) => format!("save upload catalog: {e}"),
+                Err(rollback) => format!(
+                    "save upload catalog: {e}; ROM rollback could not be completed durably at {}: {rollback}",
+                    destination.display()
+                ),
+            });
+        }
     }
-    Ok(app.restart().err())
+    if let Err(e) = app.restart() {
+        warnings.push(e);
+    }
+    Ok((!warnings.is_empty()).then(|| warnings.join(" ")))
 }
 fn redirect() -> Response {
     let mut r = plain(303, "");
@@ -1147,19 +1199,15 @@ async fn dispatch(app: Arc<App>, peer: SocketAddr, request: Request) -> Response
         let result =
             tokio::task::spawn_blocking(move || add_rom(&a, &name, &t, &filename, &bytes)).await;
         return match result {
-            Ok(Ok(restart)) => html(
+            Ok(Ok(warning)) => html(
                 200,
                 dashboard(
                     &app,
                     &s,
                     None,
                     Some(&format!(
-                        "{title} {}",
-                        if restart.is_some() {
-                            "was saved. The dashboard will pick it up after its next restart."
-                        } else {
-                            "was validated, filed, and added to the dashboard."
-                        }
+                        "{title} was validated, filed, and added to the dashboard.{}",
+                        warning.map(|w| format!(" {w}")).unwrap_or_default()
                     )),
                 ),
             ),
@@ -1236,8 +1284,14 @@ async fn dispatch(app: Arc<App>, peer: SocketAddr, request: Request) -> Response
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => return Err(e.to_string()),
             }
-        } else {
-            install(&path, encode_palette(&palette).as_bytes(), true)?;
+        } else if let Publication::Uncertain(warning) =
+            install(&path, encode_palette(&palette).as_bytes(), true)?
+        {
+            let reload = a.restart().err();
+            return Err(match reload {
+                Some(e) => format!("{warning} Dashboard reload failed: {e}"),
+                None => warning,
+            });
         }
         a.restart()
             .map_err(|e| format!("appearance was saved, but the dashboard could not reload: {e}"))

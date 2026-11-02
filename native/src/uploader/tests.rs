@@ -149,6 +149,88 @@ fn zip_decoding_rejects_paths_links_duplicates_damage_and_expansion() {
     assert!(decode_upload("gba", "big.gba", &vec![0; UPLOAD_LIMIT + 1]).is_err());
 }
 #[test]
+fn gba_raw_and_zip_accept_full_size_and_reject_oversize_images() {
+    let maximum = system("gba").unwrap().maximum;
+    let mut gba = vec![0; maximum];
+    assert_eq!(
+        decode_upload("gba", "full.gba", &gba).unwrap().len(),
+        maximum
+    );
+    let zipped = archive(&[("full.gba", &gba)]);
+    assert_eq!(
+        decode_upload("gba", "full.zip", &zipped).unwrap().len(),
+        maximum
+    );
+    gba.push(0);
+    assert!(decode_upload("gba", "large.gba", &gba).is_err());
+    assert!(decode_upload("gba", "large.zip", &archive(&[("large.gba", &gba)])).is_err());
+}
+#[test]
+fn sync_failure_after_either_publication_keeps_catalog_and_rom_and_warns() {
+    for failed_directory in ["roms/zx", "nes-deck/uploads"] {
+        let fixture = Fixture::new();
+        let app = fixture.app();
+        install(&app.config.path("nes-deck/menu/games.tsv"), b"", true).unwrap();
+        let fail_at = app.config.path(failed_directory);
+        let sync = |directory: &Path| {
+            if directory == fail_at {
+                Err(std::io::Error::other("injected directory sync failure"))
+            } else {
+                sync_directory(directory)
+            }
+        };
+        let warning = add_rom_with_sync(&app, "zx", "Sync", "sync.tap", &[2, 0, 1, 1], &sync)
+            .unwrap()
+            .expect("published upload must report uncertain durability");
+        assert!(warning.contains(fail_at.to_str().unwrap()));
+        let entries = read_catalog(&app.config.path("nes-deck/uploads/games.tsv"), false).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(fs::read(&entries[0][3]).unwrap(), [2, 0, 1, 1]);
+        assert!(add_rom(&app, "zx", "Sync", "sync.tap", &[2, 0, 2, 2]).is_err());
+        assert_eq!(fs::read(&entries[0][3]).unwrap(), [2, 0, 1, 1]);
+    }
+}
+#[test]
+fn catalog_failure_before_publication_rolls_back_new_rom() {
+    let fixture = Fixture::new();
+    let app = fixture.app();
+    install(&app.config.path("nes-deck/menu/games.tsv"), b"", true).unwrap();
+    let catalog = app.config.path("nes-deck/uploads/games.tsv");
+    // Fail rename after read_catalog and ROM publication, not at catalog intake.
+    let sync = |directory: &Path| {
+        if directory == app.config.path("roms/zx") && !catalog.exists() {
+            fs::create_dir_all(&catalog)?;
+        }
+        sync_directory(directory)
+    };
+    assert!(add_rom_with_sync(&app, "zx", "Rollback", "r.tap", &[2, 0, 0, 0], &sync).is_err());
+    assert!(!app.config.path("roms/zx/rollback.tap").exists());
+}
+#[test]
+fn concurrent_no_clobber_publication_has_one_winner() {
+    let fixture = Fixture::new();
+    let path = fixture.0.join("roms/zx/race.tap");
+    ensure_directory(path.parent().unwrap()).unwrap();
+    let barrier = std::sync::Barrier::new(2);
+    std::thread::scope(|scope| {
+        let writers = [b"first".as_slice(), b"second".as_slice()].map(|bytes| {
+            let path = &path;
+            let barrier = &barrier;
+            scope.spawn(move || {
+                barrier.wait();
+                (bytes, install(path, bytes, false))
+            })
+        });
+        let results = writers.map(|writer| writer.join().unwrap());
+        assert_eq!(
+            results.iter().filter(|(_, result)| result.is_ok()).count(),
+            1
+        );
+        let winner = results.iter().find(|(_, result)| result.is_ok()).unwrap().0;
+        assert_eq!(fs::read(&path).unwrap(), winner);
+    });
+}
+#[test]
 fn atomic_storage_does_not_overwrite_or_follow_links_and_is_private() {
     let fixture = Fixture::new();
     let path = fixture.0.join("roms/zx/test.tap");
@@ -171,7 +253,7 @@ fn atomic_storage_does_not_overwrite_or_follow_links_and_is_private() {
     }));
 }
 #[test]
-fn uploaded_catalog_is_sorted_exactly_and_rom_is_rolled_back_on_catalog_failure() {
+fn uploaded_catalog_is_sorted_and_rejects_duplicate_titles_without_changes() {
     let fixture = Fixture::new();
     let app = fixture.app();
     install(&app.config.path("nes-deck/menu/games.tsv"), b"", true).unwrap();
@@ -187,11 +269,6 @@ fn uploaded_catalog_is_sorted_exactly_and_rom_is_rolled_back_on_catalog_failure(
         fs::read(app.config.path("roms/zx/alpha.tap")).unwrap(),
         [2, 0, 1, 1]
     );
-    let catalog = app.config.path("nes-deck/uploads/games.tsv");
-    fs::remove_file(&catalog).unwrap();
-    fs::create_dir(&catalog).unwrap();
-    assert!(add_rom(&app, "zx", "Rollback", "b.tap", &[2, 0, 0, 0]).is_err());
-    assert!(!app.config.path("roms/zx/rollback.tap").exists());
 }
 #[test]
 fn palette_schema_and_legacy_icon_roundtrip_are_bounded_and_complete() {
