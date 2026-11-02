@@ -34,7 +34,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
-            libgme-dev libpng-dev libvorbis-dev pkg-config
+            imagemagick libgme-dev libpng-dev libvorbis-dev pkg-config
 
       - name: Check shell scripts
         run: |
