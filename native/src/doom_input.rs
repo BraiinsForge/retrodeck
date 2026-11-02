@@ -203,14 +203,14 @@ pub fn keyboard_key(code: u16) -> Option<(i32, i32)> {
             return Some((i32::from(letter), i32::from(letter)));
         }
     }
-    if code >= linux_key::ONE && code <= linux_key::EQUAL {
+    if (linux_key::ONE..=linux_key::EQUAL).contains(&code) {
         let digit = DIGIT_ROW[usize::from(code - linux_key::ONE)];
         return Some((i32::from(digit), i32::from(digit)));
     }
     if let Some((_, character)) = PUNCTUATION.iter().find(|(candidate, _)| *candidate == code) {
         return Some((i32::from(*character), i32::from(*character)));
     }
-    if code >= linux_key::F1 && code <= linux_key::F10 {
+    if (linux_key::F1..=linux_key::F10).contains(&code) {
         return Some((KEY_F1 + i32::from(code - linux_key::F1), 0));
     }
     match code {
@@ -275,7 +275,10 @@ impl Mapper {
     pub fn new() -> Self {
         Self {
             controllers: [0; 2],
-            keys: keyboard_codes().into_iter().map(|code| (code, false)).collect(),
+            keys: keyboard_codes()
+                .into_iter()
+                .map(|code| (code, false))
+                .collect(),
             shifted: false,
         }
     }
@@ -422,19 +425,43 @@ mod tests {
 
     #[test]
     fn keyboard_letters_carry_their_character() {
-        assert_eq!(keyboard_key(linux_key::A), Some((i32::from(b'a'), i32::from(b'a'))));
-        assert_eq!(keyboard_key(linux_key::Q), Some((i32::from(b'q'), i32::from(b'q'))));
-        assert_eq!(keyboard_key(linux_key::Z), Some((i32::from(b'z'), i32::from(b'z'))));
+        assert_eq!(
+            keyboard_key(linux_key::A),
+            Some((i32::from(b'a'), i32::from(b'a')))
+        );
+        assert_eq!(
+            keyboard_key(linux_key::Q),
+            Some((i32::from(b'q'), i32::from(b'q')))
+        );
+        assert_eq!(
+            keyboard_key(linux_key::Z),
+            Some((i32::from(b'z'), i32::from(b'z')))
+        );
         // Last letter of each evdev row.
-        assert_eq!(keyboard_key(linux_key::Q + 9), Some((i32::from(b'p'), i32::from(b'p'))));
-        assert_eq!(keyboard_key(linux_key::A + 8), Some((i32::from(b'l'), i32::from(b'l'))));
-        assert_eq!(keyboard_key(linux_key::Z + 6), Some((i32::from(b'm'), i32::from(b'm'))));
+        assert_eq!(
+            keyboard_key(linux_key::Q + 9),
+            Some((i32::from(b'p'), i32::from(b'p')))
+        );
+        assert_eq!(
+            keyboard_key(linux_key::A + 8),
+            Some((i32::from(b'l'), i32::from(b'l')))
+        );
+        assert_eq!(
+            keyboard_key(linux_key::Z + 6),
+            Some((i32::from(b'm'), i32::from(b'm')))
+        );
     }
 
     #[test]
     fn keyboard_digits_and_named_keys_translate() {
-        assert_eq!(keyboard_key(linux_key::ONE), Some((i32::from(b'1'), i32::from(b'1'))));
-        assert_eq!(keyboard_key(linux_key::ONE + 9), Some((i32::from(b'0'), i32::from(b'0'))));
+        assert_eq!(
+            keyboard_key(linux_key::ONE),
+            Some((i32::from(b'1'), i32::from(b'1')))
+        );
+        assert_eq!(
+            keyboard_key(linux_key::ONE + 9),
+            Some((i32::from(b'0'), i32::from(b'0')))
+        );
         // Eleventh key of the digit row, KEY_MINUS.
         assert_eq!(
             keyboard_key(linux_key::ONE + 10),
@@ -487,7 +514,11 @@ mod tests {
 
         // The same button on the other pad is already held, so no repeat.
         events.clear();
-        mapper.poll(|port| if port == 0 { PAD_A } else { 0 }, |_| false, &mut events);
+        mapper.poll(
+            |port| if port == 0 { PAD_A } else { 0 },
+            |_| false,
+            &mut events,
+        );
         assert!(events.is_empty());
     }
 

@@ -159,7 +159,7 @@ pub enum Pending {
     VolumeTone(settings::Effect),
     Wifi,
     Network,
-    Child(ActiveLaunch),
+    Child(Box<ActiveLaunch>),
 }
 #[derive(Debug)]
 pub enum Effect {
@@ -260,10 +260,14 @@ impl App {
             .first()
             .copied()
             .unwrap_or(policy::System::Deck);
-        let mut settings = settings::State::default();
-        settings.open = false;
-        let mut wifi = wifi::State::default();
-        wifi.open = false;
+        let settings = settings::State {
+            open: false,
+            ..Default::default()
+        };
+        let wifi = wifi::State {
+            open: false,
+            ..Default::default()
+        };
         Self {
             games,
             view: View::Dashboard,
@@ -768,12 +772,12 @@ impl App {
                     policy::LaunchKind::Terminal => format!("STARTING {}", terminal_title(&plan)),
                     policy::LaunchKind::Game => format!("STARTING {}", game.title),
                 });
-                self.pending = Some(Pending::Child(ActiveLaunch {
+                self.pending = Some(Pending::Child(Box::new(ActiveLaunch {
                     game,
                     plan,
                     result: None,
                     recovery: None,
-                }));
+                })));
                 vec![
                     Effect::Render,
                     Effect::Present,

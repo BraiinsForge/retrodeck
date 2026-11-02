@@ -105,6 +105,31 @@ fn console_carousels_tabs_and_status_match_legacy_frames() {
     }
 }
 
+#[test]
+fn carousel_windows_keep_catalog_indices_and_touch_targets() {
+    let mut games = fixture_games();
+    games.swap(1, 4);
+    let renderer = MenuRenderer::default();
+    for (position, selected, visible) in [
+        (0, 0, [0, 2, 3]),
+        (1, 2, [0, 2, 3]),
+        (2, 3, [2, 3, 4]),
+        (3, 4, [2, 3, 4]),
+        (4, 0, [0, 2, 3]),
+    ] {
+        let layout = renderer.render(&games, System::Nes, position, "");
+        assert_eq!(layout.game_indices, [0, 2, 3, 4]);
+        assert_eq!(layout.shown_game_index, Some(selected));
+        assert_eq!(layout.visible_game_indices, visible);
+        for (bounds, index) in layout.game_buttons.iter().zip(visible) {
+            assert_eq!(
+                layout.target_at(bounds.x + 1, bounds.y + 1),
+                Some(Target::Game(index))
+            );
+        }
+    }
+}
+
 fn artwork() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/settings-cog/gear-knekko-09.png")
 }

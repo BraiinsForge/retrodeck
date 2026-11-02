@@ -295,8 +295,7 @@ fn decode_png(data: &[u8], maximum_width: u32, maximum_height: u32) -> Result<De
     let height = reader.info().height;
     if width == 0 || height == 0 || width > maximum_width || height > maximum_height {
         return Err(format!(
-            "dimensions are outside 1..{} by 1..{}",
-            maximum_width, maximum_height
+            "dimensions are outside 1..{maximum_width} by 1..{maximum_height}"
         ));
     }
     let buffer_size = reader

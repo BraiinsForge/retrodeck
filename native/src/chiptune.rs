@@ -125,7 +125,7 @@ impl OggPlayer {
     pub fn open(path: &Path) -> Result<Self, String> {
         let file = OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK)
             .open(path)
             .map_err(|error| format!("cannot open chiptune: {error}"))?;
         let metadata = file
@@ -136,13 +136,11 @@ impl OggPlayer {
         }
 
         let descriptor = file.into_raw_fd();
-        let stream = unsafe { libc::fdopen(descriptor, b"rb\0".as_ptr().cast()) };
+        let stream = unsafe { libc::fdopen(descriptor, c"rb".as_ptr()) };
         if stream.is_null() {
+            let error = std::io::Error::last_os_error();
             unsafe { libc::close(descriptor) };
-            return Err(format!(
-                "cannot open chiptune stream: {}",
-                std::io::Error::last_os_error()
-            ));
+            return Err(format!("cannot open chiptune stream: {error}"));
         }
         let state = unsafe { libc::calloc(1, VORBIS_STATE_BYTES) };
         let Some(state) = NonNull::new(state) else {
@@ -466,22 +464,8 @@ fn gme_error(result: *const c_char, fallback: &str) -> String {
 }
 
 fn read_chiptune_bytes(path: &Path) -> Result<Vec<u8>, String> {
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
-        .open(path)
-        .map_err(|error| format!("cannot open chiptune: {error}"))?;
-    let metadata = file
-        .metadata()
-        .map_err(|error| format!("cannot inspect chiptune: {error}"))?;
-    if !metadata.is_file() || !(1..=MAXIMUM_FILE_SIZE).contains(&metadata.len()) {
-        return Err("chiptune must be a nonempty regular file up to 16 MiB".to_owned());
-    }
-    let mut bytes = Vec::new();
-    let mut file = file;
-    std::io::Read::read_to_end(&mut file, &mut bytes)
-        .map_err(|error| format!("cannot read chiptune: {error}"))?;
-    Ok(bytes)
+    crate::regular_file::read_regular(path, 1, MAXIMUM_FILE_SIZE, "chiptune")?
+        .ok_or_else(|| format!("chiptune does not exist: {}", path.display()))
 }
 
 pub fn probe(path: &Path) -> Result<Probe, String> {
@@ -644,6 +628,34 @@ mod tests {
                 peak: 4432,
             }
         );
+    }
+
+    #[test]
+    fn rejects_nonregular_and_oversized_inputs_before_decoding() {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::symlink;
+
+        let directory = crate::test_support::fixture_directory("chiptune-input");
+        for extension in ["ogg", "nsf"] {
+            let fifo = directory.join(format!("pipe.{extension}"));
+            let name = CString::new(fifo.as_os_str().as_bytes()).unwrap();
+            assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+            assert!(Player::open(&fifo).is_err());
+
+            let oversized = directory.join(format!("large.{extension}"));
+            std::fs::File::create(&oversized)
+                .unwrap()
+                .set_len(MAXIMUM_FILE_SIZE + 1)
+                .unwrap();
+            assert!(Player::open(&oversized).is_err());
+
+            let linked = directory.join(format!("linked.{extension}"));
+            symlink(fixture(), &linked).unwrap();
+            assert!(Player::open(&linked).is_err());
+        }
+        assert!(Player::open(&directory).is_err());
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

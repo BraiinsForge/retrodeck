@@ -158,42 +158,34 @@ impl MenuRenderer {
                 );
             }
         }
-        let pairs: Vec<(usize, &Game)> = games
+        let game_indices: Vec<_> = games
             .iter()
             .enumerate()
-            .filter(|(_, g)| g.system == active_system)
+            .filter_map(|(index, game)| (game.system == active_system).then_some(index))
             .collect();
-        let game_indices = pairs.iter().map(|(i, _)| *i).collect::<Vec<_>>();
         let mut visible_game_indices = Vec::new();
         let mut game_buttons = Vec::new();
         let mut indicators = Vec::new();
         let mut shown = None;
         let mut previous = None;
         let mut next = None;
-        if !pairs.is_empty() {
-            let selected = position % pairs.len();
-            shown = Some(pairs[selected].0);
-            let visible_count = pairs.len().min(3);
-            let first = if pairs.len() <= visible_count {
-                0
-            } else if selected == 0 {
-                0
-            } else if selected + 1 >= pairs.len() {
-                pairs.len() - visible_count
-            } else {
-                selected - 1
-            };
+        if !game_indices.is_empty() {
+            let count = game_indices.len();
+            let selected = position % count;
+            shown = Some(game_indices[selected]);
+            let visible_count = count.min(3);
+            let first = selected.saturating_sub(1).min(count - visible_count);
             let row_width =
                 visible_count as i32 * 216 + (visible_count.saturating_sub(1) as i32) * 36;
             let mut x = (WIDTH - row_width) / 2;
-            for (index, game) in pairs[first..first + visible_count].iter() {
+            for &index in &game_indices[first..first + visible_count] {
                 let b = Bounds::new(x, 154, 216, 264);
-                visible_game_indices.push(*index);
+                visible_game_indices.push(index);
                 game_buttons.push(b);
-                self.draw_card(b, game, *index == pairs[selected].0);
+                self.draw_card(b, &games[index], index == game_indices[selected]);
                 x += 252;
             }
-            if pairs.len() > 1 {
+            if count > 1 {
                 previous = Some(Bounds::new(156, 232, 80, 100));
                 next = Some(Bounds::new(1044, 232, 80, 100));
                 draw_arrow(previous.unwrap(), true, ui::color("footer"));
@@ -202,9 +194,9 @@ impl MenuRenderer {
             let iw: i32 = 16;
             let ih: u32 = 8;
             let gap: i32 = 8;
-            let total = pairs.len() as i32 * iw + (pairs.len().saturating_sub(1) as i32) * gap;
+            let total = count as i32 * iw + (count.saturating_sub(1) as i32) * gap;
             let mut ix = (WIDTH - total) / 2;
-            for i in 0..pairs.len() {
+            for i in 0..count {
                 let b = Bounds::new(ix, 438, iw as u32, ih);
                 indicators.push(b);
                 ui::outline(

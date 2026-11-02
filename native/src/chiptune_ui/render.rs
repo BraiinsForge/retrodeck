@@ -11,9 +11,9 @@ const MUTED: u32 = quantize(0x969696);
 const INDICATOR: u32 = quantize(0x6c6c6c);
 
 const fn quantize(color: u32) -> u32 {
-    (((color >> 19) & 31) * 255 / 31) << 16
-        | (((color >> 10) & 63) * 255 / 63) << 8
-        | ((color >> 3) & 31) * 255 / 31
+    ((((color >> 19) & 31) * 255 / 31) << 16)
+        | ((((color >> 10) & 63) * 255 / 63) << 8)
+        | (((color >> 3) & 31) * 255 / 31)
 }
 
 fn rect(x: i32, y: i32, width: i32, height: i32, color: u32) {

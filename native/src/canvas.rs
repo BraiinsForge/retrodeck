@@ -43,8 +43,10 @@ impl Canvas {
         };
         let rect = Rect::from_xywh(x as f32, y as f32, width as f32, height as f32)
             .expect("clipped rectangle is nonempty");
-        let mut paint = Paint::default();
-        paint.anti_alias = false;
+        let mut paint = Paint {
+            anti_alias: false,
+            ..Default::default()
+        };
         paint.set_color(color_value(color));
         self.pixmap
             .fill_rect(rect, &paint, Transform::identity(), None);

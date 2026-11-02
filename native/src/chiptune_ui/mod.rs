@@ -2,11 +2,10 @@
 mod render;
 
 use crate::{
-    audio, canvas, chiptune, controls, fbdev, input, polling, process, regular_file, state_file,
-    wayland,
+    audio, canvas, chiptune, controls, fbdev, input, polling, process, state_file, wayland,
 };
-use std::ffi::{OsStr, OsString};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 const BLOCK_NS: u64 = 16_666_666;
@@ -297,25 +296,39 @@ fn scan_files(directory: &Path) -> Vec<PathBuf> {
         if depth > 4 || files.len() >= MAXIMUM_FILES {
             return;
         }
-        let mut entries = regular_file::list_directory(directory).unwrap_or_else(|error| {
-            eprintln!("chiptune-deck: {error}");
-            Vec::new()
-        });
-        entries.retain(|entry| !entry.name.is_empty() && entry.name[0] != b'.');
-        entries.sort_by(|left, right| left.name.cmp(&right.name));
+        let entries = match std::fs::read_dir(directory) {
+            Ok(entries) => entries,
+            Err(error) => {
+                eprintln!(
+                    "chiptune-deck: cannot list directory {}: {error}",
+                    directory.display()
+                );
+                return;
+            }
+        };
+        let mut entries: Vec<_> = entries
+            .filter_map(Result::ok)
+            .filter(|entry| !entry.file_name().as_bytes().starts_with(b"."))
+            .collect();
+        entries.sort_by_cached_key(std::fs::DirEntry::file_name);
         for entry in entries {
             if files.len() == MAXIMUM_FILES {
                 break;
             }
-            let path = directory.join(OsString::from_vec(entry.name));
-            if entry.kind == regular_file::ENTRY_DIRECTORY {
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+            if kind.is_dir() {
                 walk(&path, depth + 1, files);
-            } else if entry.kind == regular_file::ENTRY_FILE
-                && (1..=16 * 1024 * 1024).contains(&entry.size)
+            } else if kind.is_file()
                 && path.extension().is_some_and(|extension| {
                     EXTENSIONS
                         .iter()
                         .any(|accepted| extension.as_bytes().eq_ignore_ascii_case(accepted))
+                })
+                && entry.metadata().is_ok_and(|metadata| {
+                    metadata.is_file() && (1..=16 * 1024 * 1024).contains(&metadata.len())
                 })
             {
                 files.push(path);
@@ -704,6 +717,24 @@ mod tests {
         assert_eq!(files[0], directory.join("a.ogg"));
         assert_eq!(files[1], directory.join("b.NSF"));
         assert!(files.last().unwrap().ends_with("depth-4.spc"));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn scan_preserves_non_utf8_names_and_skips_directory_links() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+        use std::os::unix::fs::symlink;
+
+        let directory = crate::test_support::fixture_directory("chiptune-scan-names");
+        let track = directory.join(OsString::from_vec(b"track-\xff.ogg".to_vec()));
+        std::fs::write(&track, b"x").unwrap();
+        let hidden = directory.join(".hidden");
+        std::fs::create_dir(&hidden).unwrap();
+        std::fs::write(hidden.join("secret.nsf"), b"x").unwrap();
+        symlink(&directory, directory.join("loop")).unwrap();
+
+        assert_eq!(scan_files(&directory), vec![track]);
         std::fs::remove_dir_all(directory).unwrap();
     }
 

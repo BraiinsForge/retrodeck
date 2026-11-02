@@ -322,11 +322,7 @@ pub fn activate(s: &State, t: Target) -> Effect {
     };
     let action = match t {
         Target::Close => Action::Close,
-        Target::VolumeDown => Action::Volume(if s.volume > VOLUME_STEP {
-            s.volume - VOLUME_STEP
-        } else {
-            0
-        }),
+        Target::VolumeDown => Action::Volume(s.volume.saturating_sub(VOLUME_STEP)),
         Target::VolumeUp => Action::Volume(if s.volume == 0 {
             s.last_audible_volume.max(VOLUME_STEP)
         } else {

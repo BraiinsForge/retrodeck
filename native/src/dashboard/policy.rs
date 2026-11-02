@@ -399,8 +399,7 @@ impl LaunchConfig {
 fn wad_application(g: &Game) -> bool {
     g.system == System::Deck
         && g.rom.len() > 4
-        && g.rom[..g.rom.len() - 4].len() > 0
-        && g.rom[g.rom.len() - 4..].eq_ignore_ascii_case(".wad")
+        && g.rom.as_bytes()[g.rom.len() - 4..].eq_ignore_ascii_case(b".wad")
 }
 
 /// Construct the exact child process contract used by the dashboard policy.
@@ -516,7 +515,7 @@ pub fn launch_plan(
         volume_state: volume_state.map(Path::to_path_buf),
     }
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ControllerGuard {
     pub edge_times: Vec<u64>,
     pub suspended: bool,
@@ -524,11 +523,7 @@ pub struct ControllerGuard {
 }
 impl ControllerGuard {
     pub fn new() -> Self {
-        Self {
-            edge_times: vec![],
-            suspended: false,
-            last_edge_at: None,
-        }
+        Self::default()
     }
     pub fn accept_edge(&mut self, now: u64) -> bool {
         self.last_edge_at = Some(now);
@@ -557,17 +552,6 @@ impl ControllerGuard {
         }
     }
 }
-pub fn control_priority(back: bool, physical_a: bool, touch: bool) -> Option<&'static str> {
-    if back {
-        Some("back")
-    } else if physical_a {
-        Some("confirm")
-    } else if touch {
-        Some("touch")
-    } else {
-        None
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -591,15 +575,17 @@ mod tests {
 
     #[test]
     fn launch_contract_covers_all_routes_and_overrides() {
-        let mut c = LaunchConfig::default();
-        c.nes_emulator = Some("nes-x".into());
-        c.gb_emulator = Some("gb-x".into());
-        c.gba_emulator = Some("gba-x".into());
-        c.zx_emulator = Some("zx-x".into());
-        c.deck_game = Some("deck-x".into());
-        c.doom_deck = Some("doom-x".into());
-        c.tamagotchi_deck = Some("tama-x".into());
-        c.chiptune_player = Some("chip-x".into());
+        let c = LaunchConfig {
+            nes_emulator: Some("nes-x".into()),
+            gb_emulator: Some("gb-x".into()),
+            gba_emulator: Some("gba-x".into()),
+            zx_emulator: Some("zx-x".into()),
+            deck_game: Some("deck-x".into()),
+            doom_deck: Some("doom-x".into()),
+            tamagotchi_deck: Some("tama-x".into()),
+            chiptune_player: Some("chip-x".into()),
+            ..Default::default()
+        };
         let p = |g: Game| launch_plan(&g, 37, "de", true, Some(Path::new("/state/volume")), &c);
         let nes = p(game("n", System::Nes, "/rom/n.nes"));
         assert_eq!(
@@ -660,7 +646,11 @@ mod tests {
     }
 
     #[test]
-    fn priority() {
-        assert_eq!(control_priority(true, true, true), Some("back"));
+    fn wad_routing_handles_unicode_paths_without_slicing_characters() {
+        for path in ["éxxx", "é.WAD", ".wad", "", "game.wad2"] {
+            let game = game("custom", System::Deck, path);
+            assert_eq!(wad_application(&game), path == "é.WAD", "{path:?}");
+        }
+        assert!(!wad_application(&game("custom", System::Nes, "game.wad")));
     }
 }

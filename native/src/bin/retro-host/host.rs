@@ -467,13 +467,11 @@ fn load_memory_file(path: &str, data: *mut c_void, size: usize, configuration: &
         if configuration.nes
             && metadata.len() > 0
             && metadata.len() <= retrodeck_native::nes_sram::maximum_encoded_size(size) as u64
+            && let Ok(encoded) = std::fs::read(path)
+            && retrodeck_native::nes_sram::decode(&encoded, destination)
         {
-            if let Ok(encoded) = std::fs::read(path)
-                && retrodeck_native::nes_sram::decode(&encoded, destination)
-            {
-                eprintln!("{name}: migrated encoded InfoNES save: {path}");
-                return;
-            }
+            eprintln!("{name}: migrated encoded InfoNES save: {path}");
+            return;
         }
         eprintln!("{name}: ignoring save with unexpected size: {path}");
         return;
