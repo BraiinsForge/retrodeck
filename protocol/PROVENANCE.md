@@ -1,8 +1,8 @@
 # Deck widget protocol
 
 `deck-widget.xml` is an unmodified copy of
-[BraiinsForge/bmc-main](https://github.com/BraiinsForge/bmc-main/blob/b2c945b5f7a8ea3a7d38a8410a1ca64e8b69b9af/bmc-widget-protocol/protocol/deck-widget.xml)
-at `b2c945b5f7a8ea3a7d38a8410a1ca64e8b69b9af`, verified against GitHub master
+[BraiinsForge/bmc-main](https://github.com/BraiinsForge/bmc-main/blob/5ce80092ed165bb1b75bbb54d2e672ad8cde00df/bmc-widget-protocol/protocol/deck-widget.xml)
+at `5ce80092ed165bb1b75bbb54d2e672ad8cde00df`, verified against GitHub master
 on 2026-11-02.
 The protocol XML is MIT-licensed; its copyright notice is included in the file.
 

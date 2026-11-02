@@ -190,7 +190,7 @@ guessing.
 ## Stock BMC installation
 
 The source compatibility target is unpatched `BraiinsForge/bmc-main` master
-`b2c945b5f7a8ea3a7d38a8410a1ca64e8b69b9af`, fetched on 2026-11-02. Physical
+`5ce80092ed165bb1b75bbb54d2e672ad8cde00df`, fetched on 2026-11-02. Physical
 acceptance on that revision is pending. Deploy with:
 
 ```sh

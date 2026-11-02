@@ -1,17 +1,17 @@
 # Native widget compatibility
 
-Source target: [BraiinsForge/bmc-main master, 2026-11-02](https://github.com/BraiinsForge/bmc-main/tree/b2c945b5f7a8ea3a7d38a8410a1ca64e8b69b9af),
-`b2c945b5f7a8ea3a7d38a8410a1ca64e8b69b9af`.
+Source target: [BraiinsForge/bmc-main master, 2026-11-02](https://github.com/BraiinsForge/bmc-main/tree/5ce80092ed165bb1b75bbb54d2e672ad8cde00df),
+`5ce80092ed165bb1b75bbb54d2e672ad8cde00df`.
 
 RetroDeck is a native ARM widget. Its first-party dashboard, uploader, catalog
 compiler, timer and chiptune UI are Rust executables. ECL Common Lisp, Chibi
 Scheme, Lua and MicroPython are separate language applications.
 
-## Required BMC additions
+## Stock BMC support
 
-None for native discovery, process spawning, keyed surface replacement, package
-installation or scene registration at the source target. Use the stock widget
-package/profile and version-2 configuration contracts below. Hardware acceptance
+Stock BMC supports native discovery, process spawning, keyed surface replacement,
+package installation and scene registration at the source target. Use its widget
+package/profile and version-2 configuration contracts below. Physical acceptance
 is separate from this source compatibility assessment.
 
 | Capability | Stock BMC contract | RetroDeck implementation |
@@ -28,6 +28,11 @@ Evidence at the pinned revision:
 `bmc-openwrt/src/compositor/protocol/{dispatch,state}.rs`,
 `bmc-openwrt/src/compositor/egl_compositor.rs`,
 `bmc-nix/src/bin/cli.rs`, and `bmc/src/config.rs`.
+
+The latest master changes partial panel transfer/damage, overlays and swipe
+transitions without altering the native contracts above or the protocol XML.
+Swipe reversals include `Visible` before `Leaving` and `Prepared` before `Entering`;
+RetroDeck handles these states independently.
 
 ## Package and installation
 
@@ -95,20 +100,36 @@ shutdown or compositor loss. Framebuffer and headless execution use their normal
 pacing. Touch comes from Wayland in widget mode; the direct Goodix grab belongs
 to framebuffer mode. USB controllers and keyboard fallback use local input.
 
-## Optional upstream work
+## Upstream requirements beyond 60 fps
 
-| Addition | When it is justified |
-| --- | --- |
-| PCM mixing/audio focus | Required if native `/dev/dsp` cannot coexist with alarms and system sounds under the agreed policy; stock named sounds are not a PCM stream API |
-| Mediated keyboard/gamepad focus | Required if local input cannot meet foreground ownership and hotplug requirements; stock compositor forwards touch, not keyboard/gamepad input |
-| Scoped nearest-neighbor filtering | Only if physical pixel-edge comparisons fail; the global local patch is an experiment, not an installation dependency |
-| Process-tree/cgroup supervision | Useful for generic descendant cleanup beyond RetroDeck's directly supervised native children |
-| SHM import reuse or direct scanout | Only after profiling; preserve damage, rotation, color adjustment and capture correctness |
+RetroDeck needs reliable audio coexistence, foreground input ownership and crisp
+pixel edges. Stock BMC already provides discovery, launch, same-key replacement,
+lifecycle and persistent profile/scene installation. The remaining source gaps
+below become patch requirements when local handling fails acceptance.
 
-Fork-only persistent discovery, application registries, rendering exports and
-custom gamepad/audio protocols are not prerequisites for the current package.
-Keep any demonstrated upstream fix small and independent rather than merging a
-historical RetroDeck fork wholesale.
+| Capability | Current upstream / RetroDeck handling | Acceptance criterion and minimum upstream change |
+| --- | --- | --- |
+| PCM audio coexistence | BMC plays files through `madplay`; RetroDeck streams directly to `/dev/dsp`. Named sounds are not a PCM API. | Exercise gameplay, music, cues and an alarm together. If concurrent output fails, agree on mix/duck/exclusive-focus policy and add the smallest PCM stream/focus interface that meets it. |
+| Keyboard/gamepad focus and hotplug | BMC forwards touch; RetroDeck reads keyboard/controllers locally and gates them by lifecycle. | Only the foreground app consumes input. Test scene switches, launch/return, reconnect and two-pad player order. Add mediated routing/focus only where local handling cannot guarantee ownership. |
+| Pixel-art filtering | RetroDeck scales game pixels with nearest-neighbor sampling. BMC has no per-surface filtering preference in its widget contract. | Compare physical integer-scaled pixel edges, including during swipes. If compositor filtering blurs them, add a per-surface nearest-neighbor option rather than a global renderer change. |
+| Descendant cleanup | BMC supervises the dashboard PID. RetroDeck supervises child groups and uses parent-death signals for directly launched executables. | Kill/restart the dashboard while an app runs. Add process-tree/cgroup supervision if arbitrary descendants or credential-changing execs outgrow the direct-child contract. |
+
+Pinned source evidence:
+
+- `bmc-audio/src/lib.rs`, `Audio::play`: `madplay` file playback and cancellation.
+- `bmc-openwrt/src/compositor/{device_access,egl_compositor}.rs`: input discovery
+  and touch dispatch. Widget protocol events are in
+  `bmc-openwrt/src/compositor/protocol/dispatch.rs` and the vendored
+  [protocol XML](../protocol/PROVENANCE.md).
+- `bmc-openwrt/src/compositor/scene_renderer.rs` and
+  `bmc-openwrt/src/compositor/render/egl_context.rs`: texture import and sampling.
+  Compare against the pinned source when evaluating the local filtering experiment.
+- `bmc/src/widget/{manager,spawner}.rs`: supervised process lifetime and launch.
+
+SHM import reuse and direct scanout are profiling-led performance work, not
+installation requirements. Preserve damage, rotation, color adjustment and
+capture behavior when changing those paths. Keep upstream fixes independent;
+merge only demonstrated gaps rather than the historical RetroDeck fork.
 
 ## Verification and physical acceptance
 
@@ -129,12 +150,12 @@ nix build --no-link .#checks.x86_64-linux.libretro-host-smoke
 ```
 
 The local Wayland fixture is not the BMC manager/coordinator. On 2026-11-02,
-7 actual stock socket-pair tests in `compositor::state::compositor_protocol_test`
-and 23 state tests in `compositor::protocol::state::tests` passed. They cover
-admission, language, replacement, retained registration and stale attachments.
-They ran from a private archive of the pinned revision using its `.#local` dev
-shell and Git LFS assets. This is not a supervised RetroDeck/stock-compositor
-integration run.
+7 actual stock socket-pair tests in `compositor::state::compositor_protocol_test`,
+23 state tests in `compositor::protocol::state::tests` and 12 lifecycle tests in
+`compositor::lifecycle_emitter::tests` passed. They cover admission, language,
+replacement, retained registration, stale attachments and swipe transitions.
+They ran from a private checkout of the pinned revision using its `.#local` dev
+shell and Git LFS assets, not a supervised RetroDeck/stock-compositor integration.
 
 No device deployment or physical acceptance was performed for this revision.
 Before release, test repeated dashboard/game/dashboard handoff and scene
@@ -143,3 +164,5 @@ child crash, install/update/uninstall and rollback. Check pixel edges, pacing,
 RAM/swap, swipes, touch, keyboard/THEGamepad hotplug, audible cues and terminal/REPL
 return. Confirm that off-screen apps ignore input and that `/dev/dsp` access and
 alarm/system-sound contention meet the agreed audio policy.
+Exercise partial-transfer damage/buffer swaps and premultiplied overlays during
+swipes on the physical panel.
