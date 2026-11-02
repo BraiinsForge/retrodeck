@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline stock BMC v2 configuration, profile installation, and health checks."""
 
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
 PROVISION = REPO / "ops/lib/install-bmc-scene.py"
@@ -52,12 +54,21 @@ class StockBmcInstall(unittest.TestCase):
         self.script("run/current-profile/bin/nix-store", 'cat >/dev/null; printf "import\\n" >>"$TEST_ROOT/calls"')
         self.script("run/current-profile/bin/bmc-nix-cli", '''[ "$1" != is-initialized ] || exit 0
 printf '%s\\n' "$*" >>"$TEST_ROOT/calls"
-mkdir -p "$TEST_ROOT/run/current-profile/lib/bmc-widgets/retro-deck"
-cp -R "$TEST_ROOT"''' + STORE + '''/lib/bmc-widgets/retro-deck/. "$TEST_ROOT/run/current-profile/lib/bmc-widgets/retro-deck/"''')
-        package = self.root / STORE[1:] / "lib/bmc-widgets/retro-deck"
-        package.mkdir(parents=True)
-        (package / "manifest.json").write_bytes((REPO / "deploy/widget/manifest.json").read_bytes())
-        self.script(STORE[1:] + "/lib/bmc-widgets/retro-deck/bin/retro-deck", "exit 0")
+active="$TEST_ROOT/run/current-profile/lib/bmc-widgets/retro-deck"
+rm -rf "$active"
+mkdir -p "${active%/*}"
+ln -s "$TEST_ROOT"''' + STORE + '''/lib/bmc-widgets/retro-deck "$active"''')
+        self.package = self.root / STORE[1:] / "lib/bmc-widgets/retro-deck"
+        self.package.mkdir(parents=True)
+        (self.package / "manifest.json").write_bytes((REPO / "deploy/widget/manifest.json").read_bytes())
+        prefix = STORE[1:] + "/lib/bmc-widgets/retro-deck/"
+        for executable in ("bin/retro-deck", "bin/compile-catalog", "libexec/deck-menu-launcher"):
+            self.script(prefix + executable, "exit 0")
+        self.script(prefix + "bin/deck-menu", '[ "$1" = --help ] || exit 2\nprintf tested >"$TEST_ROOT/widget-runtime-tested"')
+        (self.package / "share/menu").mkdir(parents=True)
+        for resource in ("credits.tsv", "palette.tsv"):
+            (self.package / "share/menu" / resource).write_bytes((REPO / "deploy/menu" / resource).read_bytes())
+        (self.package / "share/menu/settings-icon.png").write_bytes((REPO / "assets/settings-cog/gear-knekko-09.png").read_bytes())
 
     def script(self, path, contents):
         target = self.root / path
@@ -79,6 +90,11 @@ cp -R "$TEST_ROOT"''' + STORE + '''/lib/bmc-widgets/retro-deck/. "$TEST_ROOT/run
         self.assertEqual(result.returncode == 0, success, result.stderr)
         return result
 
+    def test_install_first_widget_without_an_existing_widget_directory(self):
+        (self.profile / "lib/bmc-widgets").rmdir()
+        self.install()
+        self.assertTrue((self.profile / "lib/bmc-widgets/retro-deck/bin/deck-menu").is_file())
+
     def test_append_preserve_backup_permissions_and_idempotence(self):
         original = self.config.read_bytes()
         self.provision("--check")
@@ -99,7 +115,7 @@ cp -R "$TEST_ROOT"''' + STORE + '''/lib/bmc-widgets/retro-deck/. "$TEST_ROOT/run
         self.assertEqual(self.provision("--widget-ids").stdout.strip(), widget["id"])
 
     def test_unsupported_schema_or_shape_is_not_written(self):
-        for version in (None, 0, 1, 3):
+        for version in (None, 0, 1, 2.0, 3):
             config = existing_config()
             config["version"] = version
             self.config.write_text(json.dumps(config))
@@ -133,10 +149,11 @@ cp -R "$TEST_ROOT"''' + STORE + '''/lib/bmc-widgets/retro-deck/. "$TEST_ROOT/run
         self.assertFalse((self.root / "calls").exists())
         self.install()
         self.assertEqual((self.root / "calls").read_text().splitlines(),
-                         ["import", "add-packages --name retro-deck-widget --version 1.0.0 --store-path " + STORE])
+                         ["import", "add-packages --base current --name retro-deck-widget --version 1.0.0 --store-path " + STORE])
         self.assertEqual((self.profile / "manifest").read_bytes(), original)
         self.assertTrue((self.profile / "lib/bmc-widgets/retro-deck/manifest.json").exists())
         self.assertEqual(json.loads(self.config.read_text())["scenes"][-1]["widgets"][0]["widget_type_id"], UID)
+        self.assertEqual((self.root / "widget-runtime-tested").read_text(), "tested")
 
     def test_import_or_profile_failure_does_not_commit_scene(self):
         for failed_command in ("nix-store", "bmc-nix-cli"):
@@ -173,6 +190,101 @@ cp -R "$TEST_ROOT"''' + STORE + '''/lib/bmc-widgets/retro-deck/. "$TEST_ROOT/run
             (self.stage / "widget-store-path").write_text(value)
             self.install(success=False)
             self.assertFalse((self.root / "calls").exists())
+
+    def test_incomplete_or_unrunnable_package_never_changes_profile_or_scene(self):
+        before = self.config.read_bytes()
+        executable = self.package / "bin/deck-menu"
+        original = executable.read_bytes()
+        for contents in (None, b"#!/bin/sh\nexit 126\n"):
+            with self.subTest(contents=contents):
+                if contents is None:
+                    executable.unlink()
+                else:
+                    executable.write_bytes(contents)
+                    executable.chmod(0o755)
+                self.install(success=False)
+                self.assertEqual(self.config.read_bytes(), before)
+                self.assertFalse((self.profile / "lib/bmc-widgets/retro-deck").exists())
+                executable.write_bytes(original)
+                executable.chmod(0o755)
+        (self.package / "share/menu/palette.tsv").unlink()
+        self.install(success=False)
+        self.assertEqual(self.config.read_bytes(), before)
+        self.assertNotIn("add-packages", (self.root / "calls").read_text())
+
+    def test_old_active_package_does_not_count_as_successful_upgrade(self):
+        self.install()
+        configured = self.config.read_bytes()
+        old = self.root / "old-widget"
+        old.mkdir()
+        (old / "bin").mkdir()
+        self.script("old-widget/bin/retro-deck", "exit 0")
+        (old / "manifest.json").write_bytes((self.package / "manifest.json").read_bytes())
+        active = self.profile / "lib/bmc-widgets/retro-deck"
+        active.unlink()
+        active.symlink_to(old)
+        self.script("run/current-profile/bin/bmc-nix-cli", "exit 0")
+        self.install(success=False)
+        self.assertEqual(self.config.read_bytes(), configured)
+
+    def test_uppercase_existing_type_uuid_is_preserved_without_duplicate(self):
+        self.provision()
+        config = json.loads(self.config.read_text())
+        config["scenes"][-1]["widgets"][0]["widget_type_id"] = UID.upper()
+        self.config.write_text(json.dumps(config))
+        before = self.config.read_bytes()
+        self.provision()
+        self.assertEqual(self.config.read_bytes(), before)
+
+    def test_uuid_uniqueness_uses_parsed_identity(self):
+        config = existing_config()
+        config["scenes"][0]["id"] = UID.upper()
+        config["scenes"][0]["widgets"][0]["id"] = UID
+        self.config.write_text(json.dumps(config))
+        self.provision(success=False)
+
+    def test_atomic_write_failure_cleans_temporary_file_and_allows_retry(self):
+        spec = importlib.util.spec_from_file_location("install_scene", PROVISION)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        before = self.config.read_bytes()
+        with mock.patch.object(module.os, "rename", side_effect=OSError("disk error")):
+            with self.assertRaises(OSError):
+                module.atomic_write(str(self.config), "replacement", 0o600)
+        self.assertEqual(self.config.read_bytes(), before)
+        self.assertFalse(Path(str(self.config) + ".retro-deck.tmp").exists())
+        module.atomic_write(str(self.config), before.decode(), 0o600)
+
+    def test_wrapper_resolves_merged_profile_symlink_to_immutable_package(self):
+        wrapper = self.package / "bin/retro-deck"
+        wrapper.write_bytes((REPO / "deploy/widget/retro-deck").read_bytes())
+        self.script(STORE[1:] + "/lib/bmc-widgets/retro-deck/libexec/deck-menu-launcher",
+                    'printf "%s" "$RETRO_DECK_WIDGET_ROOT"')
+        entry = self.root / "profile-entry"
+        entry.symlink_to(wrapper)
+        result = subprocess.run([str(entry)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, str(self.package))
+
+    def test_launcher_uses_packaged_code_and_resources_with_persistent_catalogs(self):
+        source = (REPO / "deploy/menu/deck-menu-launcher").read_text()
+        probe = source.split("\numask ", 1)[0] + '''
+printf '%s\\n' "$MENU" "$COMPILER" "$CREDITS" "$SETTINGS_ICON" "$FALLBACK_PALETTE" \\
+    "$CATALOG" "$FALLBACK_MANIFEST" "$VOLUME_STATE" "$ECL" "$LUA" "$SCHEME" "$PYTHON"
+'''
+        base = "/mnt/data/nes-deck"
+        for root in ("", str(self.root / "package with spaces")):
+            result = subprocess.run(["sh", "-c", probe], capture_output=True, text=True,
+                                    env={**os.environ, "RETRO_DECK_WIDGET_ROOT": root})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            code = root + "/bin" if root else base + "/menu"
+            resources = root + "/share/menu" if root else base + "/menu"
+            self.assertEqual(result.stdout.splitlines(), [
+                code + "/deck-menu", code + "/compile-catalog", resources + "/credits.tsv",
+                resources + "/settings-icon.png", resources + "/palette.tsv",
+                base + "/menu/games.sexp", base + "/menu/games.tsv", base + "/state/menu-volume.state",
+                base + "/ecl/bin/ecl.bin", base + "/langs/lua", base + "/langs/chibi/chibi-scheme",
+                base + "/langs/python"])
 
     def health(self):
         source = (REPO / "ops/check-deck.sh").read_text()

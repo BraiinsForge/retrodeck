@@ -57,6 +57,14 @@ ECL_RUNTIME=$BASE/ecl/lib/ecl/
 LOG_FILE=$LOG_DIR/deck-menu.log
 VOLUME_ON=42
 
+if [ -n "${RETRO_DECK_WIDGET_ROOT:-}" ]; then
+	MENU=$RETRO_DECK_WIDGET_ROOT/bin/deck-menu
+	COMPILER=$RETRO_DECK_WIDGET_ROOT/bin/compile-catalog
+	CREDITS=$RETRO_DECK_WIDGET_ROOT/share/menu/credits.tsv
+	SETTINGS_ICON=$RETRO_DECK_WIDGET_ROOT/share/menu/settings-icon.png
+	FALLBACK_PALETTE=$RETRO_DECK_WIDGET_ROOT/share/menu/palette.tsv
+fi
+
 export PATH LC_ALL TMPDIR
 export RETRO_DECK_VOLUME_PERCENT=$VOLUME_ON
 

@@ -102,7 +102,9 @@ python=$(build_flake .#python-deck)
 chibi=$(build_flake .#chibi-deck)
 runtime_licenses=$(build_flake .#runtime-licenses)
 ecl=$(build_flake .#ecl-arm-network)
-widget=$(build_flake .#retro-deck-widget)
+if [[ $presentation == stock-bmc ]]; then
+  widget=$(build_flake .#retro-deck-widget)
+fi
 
 mkdir -p \
   "$payload/nes-deck/menu" \
@@ -119,10 +121,12 @@ mkdir -p \
   "$payload/usr/sbin" \
   "$payload/etc/init.d"
 printf '%s\n' "$presentation" >"$payload/presentation"
-printf '%s\n' "$widget" >"$payload/widget-store-path"
-# This package contains only a manifest and /bin/sh wrapper, with no
-# architecture-specific runtime closure. Import it through the stock store.
-nix-store --export "$widget" >"$payload/widget.nar"
+if [[ $presentation == stock-bmc ]]; then
+  printf '%s\n' "$widget" >"$payload/widget-store-path"
+  # Static ARM dashboard, compiler and resources form one reference-free
+  # package; external applications and owner data stay in the payload below.
+  nix-store --export "$widget" >"$payload/widget.nar"
+fi
 
 cp "$nes/bin/nes-deck" "$payload/nes-deck/nes-deck"
 cp "$gb/bin/gb-deck" "$payload/nes-deck/gb-deck"

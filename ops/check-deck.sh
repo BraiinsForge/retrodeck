@@ -102,9 +102,16 @@ case "$presentation_mode" in
       report PRESENTATION "$presentation NOT RUNNING"
       failures=$((failures + 1))
     fi
-    if [ -f /run/current-profile/lib/bmc-widgets/retro-deck/manifest.json ] &&
-       [ -x /run/current-profile/lib/bmc-widgets/retro-deck/bin/retro-deck ]; then
-      report WIDGET 'installed in active Nix profile'
+    widget_root=/run/current-profile/lib/bmc-widgets/retro-deck
+    if [ -s "$widget_root/manifest.json" ] &&
+       [ -x "$widget_root/bin/retro-deck" ] &&
+       [ -x "$widget_root/bin/deck-menu" ] &&
+       [ -x "$widget_root/bin/compile-catalog" ] &&
+       [ -x "$widget_root/libexec/deck-menu-launcher" ] &&
+       [ -s "$widget_root/share/menu/palette.tsv" ] &&
+       [ -s "$widget_root/share/menu/credits.tsv" ] &&
+       [ -s "$widget_root/share/menu/settings-icon.png" ]; then
+      report WIDGET 'native dashboard installed in active Nix profile'
     else
       report WIDGET 'MISSING FROM ACTIVE PROFILE'
       failures=$((failures + 1))

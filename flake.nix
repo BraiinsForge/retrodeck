@@ -555,15 +555,25 @@ PATCH
 
     in
     {
-      packages.${system} = {
+      packages.${system} = rec {
         ecl-arm-network = eclArmNetwork;
-        # Stock BMC discovers widgets in its active Nix profile. The wrapper
-        # deliberately points at the separately deployed persistent payload.
-        retro-deck-widget = pkgs.runCommand "bmc-widget-retro-deck-1.0.0" { } ''
-          mkdir -p $out/lib/bmc-widgets/retro-deck/bin
-          cp ${./deploy/widget/manifest.json} $out/lib/bmc-widgets/retro-deck/manifest.json
-          cp ${./deploy/widget/retro-deck} $out/lib/bmc-widgets/retro-deck/bin/retro-deck
-          chmod 0755 $out/lib/bmc-widgets/retro-deck/bin/retro-deck
+        # A self-contained native dashboard, without pulling a host shell or
+        # libc into the ARM runtime closure. Applications and owner data remain
+        # in the persistent deployment and are never included in this package.
+        retro-deck-widget = pkgs.runCommand "bmc-widget-retro-deck-1.0.0" {
+          allowedReferences = [ ];
+        } ''
+          widget=$out/lib/bmc-widgets/retro-deck
+          mkdir -p "$widget/bin" "$widget/libexec" "$widget/share/menu" "$widget/share/licenses"
+          cp ${./deploy/widget/manifest.json} "$widget/manifest.json"
+          install -m755 ${./deploy/widget/retro-deck} "$widget/bin/retro-deck"
+          install -m755 ${deck-menu}/bin/deck-menu "$widget/bin/deck-menu"
+          install -m755 ${compile-catalog}/bin/compile-catalog "$widget/bin/compile-catalog"
+          install -m755 ${./deploy/menu/deck-menu-launcher} "$widget/libexec/deck-menu-launcher"
+          cp ${./deploy/menu/credits.tsv} "$widget/share/menu/credits.tsv"
+          cp ${./deploy/menu/palette.tsv} "$widget/share/menu/palette.tsv"
+          cp ${./assets/settings-cog/gear-knekko-09.png} "$widget/share/menu/settings-icon.png"
+          cp -r ${runtimeLicenses}/share/licenses/. "$widget/share/licenses/"
         '';
         deck-menu = staticRustTool {
           name = "deck-menu";
@@ -976,6 +986,26 @@ PATCH
       };
 
       checks.${system} = {
+        stock-widget-package = pkgs.runCommand "stock-widget-package" { } ''
+          widget=${self.packages.${system}.retro-deck-widget}/lib/bmc-widgets/retro-deck
+          binary=$(${pkgs.jq}/bin/jq -r .binary "$widget/manifest.json")
+          test -x "$widget/$binary"
+          test -x "$widget/libexec/deck-menu-launcher"
+          for name in deck-menu compile-catalog; do
+            ${pkgs.binutils}/bin/readelf -h "$widget/bin/$name" | grep -q 'Machine:.*ARM'
+            ! ${pkgs.binutils}/bin/readelf -l "$widget/bin/$name" | grep -q INTERP
+            ! ${pkgs.binutils}/bin/readelf -d "$widget/bin/$name" | grep -q NEEDED
+          done
+          ${pkgs.qemu-user}/bin/qemu-arm "$widget/bin/deck-menu" --help >/dev/null
+          ${pkgs.qemu-user}/bin/qemu-arm "$widget/bin/compile-catalog" \
+            ${./deploy/menu/games.sexp} games.tsv palette.tsv missing-override.sexp
+          cmp games.tsv ${./deploy/menu/games.tsv}
+          cmp palette.tsv "$widget/share/menu/palette.tsv"
+          cmp "$widget/share/menu/credits.tsv" ${./deploy/menu/credits.tsv}
+          cmp "$widget/share/menu/settings-icon.png" ${./assets/settings-cog/gear-knekko-09.png}
+          test -s "$widget/share/licenses/runtime/Wayland-COPYING"
+          touch $out
+        '';
         catalog-smoke = pkgs.runCommand "catalog-smoke" { } ''
           binary=${self.packages.${system}.compile-catalog}/bin/compile-catalog
           ${pkgs.binutils}/bin/readelf -h "$binary" | grep -q 'Machine:.*ARM'

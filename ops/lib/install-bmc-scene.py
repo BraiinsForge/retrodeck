@@ -43,11 +43,19 @@ def atomic_write(path, text, permissions):
     temporary = path + ".retro-deck.tmp"
     if stat_or_none(temporary) is not None:
         raise ValueError("BMC configuration temporary file already exists")
-    with open(temporary, "w") as output:
-        output.write(text)
-    if hasattr(os, "chmod"):
-        os.chmod(temporary, permissions)
-    os.rename(temporary, path)
+    try:
+        with open(temporary, "w") as output:
+            output.write(text)
+        if hasattr(os, "chmod"):
+            os.chmod(temporary, permissions)
+        os.rename(temporary, path)
+    except OSError:
+        # A failed write must not block every subsequent deployment.
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+        raise
 
 
 def valid_uuid(value):
@@ -63,20 +71,22 @@ def valid_uuid(value):
 
 
 def validate_config(config):
-    if not isinstance(config, dict) or config.get("version") != 2:
+    if (not isinstance(config, dict) or type(config.get("version")) is not int
+            or config["version"] != 2):
         raise ValueError("Stock BMC config version 2 is required; migrate with BMC first")
     scenes = config.get("scenes")
     if not isinstance(scenes, list):
         raise ValueError("BMC configuration has no scene list")
-    ids = []
+    ids = set()
     running = 0
     instances = []
     for scene in scenes:
         if not isinstance(scene, dict) or not valid_uuid(scene.get("id")):
             raise ValueError("Invalid BMC scene UUID")
-        if scene["id"] in ids:
+        scene_id = scene["id"].lower()
+        if scene_id in ids:
             raise ValueError("Duplicate BMC scene UUID")
-        ids.append(scene["id"])
+        ids.add(scene_id)
         if not isinstance(scene.get("enabled"), bool):
             raise ValueError("Invalid BMC scene enabled flag")
         widgets = scene.get("widgets")
@@ -87,12 +97,13 @@ def validate_config(config):
         for widget in widgets:
             if not isinstance(widget, dict) or not valid_uuid(widget.get("id")):
                 raise ValueError("Invalid configured widget UUID")
-            if widget["id"] in ids:
+            instance_id = widget["id"].lower()
+            if instance_id in ids:
                 raise ValueError("Duplicate configured widget UUID")
-            ids.append(widget["id"])
+            ids.add(instance_id)
             if not valid_uuid(widget.get("widget_type_id")):
                 raise ValueError("Invalid widget type UUID")
-            if widget["widget_type_id"] == WIDGET_UID:
+            if widget["widget_type_id"].lower() == WIDGET_UID:
                 if (scene["kind"] != "fullscreen" or len(widgets) != 1
                         or widget.get("placement") != "fullscreen"
                         or widget.get("row") != 0 or widget.get("col") != 0
@@ -127,7 +138,7 @@ def main():
         for scene in scenes:
             if mode == "--widget-ids" or scene["enabled"]:
                 for widget in scene["widgets"]:
-                    if widget["widget_type_id"] == WIDGET_UID:
+                    if widget["widget_type_id"].lower() == WIDGET_UID:
                         print(widget["id"])
         return 0
     if mode == "--check" or instances:

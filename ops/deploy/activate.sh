@@ -248,10 +248,6 @@ rm -rf "$base/menu/settings-icons"
 rm -f "$base/menu/knekko-settings-icons.tsv"
 # CHIP-8 was retired from the product.
 rm -f "$base/chip8-deck"
-rm -rf /mnt/data/roms/chip8
-if [ -f "$base/uploads/games.tsv" ]; then
-  sed -i '/	chip8	/d' "$base/uploads/games.tsv"
-fi
 rm -rf "$base/games.new"
 mkdir -p "$base/games.new"
 cp -Rp "$stage/nes-deck/games/." "$base/games.new/"
@@ -333,7 +329,8 @@ if [ "$bmc_mode" -eq 1 ]; then
   sh "$stage/install-stock-widget.sh" install "$stage"
   service_needs_restart=0
   /etc/init.d/bmc-compositor enable
-  /etc/init.d/bmc-compositor start
+  # Hooks may already have started the old configuration during activation.
+  /etc/init.d/bmc-compositor restart
 else
   /etc/init.d/nes-deck-swap stop 2>/dev/null || :
   /etc/init.d/nes-deck-swap disable

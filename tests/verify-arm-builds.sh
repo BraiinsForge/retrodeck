@@ -101,6 +101,19 @@ for notice in Wayland-COPYING Rust-crates-NOTICES.txt; do
 done
 echo "runtime-licenses: OK"
 
+widget=$(build_flake .#retro-deck-widget)
+verify_closure_free retro-deck-widget "$widget"
+verify_arm_executable retro-deck-widget "$widget" lib/bmc-widgets/retro-deck/bin/deck-menu
+verify_arm_executable retro-deck-widget "$widget" lib/bmc-widgets/retro-deck/bin/compile-catalog
+cmp deploy/widget/manifest.json "$widget/lib/bmc-widgets/retro-deck/manifest.json"
+wrapper=$widget/lib/bmc-widgets/retro-deck/bin/retro-deck
+[[ -x $wrapper ]]
+sh -n "$wrapper"
+cmp deploy/widget/retro-deck "$wrapper"
+cmp deploy/menu/deck-menu-launcher "$widget/lib/bmc-widgets/retro-deck/libexec/deck-menu-launcher"
+build_flake .#checks.x86_64-linux.stock-widget-package >/dev/null
+echo "retro-deck-widget: OK"
+
 ecl=$(nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix |
   tail -n 1)
 verify_closure_free ecl-arm-static "$ecl"

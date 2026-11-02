@@ -8,6 +8,8 @@
   },
   "binary": "bin/retro-deck",
   "category": "media",
+  "icon": "share/menu/settings-icon.png",
+  "config_help": "Requires the Retro Deck application deployment under /mnt/data/nes-deck. Catalogs, uploaded games, saves, settings and language apps use persistent storage; install them with ops/deploy.sh before adding this widget.",
   "supported_viewports": [
     {
       "type": "rectangular",
