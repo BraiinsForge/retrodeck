@@ -3,7 +3,7 @@ use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::mem::MaybeUninit;
-use std::os::fd::{AsRawFd, IntoRawFd};
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
@@ -282,62 +282,111 @@ pub enum HelperPhase {
 pub struct HelperResult {
     pub phase: HelperPhase,
     pub exit_code: Option<i32>,
-    pub signal: Option<i32>,
     pub error: Option<String>,
 }
 
 pub fn run_helper(executable: &Path, input: &[u8]) -> HelperResult {
-    let mut child = match Command::new(executable).stdin(Stdio::piped()).spawn() {
+    run_helper_until(
+        executable,
+        input,
+        Duration::from_secs(10),
+        shutdown_requested,
+    )
+}
+
+fn run_helper_until(
+    executable: &Path,
+    input: &[u8],
+    timeout: Duration,
+    cancelled: impl Fn() -> bool,
+) -> HelperResult {
+    let failure = |phase, error: String| HelperResult {
+        phase,
+        exit_code: None,
+        error: Some(error),
+    };
+    // Isolate descendants and suppress helper output, which can contain credentials.
+    let mut child = match Command::new(executable)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()
+    {
         Ok(child) => child,
-        Err(error) => {
-            return HelperResult {
-                phase: HelperPhase::Start,
-                exit_code: None,
-                signal: None,
-                error: Some(error.to_string()),
-            };
+        Err(error) => return failure(HelperPhase::Start, error.to_string()),
+    };
+    let deadline = Instant::now() + timeout;
+    let mut stdin = child.stdin.take().expect("piped helper stdin");
+    let fd = stdin.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    let mut input_error =
+        if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+            Some(io::Error::last_os_error().to_string())
+        } else {
+            None
+        };
+    let mut written = 0;
+    while written < input.len() && input_error.is_none() {
+        if cancelled() || Instant::now() >= deadline {
+            input_error = Some("helper input cancelled or timed out".into());
+            break;
         }
-    };
-    let input_error = child
-        .stdin
-        .take()
-        .map_or_else(
-            || Some(io::Error::other("helper stdin is unavailable")),
-            |mut stdin| {
-                let write_error = stdin.write_all(input).err();
-                let descriptor = stdin.into_raw_fd();
-                let close_error =
-                    (unsafe { libc::close(descriptor) } != 0).then(io::Error::last_os_error);
-                write_error.or(close_error)
+        match stdin.write(&input[written..]) {
+            Ok(0) => input_error = Some("helper stdin closed".into()),
+            Ok(count) => written += count,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(
+                    POLL_INTERVAL.min(deadline.saturating_duration_since(Instant::now())),
+                );
+            }
+            Err(error) => input_error = Some(error.to_string()),
+        }
+    }
+    drop(stdin);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return HelperResult {
+                    phase: if input_error.is_some() {
+                        HelperPhase::Input
+                    } else {
+                        HelperPhase::Complete
+                    },
+                    exit_code: status.code(),
+                    error: input_error,
+                };
+            }
+            Ok(None) if !cancelled() && Instant::now() < deadline => {
+                thread::sleep(
+                    POLL_INTERVAL.min(deadline.saturating_duration_since(Instant::now())),
+                );
+                continue;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                stop_helper(&mut child);
+                return failure(HelperPhase::Wait, error.to_string());
+            }
+        }
+        stop_helper(&mut child);
+        return failure(
+            if input_error.is_some() {
+                HelperPhase::Input
+            } else {
+                HelperPhase::Wait
             },
-        )
-        .map(|error| error.to_string());
-    let (exit_code, signal, wait_error) = match child.wait() {
-        Ok(status) => (status.code(), status.signal(), None),
-        Err(error) => (None, None, Some(error.to_string())),
-    };
-    if let Some(error) = input_error {
-        return HelperResult {
-            phase: HelperPhase::Input,
-            exit_code,
-            signal,
-            error: Some(error),
-        };
+            input_error.unwrap_or_else(|| "helper cancelled or timed out".into()),
+        );
     }
-    if let Some(error) = wait_error {
-        return HelperResult {
-            phase: HelperPhase::Wait,
-            exit_code: None,
-            signal: None,
-            error: Some(error),
-        };
-    }
-    HelperResult {
-        phase: HelperPhase::Complete,
-        exit_code,
-        signal,
-        error: None,
-    }
+}
+
+fn stop_helper(child: &mut std::process::Child) {
+    // Kill the whole private group before reaping the leader.
+    unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn widget_child_requested(environment: &[(OsString, OsString)]) -> bool {
@@ -548,7 +597,7 @@ fn duration_ms(duration: Duration) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use HelperPhase::{Complete, Input, Start};
+    use HelperPhase::{Complete, Input, Start, Wait};
     use std::env;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
@@ -684,11 +733,11 @@ mod tests {
         (name.into(), value.into())
     }
 
-    type HelperOutcome = (HelperPhase, Option<i32>, Option<i32>, bool);
+    type HelperOutcome = (HelperPhase, Option<i32>, bool);
 
-    const HELPER_EXIT_7: HelperOutcome = (Complete, Some(7), None, false);
-    const HELPER_SIGTERM: HelperOutcome = (Complete, None, Some(libc::SIGTERM), false);
-    const HELPER_INPUT_EXIT_7: HelperOutcome = (Input, Some(7), None, true);
+    const HELPER_EXIT_7: HelperOutcome = (Complete, Some(7), false);
+    const HELPER_SIGTERM: HelperOutcome = (Complete, None, false);
+    const HELPER_INPUT_EXIT_7: HelperOutcome = (Input, Some(7), true);
 
     fn run_script_fixture(path: &Path, input: &[u8]) -> HelperResult {
         let busy = io::Error::from_raw_os_error(libc::ETXTBSY).to_string();
@@ -713,8 +762,29 @@ mod tests {
         std::fs::remove_file(helper).unwrap();
         assert_eq!(result.phase, expected.0, "{result:?}");
         assert_eq!(result.exit_code, expected.1);
-        assert_eq!(result.signal, expected.2);
-        assert_eq!(result.error.is_some(), expected.3);
+        assert_eq!(result.error.is_some(), expected.2);
+    }
+
+    #[test]
+    fn helper_bounds_blocked_input_and_wait_and_honors_cancellation() {
+        for (body, input, phase, cancel) in [
+            ("exec sleep 30\n", vec![b'x'; 1024 * 1024], Input, false),
+            (
+                "cat >/dev/null\nexec sleep 30\n",
+                b"profile\n".to_vec(),
+                Wait,
+                false,
+            ),
+            ("exec sleep 30\n", vec![b'x'; 1024 * 1024], Input, true),
+        ] {
+            let helper = helper_script(body);
+            let started = Instant::now();
+            let result = run_helper_until(&helper, &input, Duration::from_millis(200), || cancel);
+            std::fs::remove_file(helper).unwrap();
+            assert_eq!(result.phase, phase, "{result:?}");
+            assert!(result.error.is_some());
+            assert!(started.elapsed() < Duration::from_secs(2));
+        }
     }
 
     #[test]
