@@ -1,4 +1,10 @@
 use crate::canvas;
+#[cfg(test)]
+use crate::fbdev_abi::FbBitfield;
+use crate::fbdev_abi::{
+    FB_BLANK_UNBLANK, FB_TYPE_PACKED_PIXELS, FB_VISUAL_TRUECOLOR, FBIOBLANK, FBIOGET_FSCREENINFO,
+    FBIOGET_VSCREENINFO, FbFixedScreenInfo, FbVariableScreenInfo,
+};
 use rustix::mm::{MapFlags, ProtFlags, mmap, munmap};
 use std::cell::RefCell;
 use std::ffi::{c_int, c_ulong, c_void};
@@ -12,86 +18,12 @@ const LOGICAL_WIDTH: usize = canvas::WIDTH as usize;
 const LOGICAL_HEIGHT: usize = canvas::HEIGHT as usize;
 const PHYSICAL_WIDTH: usize = 600;
 const PHYSICAL_HEIGHT: usize = 1280;
-const FBIOGET_VSCREENINFO: c_ulong = 0x4600;
-const FBIOGET_FSCREENINFO: c_ulong = 0x4602;
-const FBIOBLANK: c_ulong = 0x4611;
-const FB_BLANK_UNBLANK: c_int = 0;
-const FB_TYPE_PACKED_PIXELS: u32 = 0;
-const FB_VISUAL_TRUECOLOR: u32 = 2;
 const EINVAL: i32 = 22;
 const ENOTTY: i32 = 25;
 
 unsafe extern "C" {
     fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
 }
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct FbBitfield {
-    offset: u32,
-    length: u32,
-    msb_right: u32,
-}
-
-#[repr(C)]
-#[derive(Default)]
-struct FbVariableScreenInfo {
-    xres: u32,
-    yres: u32,
-    xres_virtual: u32,
-    yres_virtual: u32,
-    xoffset: u32,
-    yoffset: u32,
-    bits_per_pixel: u32,
-    grayscale: u32,
-    red: FbBitfield,
-    green: FbBitfield,
-    blue: FbBitfield,
-    transparency: FbBitfield,
-    nonstandard: u32,
-    activate: u32,
-    height_mm: u32,
-    width_mm: u32,
-    accel_flags: u32,
-    pixclock: u32,
-    left_margin: u32,
-    right_margin: u32,
-    upper_margin: u32,
-    lower_margin: u32,
-    hsync_length: u32,
-    vsync_length: u32,
-    sync: u32,
-    vmode: u32,
-    rotate: u32,
-    colorspace: u32,
-    reserved: [u32; 4],
-}
-
-#[repr(C)]
-#[derive(Default)]
-struct FbFixedScreenInfo {
-    id: [u8; 16],
-    smem_start: c_ulong,
-    smem_len: u32,
-    kind: u32,
-    type_aux: u32,
-    visual: u32,
-    xpanstep: u16,
-    ypanstep: u16,
-    ywrapstep: u16,
-    line_length: u32,
-    mmio_start: c_ulong,
-    mmio_len: u32,
-    accel: u32,
-    capabilities: u16,
-    reserved: [u16; 2],
-}
-
-const _: [(); 160] = [(); std::mem::size_of::<FbVariableScreenInfo>()];
-#[cfg(target_pointer_width = "64")]
-const _: [(); 80] = [(); std::mem::size_of::<FbFixedScreenInfo>()];
-#[cfg(target_pointer_width = "32")]
-const _: [(); 68] = [(); std::mem::size_of::<FbFixedScreenInfo>()];
 
 struct Geometry {
     stride: usize,

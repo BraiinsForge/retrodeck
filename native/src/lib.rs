@@ -8,6 +8,7 @@ pub mod controls;
 pub mod dashboard;
 pub mod doom_input;
 pub mod fbdev;
+mod fbdev_abi;
 pub mod game_audio;
 pub mod game_video;
 mod font;

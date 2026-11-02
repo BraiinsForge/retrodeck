@@ -49,25 +49,25 @@ struct Player {
     mono: Vec<i16>,
 }
 
-static SHARED: OnceLock<&'static Mutex<Shared>> = OnceLock::new();
-static CONDITION: OnceLock<&'static Condvar> = OnceLock::new();
+static SHARED: OnceLock<Mutex<Shared>> = OnceLock::new();
+static CONDITION: OnceLock<Condvar> = OnceLock::new();
 static PLAYER: Mutex<Option<Player>> = Mutex::new(None);
 
 fn shared() -> &'static Mutex<Shared> {
     SHARED.get_or_init(|| {
-        Box::leak(Box::new(Mutex::new(Shared {
+        Mutex::new(Shared {
             queue: Vec::new(),
             head: 0,
             size: 0,
             dropped: 0,
             stopping: false,
             worker_failed: false,
-        })))
+        })
     })
 }
 
 fn condition() -> &'static Condvar {
-    CONDITION.get_or_init(|| Box::leak(Box::new(Condvar::new())))
+    CONDITION.get_or_init(Condvar::new)
 }
 
 pub fn volume_percent() -> Result<i32, String> {
