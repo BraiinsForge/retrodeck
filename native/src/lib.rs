@@ -7,6 +7,7 @@ pub mod control_file;
 pub mod controls;
 pub mod dashboard;
 pub mod doom_input;
+mod evdev_input;
 pub mod fbdev;
 mod fbdev_abi;
 pub mod game_audio;

@@ -100,6 +100,14 @@ shutdown or compositor loss. Framebuffer and headless execution use their normal
 pacing. Touch comes from Wayland in widget mode; the direct Goodix grab belongs
 to framebuffer mode. USB controllers and keyboard fallback use local input.
 
+A fresh master fetch on 2026-11-02 confirmed the revision above. It has no gamepad
+routing API in the widget protocol; the compositor explicitly ignores keyboard
+input. RetroDeck therefore uses the pinned `evdev` crate for controller transport,
+sharing device opening, identity constants, axis discovery and snapshots between
+the dashboard and emulator hosts. Keep dashboard press-edge reports and emulator
+held-state/player assignment separate. The input-session guard restores VT state
+on startup failure and normal return; engine exit callbacks clean up explicitly.
+
 ## Upstream requirements beyond 60 fps
 
 RetroDeck needs reliable audio coexistence, foreground input ownership and crisp

@@ -332,6 +332,7 @@ fn read_wad(path: &Path) -> Result<(), String> {
 
 fn shutdown() {
     let _ = std::io::Write::flush(&mut std::io::stdout());
+    // Engine exit calls process::exit, bypassing the run_host Session guard.
     retrodeck_native::joypad::shutdown();
     retrodeck_native::game_audio::close();
     retrodeck_native::game_video::close();
@@ -366,10 +367,14 @@ pub fn run_host(arguments: &[String]) -> u8 {
         TEST_FRAMES.store(frames, Ordering::Relaxed);
     }
 
-    if let Err(error) = retrodeck_native::joypad::initialize(false) {
-        eprintln!("{NAME}: {error}");
-        eprintln!("{NAME}: continuing without controller input");
-    }
+    let _input_session = match retrodeck_native::joypad::Session::start(false) {
+        Ok(session) => Some(session),
+        Err(error) => {
+            eprintln!("{NAME}: {error}");
+            eprintln!("{NAME}: continuing without controller input");
+            None
+        }
+    };
 
     if let Err(error) = retrodeck_native::game_video::open(test_frames.is_some()) {
         eprintln!("{NAME}: {error}");

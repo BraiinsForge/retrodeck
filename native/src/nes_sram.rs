@@ -9,6 +9,7 @@ pub fn decode(input: &[u8], output: &mut [u8]) -> bool {
     if input.is_empty() || output.is_empty() {
         return false;
     }
+    let mut decoded = vec![0; output.len()];
     let tag = input[0];
     let mut input_index = 1;
     let mut output_index = 0;
@@ -18,7 +19,7 @@ pub fn decode(input: &[u8], output: &mut [u8]) -> bool {
         };
         input_index += 1;
         if value != tag {
-            output[output_index] = value;
+            decoded[output_index] = value;
             output_index += 1;
             continue;
         }
@@ -31,48 +32,10 @@ pub fn decode(input: &[u8], output: &mut [u8]) -> bool {
         if output.len() - output_index < run_length {
             return false;
         }
-        output[output_index..output_index + run_length].fill(repeated);
+        decoded[output_index..output_index + run_length].fill(repeated);
         output_index += run_length;
     }
-    true
-}
-
-#[cfg(test)]
-pub fn encode(input: &[u8], output: &mut Vec<u8>) -> bool {
-    if input.is_empty() {
-        return false;
-    }
-    let mut frequency = [0_usize; 256];
-    for &value in input {
-        frequency[usize::from(value)] += 1;
-    }
-    let mut tag = 0_u8;
-    for value in 1..=255_u8 {
-        if frequency[usize::from(value)] < frequency[usize::from(tag)] {
-            tag = value;
-        }
-    }
-    output.clear();
-    output.push(tag);
-    let mut input_index = 0;
-    while input_index < input.len() {
-        let value = input[input_index];
-        let mut run_length = 1;
-        while input_index + run_length < input.len()
-            && run_length < 256
-            && input[input_index + run_length] == value
-        {
-            run_length += 1;
-        }
-        if run_length >= 4 || value == tag {
-            output.push(tag);
-            output.push(value);
-            output.push((run_length - 1) as u8);
-        } else {
-            output.extend(std::iter::repeat_n(value, run_length));
-        }
-        input_index += run_length;
-    }
+    output.copy_from_slice(&decoded);
     true
 }
 
@@ -81,23 +44,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn round_trips_the_cpp_run_length_format() {
-        let sram: Vec<u8> = (0..8192_u32)
-            .map(|index| if index % 97 == 0 { 0xAA } else { (index % 7) as u8 })
-            .collect();
-        let mut encoded = Vec::new();
-        assert!(encode(&sram, &mut encoded));
-        assert!(encoded.len() <= maximum_encoded_size(sram.len()));
-        let mut decoded = vec![0_u8; sram.len()];
-        assert!(decode(&encoded, &mut decoded));
-        assert_eq!(decoded, sram);
+    fn decodes_literal_and_tag_escaped_runs() {
+        let mut output = [0; 8];
+        assert!(decode(&[7, 1, 2, 7, 7, 1, 7, 42, 3], &mut output));
+        assert_eq!(output, [1, 2, 7, 7, 42, 42, 42, 42]);
     }
 
     #[test]
     fn rejects_truncated_and_oversized_payloads() {
-        let mut output = [0_u8; 8];
-        assert!(!decode(&[], &mut output));
-        assert!(!decode(&[7, 7], &mut output));
-        assert!(!decode(&[7, 7, 1, 200], &mut output));
+        let mut output = [0xA5; 8];
+        for input in [&[][..], &[7, 7], &[7, 7, 1, 200], &[0xFF, 0x42]] {
+            assert!(!decode(input, &mut output));
+            assert_eq!(output, [0xA5; 8]);
+        }
     }
 }

@@ -1,7 +1,13 @@
 //! Two-THEGamepad evdev input plus the medium-raw VT keyboard fallback,
 //! sampled as held levels by the libretro input callback.
 
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use crate::evdev_input::{
+    AxisInfo, GAMEPAD_PRODUCT, GAMEPAD_VENDOR, gamepad_axes, gamepad_snapshot, open_device,
+};
+use evdev::raw_stream::RawDevice;
+use evdev::{AbsoluteAxisCode, EventSummary, InputEvent, KeyCode, SynchronizationCode};
+use std::os::fd::{AsRawFd, RawFd};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
@@ -33,31 +39,8 @@ pub const RETRO_BUTTON_MAP: [(u32, u32); 8] = [
 ];
 pub const RETRO_ZX_BUTTON_MAP: [(u32, u32); 2] = [(PAD_L, 10), (PAD_R, 11)];
 
-const GAMEPAD_VENDOR: u16 = 0x1c59;
-const GAMEPAD_PRODUCT: u16 = 0x0026;
 const PLAYER_COUNT: usize = 2;
-
-const EV_SYN: u16 = 0;
-const EV_KEY: u16 = 1;
-const EV_ABS: u16 = 3;
-const SYN_REPORT: u16 = 0;
-const SYN_DROPPED: u16 = 3;
-const BTN_TRIGGER: u16 = 0x120;
-const BTN_BASE2: u16 = 0x127;
-const ABS_X: u16 = 0;
-const ABS_Y: u16 = 1;
-
-const KEY_STATE_BYTES: usize = 96;
-
-const fn ioc_read(nr: u32, size: u32) -> libc::c_ulong {
-    ((2 << 30) | (size << 16) | (('E' as u32) << 8) | nr) as libc::c_ulong
-}
-
-const EVIOCGID: libc::c_ulong = ioc_read(0x02, 8);
-const EVIOCGPHYS: libc::c_ulong = ioc_read(0x07, 256);
-const EVIOCGKEY: libc::c_ulong = ioc_read(0x18, KEY_STATE_BYTES as u32);
-const EVIOCGABS_X: libc::c_ulong = ioc_read(0x40 + ABS_X as u32, 24);
-const EVIOCGABS_Y: libc::c_ulong = ioc_read(0x40 + ABS_Y as u32, 24);
+const BTN_TRIGGER: u16 = KeyCode::BTN_TRIGGER.0;
 
 const KDGKBTYPE: libc::c_ulong = 0x4b33;
 const KDGKBMODE: libc::c_ulong = 0x4b44;
@@ -66,32 +49,12 @@ const K_MEDIUMRAW: libc::c_int = 0x02;
 const KB_84: libc::c_char = 0x01;
 const KB_101: libc::c_char = 0x02;
 
-#[repr(C)]
-#[derive(Default, Clone, Copy)]
-struct InputId {
-    bustype: u16,
-    vendor: u16,
-    product: u16,
-    version: u16,
-}
-
-#[repr(C)]
-#[derive(Default, Clone, Copy)]
-struct AbsInfo {
-    value: i32,
-    minimum: i32,
-    maximum: i32,
-    fuzz: i32,
-    flat: i32,
-    resolution: i32,
-}
-
 struct Gamepad {
-    fd: Option<OwnedFd>,
+    fd: Option<RawDevice>,
     path: String,
     physical_path: String,
-    x_info: AbsInfo,
-    y_info: AbsInfo,
+    x_info: AxisInfo,
+    y_info: AxisInfo,
     x_value: i32,
     y_value: i32,
     raw_buttons: u8,
@@ -101,27 +64,13 @@ struct Gamepad {
 }
 
 impl Gamepad {
-    const fn empty() -> Self {
+    fn empty() -> Self {
         Self {
             fd: None,
             path: String::new(),
             physical_path: String::new(),
-            x_info: AbsInfo {
-                value: 0,
-                minimum: 0,
-                maximum: 0,
-                fuzz: 0,
-                flat: 0,
-                resolution: 0,
-            },
-            y_info: AbsInfo {
-                value: 0,
-                minimum: 0,
-                maximum: 0,
-                fuzz: 0,
-                flat: 0,
-                resolution: 0,
-            },
+            x_info: AxisInfo::default(),
+            y_info: AxisInfo::default(),
             x_value: 0,
             y_value: 0,
             raw_buttons: 0,
@@ -158,24 +107,30 @@ struct Shared {
     stopping: AtomicBool,
 }
 
-static SHARED: OnceLock<&'static Shared> = OnceLock::new();
-static WORKER: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
+static SHARED: OnceLock<Shared> = OnceLock::new();
+struct Worker {
+    generation: u64,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+static WORKER: Mutex<Worker> = Mutex::new(Worker {
+    generation: 0,
+    thread: None,
+});
 
 fn shared() -> &'static Shared {
-    SHARED.get_or_init(|| {
-        Box::leak(Box::new(Shared {
-            inner: Mutex::new(Inner {
-                gamepads: [Gamepad::empty(), Gamepad::empty()],
-                keyboard: None,
-                keyboard_keys: [false; 128],
-                keyboard_mask: 0,
-                zx: false,
-                diagnostics: false,
-            }),
-            pad_state: std::array::from_fn(|_| AtomicU32::new(0)),
-            pad_distinct: std::array::from_fn(|_| AtomicU32::new(0)),
-            stopping: AtomicBool::new(false),
-        }))
+    SHARED.get_or_init(|| Shared {
+        inner: Mutex::new(Inner {
+            gamepads: [Gamepad::empty(), Gamepad::empty()],
+            keyboard: None,
+            keyboard_keys: [false; 128],
+            keyboard_mask: 0,
+            zx: false,
+            diagnostics: false,
+        }),
+        pad_state: std::array::from_fn(|_| AtomicU32::new(0)),
+        pad_distinct: std::array::from_fn(|_| AtomicU32::new(0)),
+        stopping: AtomicBool::new(false),
     })
 }
 
@@ -285,29 +240,18 @@ fn publish_states(inner: &Inner) {
 }
 
 fn resynchronize(gamepad: &mut Gamepad) -> bool {
-    let Some(fd) = gamepad.fd.as_ref().map(AsRawFd::as_raw_fd) else {
+    let Some(device) = gamepad.fd.as_ref() else {
         return false;
     };
-    let mut keys = [0_u8; KEY_STATE_BYTES];
-    let mut x_info = AbsInfo::default();
-    let mut y_info = AbsInfo::default();
-    if unsafe { libc::ioctl(fd, EVIOCGKEY, keys.as_mut_ptr()) } < 0
-        || unsafe { libc::ioctl(fd, EVIOCGABS_X, &mut x_info) } < 0
-        || unsafe { libc::ioctl(fd, EVIOCGABS_Y, &mut y_info) } < 0
-    {
+    let Ok(snapshot) = gamepad_snapshot(device) else {
         return false;
-    }
-    gamepad.x_info = x_info;
-    gamepad.y_info = y_info;
-    gamepad.x_value = x_info.value;
-    gamepad.y_value = y_info.value;
-    gamepad.raw_buttons = 0;
-    for bit in 0..8_u16 {
-        let code = (BTN_TRIGGER + bit) as usize;
-        if keys[code / 8] & (1 << (code % 8)) != 0 {
-            gamepad.raw_buttons |= 1 << bit;
-        }
-    }
+    };
+    gamepad.x_info = snapshot.x;
+    gamepad.y_info = snapshot.y;
+    gamepad.x_value = snapshot.x.value;
+    gamepad.y_value = snapshot.y.value;
+    gamepad.raw_buttons = snapshot.raw_buttons as u8;
+    gamepad.dropping_events = false;
     gamepad.state = gamepad_state(gamepad);
     gamepad.distinct = gamepad_distinct_state(gamepad);
     true
@@ -326,53 +270,29 @@ fn close_gamepad(gamepad: &mut Gamepad, remember_physical_path: bool) {
 }
 
 struct Candidate {
-    fd: OwnedFd,
+    fd: RawDevice,
     path: String,
     physical_path: String,
-    x_info: AbsInfo,
-    y_info: AbsInfo,
+    x_info: AxisInfo,
+    y_info: AxisInfo,
 }
 
 fn probe_candidate(path: &str) -> Option<Candidate> {
-    let name = std::ffi::CString::new(path).ok()?;
-    let raw = unsafe {
-        libc::open(
-            name.as_ptr(),
-            libc::O_RDONLY | libc::O_NONBLOCK | libc::O_CLOEXEC,
-        )
-    };
-    if raw < 0 {
+    let fd = open_device(Path::new(path))?;
+    let id = fd.input_id();
+    if id.vendor() != GAMEPAD_VENDOR || id.product() != GAMEPAD_PRODUCT {
         return None;
     }
-    let fd = unsafe { OwnedFd::from_raw_fd(raw) };
-    let mut id = InputId::default();
-    let mut x_info = AbsInfo::default();
-    let mut y_info = AbsInfo::default();
-    if unsafe { libc::ioctl(raw, EVIOCGID, &mut id) } < 0
-        || id.vendor != GAMEPAD_VENDOR
-        || id.product != GAMEPAD_PRODUCT
-        || unsafe { libc::ioctl(raw, EVIOCGABS_X, &mut x_info) } < 0
-        || unsafe { libc::ioctl(raw, EVIOCGABS_Y, &mut y_info) } < 0
-    {
-        return None;
-    }
-    let mut physical = [0_u8; 256];
-    let length = unsafe { libc::ioctl(raw, EVIOCGPHYS, physical.as_mut_ptr()) };
-    let physical_path = if length > 0 {
-        let bytes = &physical[..(length as usize).min(physical.len())];
-        let end = bytes.iter().position(|&byte| byte == 0).unwrap_or(bytes.len());
-        String::from_utf8_lossy(&bytes[..end]).into_owned()
-    } else {
-        String::new()
-    };
+    let (x_info, y_info) = gamepad_axes(&fd).ok()?;
+    let physical_path = fd
+        .physical_path()
+        .filter(|value| !value.is_empty())
+        .unwrap_or(path)
+        .to_owned();
     Some(Candidate {
         fd,
         path: path.to_owned(),
-        physical_path: if physical_path.is_empty() {
-            path.to_owned()
-        } else {
-            physical_path
-        },
+        physical_path,
         x_info,
         y_info,
     })
@@ -471,70 +391,57 @@ fn scan_gamepads(inner: &mut Inner) {
     publish_states(inner);
 }
 
+/// Return true at the recovery boundary after SYN_DROPPED.
+fn apply_gamepad_event(gamepad: &mut Gamepad, event: InputEvent) -> bool {
+    if gamepad.dropping_events {
+        return matches!(
+            event.destructure(),
+            EventSummary::Synchronization(_, SynchronizationCode::SYN_REPORT, _)
+        );
+    }
+    match event.destructure() {
+        EventSummary::Synchronization(_, SynchronizationCode::SYN_DROPPED, _) => {
+            gamepad.dropping_events = true;
+        }
+        EventSummary::Key(_, code, value)
+            if (KeyCode::BTN_TRIGGER.0..=KeyCode::BTN_BASE2.0).contains(&code.0) =>
+        {
+            let bit = 1 << (code.0 - KeyCode::BTN_TRIGGER.0);
+            if value != 0 {
+                gamepad.raw_buttons |= bit;
+            } else {
+                gamepad.raw_buttons &= !bit;
+            }
+        }
+        EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_X, value) => gamepad.x_value = value,
+        EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_Y, value) => gamepad.y_value = value,
+        _ => {}
+    }
+    false
+}
+
 fn drain_gamepad(gamepad: &mut Gamepad) -> bool {
-    let Some(fd) = gamepad.fd.as_ref().map(AsRawFd::as_raw_fd) else {
-        return false;
-    };
     loop {
-        let mut events = [libc::input_event {
-            time: libc::timeval {
-                tv_sec: 0,
-                tv_usec: 0,
-            },
-            type_: 0,
-            code: 0,
-            value: 0,
-        }; 32];
-        let amount = unsafe {
-            libc::read(
-                fd,
-                events.as_mut_ptr().cast(),
-                std::mem::size_of_val(&events),
-            )
+        let Some(device) = gamepad.fd.as_mut() else {
+            return false;
         };
-        if amount < 0 {
-            let error = std::io::Error::last_os_error();
-            if error.raw_os_error() == Some(libc::EINTR) {
-                continue;
-            }
-            if error.raw_os_error() == Some(libc::EAGAIN) {
-                break;
-            }
+        let events = match device.fetch_events() {
+            Ok(events) => events.collect::<Vec<_>>(),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return true,
+            Err(_) => return false,
+        };
+        if events.is_empty() {
             return false;
         }
-        let event_size = std::mem::size_of::<libc::input_event>();
-        if amount == 0 || amount as usize % event_size != 0 {
-            return false;
-        }
-        for event in &events[..amount as usize / event_size] {
-            if gamepad.dropping_events {
-                if event.type_ == EV_SYN && event.code == SYN_REPORT {
-                    gamepad.dropping_events = false;
-                    if !resynchronize(gamepad) {
-                        return false;
-                    }
-                }
-                continue;
-            }
-            match (event.type_, event.code) {
-                (EV_SYN, SYN_DROPPED) => gamepad.dropping_events = true,
-                (EV_KEY, code) if (BTN_TRIGGER..=BTN_BASE2).contains(&code) => {
-                    let bit = 1 << (code - BTN_TRIGGER);
-                    if event.value != 0 {
-                        gamepad.raw_buttons |= bit;
-                    } else {
-                        gamepad.raw_buttons &= !bit;
-                    }
-                }
-                (EV_ABS, ABS_X) => gamepad.x_value = event.value,
-                (EV_ABS, ABS_Y) => gamepad.y_value = event.value,
-                _ => {}
+        for event in events {
+            if apply_gamepad_event(gamepad, event) && !resynchronize(gamepad) {
+                return false;
             }
         }
         gamepad.state = gamepad_state(gamepad);
         gamepad.distinct = gamepad_distinct_state(gamepad);
     }
-    true
 }
 
 fn is_console_keyboard(fd: RawFd) -> bool {
@@ -636,6 +543,16 @@ fn close_keyboard(inner: &mut Inner) {
     publish_states(inner);
 }
 
+fn apply_keyboard_bytes(zx: bool, keys: &mut [bool; 128], bytes: &[u8]) -> u32 {
+    for &byte in bytes {
+        keys[usize::from(byte & 0x7f)] = byte & 0x80 == 0;
+    }
+    keys.iter()
+        .enumerate()
+        .filter(|(_, held)| **held)
+        .fold(0, |mask, (code, _)| mask | keycode_to_pad(zx, code as u8))
+}
+
 fn drain_keyboard(inner: &mut Inner) {
     let Some(fd) = inner.keyboard.as_ref().map(|keyboard| keyboard.fd) else {
         return;
@@ -645,20 +562,11 @@ fn drain_keyboard(inner: &mut Inner) {
     if amount <= 0 {
         return;
     }
-    let zx = inner.zx;
-    for &byte in &buffer[..amount as usize] {
-        let released = byte & 0x80 != 0;
-        let keycode = byte & 0x7f;
-        inner.keyboard_keys[usize::from(keycode)] = !released;
-        let pad = keycode_to_pad(zx, keycode);
-        if pad != 0 {
-            if released {
-                inner.keyboard_mask &= !pad;
-            } else {
-                inner.keyboard_mask |= pad;
-            }
-        }
-    }
+    inner.keyboard_mask = apply_keyboard_bytes(
+        inner.zx,
+        &mut inner.keyboard_keys,
+        &buffer[..amount as usize],
+    );
     publish_states(inner);
 }
 
@@ -738,39 +646,80 @@ fn input_thread() {
     }
 }
 
-pub fn initialize(zx: bool) -> Result<(), String> {
-    let shared = shared();
-    {
-        let mut inner = shared.inner.lock().expect("input lock");
-        inner.zx = zx;
-        inner.diagnostics = std::env::var("RETRO_DECK_INPUT_DIAGNOSTICS")
-            .is_ok_and(|value| value == "1");
-        inner.keyboard = initialize_keyboard();
-        if inner.keyboard.is_none() {
-            eprintln!("Retro Deck: No raw keyboard available; gamepads remain enabled");
-        }
-        scan_gamepads(&mut inner);
-    }
-    shared.stopping.store(false, Ordering::Release);
-    let worker = std::thread::Builder::new()
-        .name("retro-deck-input".to_owned())
-        .spawn(input_thread)
-        .map_err(|error| format!("cannot start input thread: {error}"))?;
-    *WORKER.lock().expect("input worker lock") = Some(worker);
-    Ok(())
+/// Owns the input worker and VT state throughout a host session.
+#[must_use = "keep the input session alive for the host lifetime"]
+pub struct Session {
+    generation: u64,
 }
 
-pub fn shutdown() {
-    let shared = shared();
-    shared.stopping.store(true, Ordering::Release);
-    if let Some(worker) = WORKER.lock().expect("input worker lock").take() {
-        let _ = worker.join();
+impl Session {
+    pub fn start(zx: bool) -> Result<Self, String> {
+        let mut slot = WORKER.lock().expect("input worker lock");
+        if slot.thread.is_some() {
+            return Err("input session is already active".to_owned());
+        }
+        let generation = slot
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| "input session generation exhausted".to_owned())?;
+        let shared = shared();
+        {
+            let mut inner = shared.inner.lock().expect("input lock");
+            inner.zx = zx;
+            inner.diagnostics =
+                std::env::var("RETRO_DECK_INPUT_DIAGNOSTICS").is_ok_and(|value| value == "1");
+            inner.keyboard = initialize_keyboard();
+            if inner.keyboard.is_none() {
+                eprintln!("Retro Deck: No raw keyboard available; gamepads remain enabled");
+            }
+            scan_gamepads(&mut inner);
+        }
+        shared.stopping.store(false, Ordering::Release);
+        match std::thread::Builder::new()
+            .name("retro-deck-input".to_owned())
+            .spawn(input_thread)
+        {
+            Ok(worker) => slot.thread = Some(worker),
+            Err(error) => {
+                shared.stopping.store(true, Ordering::Release);
+                close_devices(&mut shared.inner.lock().expect("input lock"));
+                return Err(format!("cannot start input thread: {error}"));
+            }
+        }
+        slot.generation = generation;
+        Ok(Self { generation })
     }
-    let mut inner = shared.inner.lock().expect("input lock");
-    close_keyboard(&mut inner);
-    for gamepad in inner.gamepads.iter_mut() {
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        shutdown_generation(Some(self.generation));
+    }
+}
+
+fn close_devices(inner: &mut Inner) {
+    for gamepad in &mut inner.gamepads {
         close_gamepad(gamepad, false);
     }
+    close_keyboard(inner);
+}
+
+/// Explicit cleanup for engine callbacks that terminate without running destructors.
+pub fn shutdown() {
+    shutdown_generation(None);
+}
+
+fn shutdown_generation(generation: Option<u64>) {
+    let shared = shared();
+    let mut slot = WORKER.lock().expect("input worker lock");
+    if generation.is_some_and(|generation| generation != slot.generation) {
+        return;
+    }
+    shared.stopping.store(true, Ordering::Release);
+    if let Some(worker) = slot.thread.take() {
+        let _ = worker.join();
+    }
+    close_devices(&mut shared.inner.lock().expect("input lock"));
 }
 
 pub fn joypad_state(port: u32) -> u32 {
@@ -824,8 +773,8 @@ const RETROK_RSUPER: u32 = 311;
 
 const ZX_DIGIT_KEYCODES: [u16; 10] = [11, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 const ZX_LETTER_KEYCODES: [u16; 26] = [
-    30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38, 50, 49, 24, 25, 16, 19, 31, 20, 22, 47, 17,
-    45, 21, 44,
+    30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38, 50, 49, 24, 25, 16, 19, 31, 20, 22, 47, 17, 45,
+    21, 44,
 ];
 
 pub fn zx_linux_keycode(retro_key: u32) -> u16 {
@@ -856,6 +805,124 @@ mod tests {
     use super::*;
 
     #[test]
+    fn releasing_an_alias_preserves_the_held_direction() {
+        for (first, second, pad) in [
+            (0x11, 0x67, PAD_UP),
+            (0x1f, 0x6c, PAD_DOWN),
+            (0x1e, 0x69, PAD_LEFT),
+            (0x20, 0x6a, PAD_RIGHT),
+        ] {
+            let mut keys = [false; 128];
+            assert_eq!(
+                apply_keyboard_bytes(false, &mut keys, &[first, second]),
+                pad
+            );
+            assert_eq!(apply_keyboard_bytes(false, &mut keys, &[first | 0x80]), pad);
+            assert_eq!(apply_keyboard_bytes(false, &mut keys, &[second | 0x80]), 0);
+        }
+    }
+
+    #[test]
+    fn dropped_reports_ignore_events_until_resynchronization() {
+        let mut pad = Gamepad::empty();
+        assert!(!apply_gamepad_event(&mut pad, InputEvent::new(1, 0x123, 1)));
+        assert_eq!(gamepad_state(&pad), PAD_A);
+        assert_eq!(gamepad_distinct_state(&pad), PAD_X);
+        assert!(!apply_gamepad_event(&mut pad, InputEvent::new(0, 3, 0)));
+        assert!(!apply_gamepad_event(&mut pad, InputEvent::new(1, 0x123, 0)));
+        assert_eq!(gamepad_state(&pad), PAD_A);
+        assert!(apply_gamepad_event(&mut pad, InputEvent::new(0, 0, 0)));
+        close_gamepad(&mut pad, true);
+        assert_eq!(gamepad_state(&pad), 0);
+        assert_eq!(gamepad_distinct_state(&pad), 0);
+    }
+
+    static SESSION_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn stale_session_does_not_stop_its_replacement() {
+        let _serial = SESSION_TEST_LOCK.lock().unwrap();
+        let (old, current) = {
+            let mut worker = WORKER.lock().unwrap();
+            let old = Session {
+                generation: worker.generation,
+            };
+            worker.generation += 1;
+            worker.thread = Some(std::thread::spawn(|| {}));
+            (
+                old,
+                Session {
+                    generation: worker.generation,
+                },
+            )
+        };
+        drop(old);
+        assert!(WORKER.lock().unwrap().thread.is_some());
+        drop(current);
+        assert!(WORKER.lock().unwrap().thread.is_none());
+    }
+
+    #[test]
+    fn session_drop_restores_terminal_and_clears_held_input() {
+        let _serial = SESSION_TEST_LOCK.lock().unwrap();
+        use std::os::fd::{FromRawFd, OwnedFd};
+        let (mut master, mut slave) = (-1, -1);
+        assert_eq!(
+            unsafe {
+                libc::openpty(
+                    &mut master,
+                    &mut slave,
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                    std::ptr::null(),
+                )
+            },
+            0
+        );
+        let _master = unsafe { OwnedFd::from_raw_fd(master) };
+        let slave = unsafe { OwnedFd::from_raw_fd(slave) };
+        let fd = slave.as_raw_fd();
+        let mut saved_termios = unsafe { std::mem::zeroed::<libc::termios>() };
+        assert_eq!(unsafe { libc::tcgetattr(fd, &mut saved_termios) }, 0);
+        let saved_flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        let mut raw = saved_termios;
+        raw.c_lflag &= !(libc::ECHO | libc::ICANON | libc::ISIG);
+        assert_eq!(unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw) }, 0);
+        assert_eq!(
+            unsafe { libc::fcntl(fd, libc::F_SETFL, saved_flags | libc::O_NONBLOCK) },
+            0
+        );
+        {
+            let mut inner = shared().inner.lock().unwrap();
+            inner.keyboard = Some(Keyboard {
+                fd,
+                owned: false,
+                saved_mode: 0,
+                saved_termios,
+                saved_flags,
+            });
+            inner.keyboard_keys[0x11] = true;
+            inner.keyboard_mask = PAD_UP;
+            inner.gamepads[0].state = PAD_A;
+            inner.gamepads[0].distinct = PAD_X;
+            publish_states(&inner);
+        }
+        let fail_after_input = || -> Result<(), ()> {
+            let generation = WORKER.lock().unwrap().generation;
+            let _session = Session { generation };
+            Err(())
+        };
+        assert!(fail_after_input().is_err());
+        let mut restored = unsafe { std::mem::zeroed::<libc::termios>() };
+        assert_eq!(unsafe { libc::tcgetattr(fd, &mut restored) }, 0);
+        assert_eq!(restored.c_lflag, saved_termios.c_lflag);
+        assert_eq!(unsafe { libc::fcntl(fd, libc::F_GETFL) }, saved_flags);
+        assert_eq!(joypad_state(0), 0);
+        assert_eq!(joypad_distinct_state(0), 0);
+        assert!(!keyboard_key_held(0x11));
+    }
+
+    #[test]
     fn maps_gamepad_buttons_like_the_cpp_frontend() {
         let expected = [
             (0x120, PAD_B),
@@ -882,7 +949,10 @@ mod tests {
         assert_eq!(axis_to_pad(255, 0, 255, PAD_LEFT, PAD_RIGHT), PAD_RIGHT);
         assert_eq!(axis_to_pad(-32767, -32767, 32767, PAD_UP, PAD_DOWN), PAD_UP);
         assert_eq!(axis_to_pad(0, -32767, 32767, PAD_UP, PAD_DOWN), 0);
-        assert_eq!(axis_to_pad(32767, -32767, 32767, PAD_UP, PAD_DOWN), PAD_DOWN);
+        assert_eq!(
+            axis_to_pad(32767, -32767, 32767, PAD_UP, PAD_DOWN),
+            PAD_DOWN
+        );
         assert_eq!(axis_to_pad(5, 5, 5, PAD_UP, PAD_DOWN), 0);
     }
 

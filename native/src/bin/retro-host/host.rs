@@ -304,8 +304,11 @@ unsafe extern "C" fn environment_callback(command: c_uint, data: *mut c_void) ->
             let Some(format) = (unsafe { data.cast::<c_uint>().as_ref() }) else {
                 return false;
             };
+            if *format != PIXEL_FORMAT_XRGB8888 && *format != PIXEL_FORMAT_RGB565 {
+                return false;
+            }
             PIXEL_FORMAT.store(*format, Ordering::Relaxed);
-            *format == PIXEL_FORMAT_XRGB8888 || *format == PIXEL_FORMAT_RGB565
+            true
         }
         ENV_SET_CORE_OPTIONS | ENV_SET_CORE_OPTIONS_INTL | ENV_SET_CORE_OPTIONS_V2
         | ENV_SET_CORE_OPTIONS_V2_INTL | ENV_SET_VARIABLES | ENV_SET_CORE_OPTIONS_DISPLAY
@@ -447,22 +450,28 @@ fn save_memory_file(path: &str, data: *const c_void, size: usize) -> std::io::Re
     result
 }
 
-fn load_memory_file(path: &str, data: *mut c_void, size: usize, configuration: &CoreConfig) {
+// False protects an existing save that could not be loaded from later writes.
+fn load_memory_file(
+    path: &str,
+    data: *mut c_void,
+    size: usize,
+    configuration: &CoreConfig,
+) -> bool {
     if data.is_null() || size == 0 {
-        return;
+        return false;
     }
-    let name = config().frontend_name;
+    let name = configuration.frontend_name;
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
         Err(error) => {
             eprintln!("{name}: cannot stat save {path}: {error}");
-            return;
+            return false;
         }
     };
     if !metadata.is_file() {
         eprintln!("{name}: save is not a regular file: {path}");
-        return;
+        return false;
     }
     let destination = unsafe { std::slice::from_raw_parts_mut(data.cast::<u8>(), size) };
     if metadata.len() != size as u64 {
@@ -473,45 +482,66 @@ fn load_memory_file(path: &str, data: *mut c_void, size: usize, configuration: &
             && retrodeck_native::nes_sram::decode(&encoded, destination)
         {
             eprintln!("{name}: migrated encoded InfoNES save: {path}");
-            return;
+            return true;
         }
-        eprintln!("{name}: ignoring save with unexpected size: {path}");
-        return;
+        eprintln!("{name}: protecting save with unexpected size: {path}");
+        return false;
     }
     match std::fs::read(path) {
-        Ok(bytes) if bytes.len() == size => destination.copy_from_slice(&bytes),
-        Ok(_) => eprintln!("{name}: incomplete save read: {path}"),
-        Err(error) => eprintln!("{name}: cannot read save {path}: {error}"),
-    }
-}
-
-fn load_persistent_memory(base: &str, configuration: &CoreConfig) {
-    unsafe {
-        load_memory_file(
-            &format!("{base}{}", configuration.save_extension),
-            retro_get_memory_data(MEMORY_SAVE_RAM),
-            retro_get_memory_size(MEMORY_SAVE_RAM),
-            configuration,
-        );
-        if configuration.has_rtc {
-            load_memory_file(
-                &format!("{base}.rtc"),
-                retro_get_memory_data(MEMORY_RTC),
-                retro_get_memory_size(MEMORY_RTC),
-                configuration,
-            );
+        Ok(bytes) if bytes.len() == size => {
+            destination.copy_from_slice(&bytes);
+            true
+        }
+        Ok(_) => {
+            eprintln!("{name}: incomplete save read: {path}");
+            false
+        }
+        Err(error) => {
+            eprintln!("{name}: cannot read save {path}: {error}");
+            false
         }
     }
 }
 
-fn save_persistent_memory(base: &str, configuration: &CoreConfig) -> std::io::Result<()> {
+struct PersistentMemory {
+    save_ram_writable: bool,
+    rtc_writable: bool,
+}
+
+fn load_persistent_memory(base: &str, configuration: &CoreConfig) -> PersistentMemory {
     unsafe {
-        save_memory_file(
-            &format!("{base}{}", configuration.save_extension),
-            retro_get_memory_data(MEMORY_SAVE_RAM),
-            retro_get_memory_size(MEMORY_SAVE_RAM),
-        )?;
-        if configuration.has_rtc {
+        PersistentMemory {
+            save_ram_writable: load_memory_file(
+                &format!("{base}{}", configuration.save_extension),
+                retro_get_memory_data(MEMORY_SAVE_RAM),
+                retro_get_memory_size(MEMORY_SAVE_RAM),
+                configuration,
+            ),
+            rtc_writable: configuration.has_rtc
+                && load_memory_file(
+                    &format!("{base}.rtc"),
+                    retro_get_memory_data(MEMORY_RTC),
+                    retro_get_memory_size(MEMORY_RTC),
+                    configuration,
+                ),
+        }
+    }
+}
+
+fn save_persistent_memory(
+    base: &str,
+    configuration: &CoreConfig,
+    memory: &PersistentMemory,
+) -> std::io::Result<()> {
+    unsafe {
+        if memory.save_ram_writable {
+            save_memory_file(
+                &format!("{base}{}", configuration.save_extension),
+                retro_get_memory_data(MEMORY_SAVE_RAM),
+                retro_get_memory_size(MEMORY_SAVE_RAM),
+            )?;
+        }
+        if memory.rtc_writable {
             save_memory_file(
                 &format!("{base}.rtc"),
                 retro_get_memory_data(MEMORY_RTC),
@@ -549,8 +579,8 @@ pub fn run_host(configuration: &'static CoreConfig, arguments: &[String]) -> u8 
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-    let directory = std::ffi::CString::new(parent.to_string_lossy().into_owned())
-        .unwrap_or_default();
+    let directory =
+        std::ffi::CString::new(parent.to_string_lossy().into_owned()).unwrap_or_default();
     SYSTEM_DIRECTORY.set(directory).ok();
     if configuration.gba {
         let bios = if parent.join("gba_bios.bin").is_file() {
@@ -610,10 +640,14 @@ pub fn run_host(configuration: &'static CoreConfig, arguments: &[String]) -> u8 
         return 1;
     }
 
-    if let Err(error) = retrodeck_native::joypad::initialize(configuration.zx) {
-        eprintln!("{name}: {error}");
-        eprintln!("{name}: continuing without controller input");
-    }
+    let _input_session = match retrodeck_native::joypad::Session::start(configuration.zx) {
+        Ok(session) => Some(session),
+        Err(error) => {
+            eprintln!("{name}: {error}");
+            eprintln!("{name}: continuing without controller input");
+            None
+        }
+    };
 
     let test_frames = std::env::var("RETRO_DECK_TEST_FRAMES")
         .ok()
@@ -641,7 +675,7 @@ pub fn run_host(configuration: &'static CoreConfig, arguments: &[String]) -> u8 
     }
 
     let persistent_base = save_base(rom_path);
-    load_persistent_memory(&persistent_base, configuration);
+    let persistent_memory = load_persistent_memory(&persistent_base, configuration);
     let library = if system_info.library_name.is_null() {
         configuration.default_core_name.to_owned()
     } else {
@@ -703,7 +737,8 @@ pub fn run_host(configuration: &'static CoreConfig, arguments: &[String]) -> u8 
             previous_audio_callbacks = audio_calls;
         }
         if frames % 600 == 0
-            && let Err(error) = save_persistent_memory(&persistent_base, configuration)
+            && let Err(error) =
+                save_persistent_memory(&persistent_base, configuration, &persistent_memory)
         {
             eprintln!("{name}: periodic save failed: {error}");
         }
@@ -712,10 +747,10 @@ pub fn run_host(configuration: &'static CoreConfig, arguments: &[String]) -> u8 
         }
     }
 
-    if let Err(error) = save_persistent_memory(&persistent_base, configuration) {
+    if let Err(error) = save_persistent_memory(&persistent_base, configuration, &persistent_memory)
+    {
         eprintln!("{name}: final save failed: {error}");
     }
-    retrodeck_native::joypad::shutdown();
     retrodeck_native::game_audio::close();
     retrodeck_native::game_video::close();
     unsafe {
@@ -735,5 +770,75 @@ mod tests {
         assert_eq!(save_base("/roms/nes/mario"), "/roms/nes/mario");
         assert_eq!(save_base("mario.nes"), "mario");
         assert_eq!(save_base("/dotted.dir/rom"), "/dotted.dir/rom");
+    }
+
+    thread_local! {
+        static SRAM: std::cell::UnsafeCell<[u8; 8]> = const { std::cell::UnsafeCell::new([0xA5; 8]) };
+    }
+
+    // Only the memory ABI is needed by these host-side persistence tests.
+    #[unsafe(no_mangle)]
+    extern "C" fn retro_get_memory_data(_id: c_uint) -> *mut c_void {
+        SRAM.with(|memory| memory.get().cast())
+    }
+
+    #[unsafe(no_mangle)]
+    extern "C" fn retro_get_memory_size(_id: c_uint) -> usize {
+        8
+    }
+
+    #[test]
+    fn protects_rejected_saves_and_writes_valid_or_new_saves() {
+        let directory =
+            std::env::temp_dir().join(format!("retro-host-save-{}", std::process::id()));
+        std::fs::create_dir(&directory).expect("create isolated saves");
+        let base = directory.join("game").to_str().unwrap().to_owned();
+        let path = format!("{base}.srm");
+        for rejected in [&[0xFF, 0x42][..], &[7, 7, 1, 200]] {
+            std::fs::write(&path, rejected).unwrap();
+            let memory = load_persistent_memory(&base, &NES_CONFIG);
+            assert!(!memory.save_ram_writable);
+            SRAM.with(|sram| assert_eq!(unsafe { *sram.get() }, [0xA5; 8]));
+            // Both the periodic and final save use this same guarded path.
+            save_persistent_memory(&base, &NES_CONFIG, &memory).unwrap();
+            save_persistent_memory(&base, &NES_CONFIG, &memory).unwrap();
+            assert_eq!(std::fs::read(&path).unwrap(), rejected);
+        }
+        std::fs::write(&path, [7, 7, 42, 7]).unwrap();
+        let memory = load_persistent_memory(&base, &NES_CONFIG);
+        assert!(memory.save_ram_writable);
+        save_persistent_memory(&base, &NES_CONFIG, &memory).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), [42; 8]);
+
+        std::fs::write(&path, [0x53; 8]).unwrap();
+        let memory = load_persistent_memory(&base, &NES_CONFIG);
+        assert!(memory.save_ram_writable);
+        SRAM.with(|sram| assert_eq!(unsafe { *sram.get() }, [0x53; 8]));
+
+        std::fs::remove_file(&path).unwrap();
+        let memory = load_persistent_memory(&base, &NES_CONFIG);
+        assert!(memory.save_ram_writable);
+        save_persistent_memory(&base, &NES_CONFIG, &memory).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), [0x53; 8]);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn rejects_pixel_formats_without_changing_the_negotiated_format() {
+        for accepted in [PIXEL_FORMAT_RGB565, PIXEL_FORMAT_XRGB8888] {
+            let mut format = accepted;
+            assert!(unsafe {
+                environment_callback(ENV_SET_PIXEL_FORMAT, (&mut format as *mut c_uint).cast())
+            });
+            let mut unsupported: c_uint = 0;
+            assert!(!unsafe {
+                environment_callback(
+                    ENV_SET_PIXEL_FORMAT,
+                    (&mut unsupported as *mut c_uint).cast(),
+                )
+            });
+            assert!(!unsafe { environment_callback(ENV_SET_PIXEL_FORMAT, std::ptr::null_mut()) });
+            assert_eq!(PIXEL_FORMAT.load(Ordering::Relaxed), accepted);
+        }
     }
 }

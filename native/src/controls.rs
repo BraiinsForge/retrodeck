@@ -1,7 +1,10 @@
+use crate::evdev_input::{
+    AxisInfo, GAMEPAD_PRODUCT, GAMEPAD_VENDOR, GamepadSnapshot, gamepad_axes, gamepad_snapshot,
+    open_device,
+};
 use evdev::raw_stream::RawDevice;
 use evdev::{AbsoluteAxisCode, EventSummary, InputEvent, KeyCode, SynchronizationCode};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
-use rustix::fs::{Mode, OFlags, open as open_file};
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
@@ -101,20 +104,6 @@ fn keyboard_key_repeats(code: KeyCode) -> bool {
     )
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct AxisInfo {
-    minimum: i32,
-    maximum: i32,
-    value: i32,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-struct GamepadSnapshot {
-    x: AxisInfo,
-    y: AxisInfo,
-    raw_buttons: u32,
-}
-
 #[derive(Clone, Copy, Debug, Default)]
 struct GamepadState {
     snapshot: GamepadSnapshot,
@@ -212,8 +201,6 @@ fn axis_state(axis: AxisInfo, negative: u32, positive: u32) -> u32 {
 }
 
 const INPUT_DIRECTORY: &str = "/dev/input";
-const THE_GAMEPAD_VENDOR: u16 = 0x1c59;
-const THE_GAMEPAD_PRODUCT: u16 = 0x0026;
 const MAXIMUM_GAMEPADS: usize = 2;
 const MAXIMUM_KEYBOARDS: usize = 4;
 const MAXIMUM_CONTROL_REPORTS: usize = 64;
@@ -229,7 +216,7 @@ impl GamepadDevice {
     fn open(path: &Path) -> Option<Self> {
         let device = open_device(path)?;
         let identity = device.input_id();
-        if identity.vendor() != THE_GAMEPAD_VENDOR || identity.product() != THE_GAMEPAD_PRODUCT {
+        if identity.vendor() != GAMEPAD_VENDOR || identity.product() != GAMEPAD_PRODUCT {
             return None;
         }
         let (mut x, mut y) = gamepad_axes(&device).ok()?;
@@ -591,16 +578,6 @@ fn event_path(path: PathBuf) -> Option<PathBuf> {
     (!suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())).then_some(path)
 }
 
-fn open_device(path: &Path) -> Option<RawDevice> {
-    let fd = open_file(
-        path,
-        OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC,
-        Mode::empty(),
-    )
-    .ok()?;
-    RawDevice::from_fd(fd).ok()
-}
-
 fn keyboard_capabilities(device: &RawDevice) -> bool {
     let Some(keys) = device.supported_keys() else {
         return false;
@@ -621,38 +598,6 @@ fn keyboard_snapshot(device: &RawDevice) -> io::Result<(bool, bool)> {
         keys.contains(KeyCode::KEY_LEFTSHIFT),
         keys.contains(KeyCode::KEY_RIGHTSHIFT),
     ))
-}
-
-fn gamepad_axes(device: &RawDevice) -> io::Result<(AxisInfo, AxisInfo)> {
-    let mut x = None;
-    let mut y = None;
-    for (code, info) in device.get_absinfo()? {
-        let axis = AxisInfo {
-            minimum: info.minimum(),
-            maximum: info.maximum(),
-            value: info.value(),
-        };
-        match code {
-            AbsoluteAxisCode::ABS_X => x = Some(axis),
-            AbsoluteAxisCode::ABS_Y => y = Some(axis),
-            _ => {}
-        }
-    }
-    let x = x.ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "ABS_X is unavailable"))?;
-    let y = y.ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "ABS_Y is unavailable"))?;
-    Ok((x, y))
-}
-
-fn gamepad_snapshot(device: &RawDevice) -> io::Result<GamepadSnapshot> {
-    let (x, y) = gamepad_axes(device)?;
-    let keys = device.get_key_state()?;
-    let mut raw_buttons = 0;
-    for index in 0..8 {
-        if keys.contains(KeyCode(KeyCode::BTN_TRIGGER.0 + index)) {
-            raw_buttons |= 1 << index;
-        }
-    }
-    Ok(GamepadSnapshot { x, y, raw_buttons })
 }
 
 #[cfg(test)]

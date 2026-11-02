@@ -24,6 +24,8 @@
 
 #include "retrodeck_doom.h"
 
+#include <stdint.h>
+
 //
 // I_GetTime
 // returns time in 1/35th second tics
@@ -31,7 +33,7 @@
 
 int I_GetTime (void)
 {
-    return (retrodeck_doom_ticks() * TICRATE) / 1000;
+    return (int) (((int64_t) retrodeck_doom_ticks() * TICRATE) / 1000);
 }
 
 //
