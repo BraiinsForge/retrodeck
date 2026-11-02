@@ -7,6 +7,26 @@ RetroDeck is a native ARM widget. Its first-party dashboard, uploader, catalog
 compiler, timer and chiptune UI are Rust executables. ECL Common Lisp, Chibi
 Scheme, Lua and MicroPython are separate language applications.
 
+## Source provenance
+
+The 2026-11-02 comparison used a fresh fetch from
+`git@github.com:BraiinsForge/bmc-main.git`, not the July feature checkout's files.
+The root `flake.nix` uses GitHub `BraiinsForge/nix-source-info` and
+`BraiinsForge/nix-lib`. All 16 resolved entries in its `flake.lock` are GitHub
+sources; Cargo Git sources are also on GitHub. RetroDeck's build manifests,
+locks, operations and GitHub workflows contain no `gitlab.ii.zone` reference.
+
+The locked `nix-lib` declares a GitLab default for `nix-source-info` in its own
+flake. BMC overrides it with `nixlib.inputs.nix-source-info.follows =
+"nix-source-info"`. Archiving the locked input graph succeeded, and evaluating
+both effective source-info paths confirmed the same GitHub source. This checks
+the selected graph, not every optional derivation or an uncached full build.
+Public package registries and binary caches are separate download sources.
+
+Upstream's `.gitlab-ci.yml` still fetches private `nix/ci-tools` from GitLab.
+That recipe is separate from the local Nix build and RetroDeck's GitHub Actions.
+Historical upstream documentation also contains GitLab links.
+
 ## Stock BMC support
 
 Stock BMC supports native discovery, process spawning, keyed surface replacement,
@@ -139,6 +159,35 @@ installation requirements. Preserve damage, rotation, color adjustment and
 capture behavior when changing those paths. Keep upstream fixes independent;
 merge only demonstrated gaps rather than the historical RetroDeck fork.
 
+## Preserved legacy compositor changes
+
+The audited `feature/retro-dashboard-wayland` checkout is
+`7860917be276bbca31f8fedfd864d4560e517689`, eight branch-only commits and 1,784
+upstream-only commits from the pinned master. Its dirty
+`bmc-openwrt/src/compositor/render/egl_context.rs` edit is reproduced byte-for-byte
+by [the tracked filtering patch](../patches/bmc-nearest-neighbor-filter.patch).
+The comparison preserved that branch and edit. These changes require individual
+evaluation rather than a wholesale fork merge.
+
+All source locations below refer to the pinned master, not the legacy checkout.
+
+| Legacy change | Disposition and upstream evidence | Required evidence before adoption |
+| --- | --- | --- |
+| `d32fff0a7`: persistent widget directory | Superseded installation mechanism. `bmc-openwrt/src/main.rs:87-90` defaults to the profile directory and permits an override. | Use the stock package/profile contract above. |
+| `a6f458111`: teardown logs | Diagnostic-only. `bmc-wasm-host/src/main_loop.rs:948-958` logs render failures/panics; line 615 discards some dispatch errors. Coverage differs. | Add targeted logs when an actual failure needs them. |
+| `2b5e710d6`: invalid cached DMA-BUF fd recovery | Unproven correctness gap. `bmc-widget/src/egl.rs:773-797` caches/duplicates the fd and propagates errors, without this recovery. | Reproduce the failure on master and establish descriptor ownership. Restoring an `OwnedFd` after external close/reuse is safety-sensitive. |
+| `88657444a`: cached descriptors above stdio | Unproven correctness gap. `bmc-widget/src/egl.rs:781-797` caches the GBM fd without a minimum-number constraint. | Reproduce a descriptor-ownership/stdio collision before selecting a fix. |
+| `445c3f9d1`: retain prepared buffers | Memory/latency experiment. `bmc-wasm-host/src/lifecycle.rs:275-284` compacts prepared targets; see also `render_target.rs:57-60,141`. | Measure lifecycle latency and retained memory. |
+| `5a23aed65`: reuse SHM textures | Import/reuse experiment. `bmc-openwrt/src/compositor/scene_renderer.rs:623` imports SHM with no surface data and empty damage. | Measure imports/frame time and verify damage correctness. |
+| `b77f5a1cf`: release GPU lock on page flip | Different synchronization contract. Master holds the render lock in `scene_renderer.rs:699` and waits for GPU completion in `render/egl_context.rs:83-87`. | Prove lock safety on failures/lost flips and measure latency. |
+| `7860917be`: direct gameplay scanout | Composition/occlusion experiment. Master has separate swizzler/capture paths in `scene_renderer.rs:46,52,412,1032,1070`. | Measure the gain while preserving rotation, color, overlays and capture. |
+| Dirty global nearest-neighbor edit | Potential visual gap. `render/frame_diff.rs:458-466` temporarily selects nearest sampling, then restores linear for composition. An initialization-only patch can therefore be overwritten on master. | Reproduce blurred pixel edges on the panel; request per-surface filtering if needed. |
+
+This source audit establishes no unconditional patch requirement from those nine
+changes. The behavioral acceptance criteria above determine which need upstream
+work. For screenshots, master already implements `ext-image-copy-capture-v1`;
+see [Deck screen capture](deck-capture.md).
+
 ## Verification and physical acceptance
 
 Automated coverage includes full-frame UI references, catalog validation and
@@ -164,6 +213,12 @@ The local Wayland fixture is not the BMC manager/coordinator. On 2026-11-02,
 replacement, retained registration, stale attachments and swipe transitions.
 They ran from a private checkout of the pinned revision using its `.#local` dev
 shell and Git LFS assets, not a supervised RetroDeck/stock-compositor integration.
+
+A read-only capture of the installed legacy Deck dashboard was also obtained on
+2026-11-02. That installation exposes the old `deck_widget_manager_v3` /
+`deck_widget_surface_v2` globals and uses framebuffer fallback. It does not
+exercise this revision's keyed widget integration. See the
+[capture procedure and evidence limits](deck-capture.md).
 
 No device deployment or physical acceptance was performed for this revision.
 Before release, test repeated dashboard/game/dashboard handoff and scene

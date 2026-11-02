@@ -23,16 +23,20 @@ never swept into a migration commit.
 
 ** Pin Deck comparisons to current GitHub master
 
-- Problem: The local BMC worktrees still have a GitLab =origin= and July 2026
-  cached refs. Using those refs missed the current keyed widget protocol.
-- Behavior: Verify =BraiinsForge/bmc-main= on GitHub, fetch master into
-  =refs/remotes/github/master=, record its full SHA, and read that revision
-  with =git show= when auditing forks. Preserve existing branches and worktrees.
+- Problem: Fetching current master does not update a feature checkout. Reading
+  the July working tree as if it were November master produced a false GitLab
+  dependency finding and missed the current keyed widget protocol.
+- Behavior: Fetch =BraiinsForge/bmc-main= from GitHub, record master's full SHA,
+  and use =git show SHA:path= or a clean pinned comparison worktree. Preserve
+  existing branches and edits; distinguish declared helper defaults from the
+  effective locked input graph.
 - Scope and location: Project workflow note; no active-image mutation.
-- Verification: On 2026-11-02 a fresh GitHub fetch resolved master to
-  =5ce80092ed165bb1b75bbb54d2e672ad8cde00df=; protocol v2 was re-audited.
-- Removal condition: Remove after the local upstream remotes and comparison
-  workflow use GitHub directly.
+- Verification: On 2026-11-02 GitHub master was
+  =5ce80092ed165bb1b75bbb54d2e672ad8cde00df=. A separate master worktree and
+  effective Nix input evaluation confirmed the comparison without altering the
+  legacy feature checkout.
+- Removal condition: Remove when upstream comparisons use pinned sources
+  automatically and cannot silently read an unrelated working tree.
 
 ** Use component working directories for direct tool checks
 
