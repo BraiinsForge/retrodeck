@@ -186,6 +186,8 @@ impl Runtime {
         self.backend == Some(Backend::Widget)
     }
     fn open_presentation(&mut self) -> Result<(), String> {
+        let widget_required =
+            std::env::var_os("RETRO_DECK_PRESENTATION").is_some_and(|mode| mode == "widget");
         if let Some(display) = &self.display {
             if wayland::size().is_some() {
                 self.backend = Some(Backend::Widget);
@@ -197,10 +199,14 @@ impl Runtime {
                     self.presentation_owned = true;
                     return Ok(());
                 }
+                Err(error) if widget_required => return Err(error),
                 Err(error) => {
                     eprintln!("retrodeck: {error}; Wayland widget unavailable; trying fbdev")
                 }
             }
+        }
+        if widget_required {
+            return Err("WAYLAND_DISPLAY is required for widget presentation".into());
         }
         if fbdev::size().is_none() {
             fbdev::open()?;
