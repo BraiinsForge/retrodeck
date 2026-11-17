@@ -760,12 +760,22 @@ type Entry = [String; 5];
 fn read_catalog(path: &Path, missing_ok: bool) -> Result<Vec<Entry>> {
     let mut entries = Vec::new();
     if let Some(text) = read_text(path, 65536, missing_ok)? {
+        let mut first_record = true;
         for line in text.lines() {
             if line.len() > 4095 {
                 return Err("catalog line exceeds 4095 bytes".into());
             }
             if line.is_empty() || line.starts_with('#') {
                 continue;
+            }
+            if first_record {
+                first_record = false;
+                if matches!(
+                    line,
+                    "id\ttitle\tsystem\trom\tcolor" | "id\ttitle\tsystem\trom\t#RRGGBB"
+                ) {
+                    continue;
+                }
             }
             let fields = line.split('\t').map(str::to_owned).collect::<Vec<_>>();
             let entry = fields
@@ -1385,3 +1395,65 @@ pub async fn serve(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod catalog_header_tests {
+    use super::*;
+
+    struct Directory(PathBuf);
+    impl Drop for Directory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn catalog_headers_preserve_all_upload_slots() {
+        for header in [
+            "",
+            "id\ttitle\tsystem\trom\tcolor\n",
+            "id\ttitle\tsystem\trom\t#RRGGBB\n",
+        ] {
+            let directory = Directory(std::env::temp_dir().join(format!(
+                "retrodeck-uploader-header-test-{}",
+                token().unwrap()
+            )));
+            fs::create_dir(&directory.0).unwrap();
+            let app = App {
+                config: Config {
+                    data_root: directory.0.clone(),
+                    restart_command: None,
+                    ..Config::default()
+                },
+                auth: Mutex::new(Auth::default()),
+                storage: Mutex::new(()),
+                login: Arc::new(Semaphore::new(1)),
+            };
+            let base = app.config.path("nes-deck/menu/games.tsv");
+            install(&base, header.as_bytes(), true).unwrap();
+            assert!(read_catalog(&base, false).unwrap().is_empty());
+
+            let uploads = (0..63)
+                .map(|index| {
+                    format!(
+                        "upload-zx-game-{index}\tGame {index}\tzx\t{}/roms/zx/game-{index}.tap\t#5F87AF\n",
+                        directory.0.display()
+                    )
+                })
+                .collect::<String>();
+            let catalog = app.config.path("nes-deck/uploads/games.tsv");
+            install(&catalog, uploads.as_bytes(), true).unwrap();
+            add_rom(&app, "zx", "Last slot", "last.tap", &[2, 0, 1, 1]).unwrap();
+            assert_eq!(read_catalog(&catalog, false).unwrap().len(), 64);
+            assert_eq!(
+                fs::read(app.config.path("roms/zx/last-slot.tap")).unwrap(),
+                [2, 0, 1, 1]
+            );
+            assert!(add_rom(&app, "zx", "Over capacity", "over.tap", &[2, 0, 1, 1]).is_err());
+            assert!(!app.config.path("roms/zx/over-capacity.tap").exists());
+
+            install(&base, format!("{header}{uploads}").as_bytes(), true).unwrap();
+            assert_eq!(read_catalog(&base, false).unwrap().len(), 63);
+        }
+    }
+}

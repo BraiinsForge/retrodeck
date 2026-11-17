@@ -19,7 +19,6 @@ MENU=$MENU_DIR/deck-menu
 NES_EMULATOR=$BASE/nes-deck
 GB_EMULATOR=$BASE/gb-deck
 ZX_EMULATOR=$BASE/zx-deck
-DECK_GAME=$BASE/ten-seconds-deck
 DOOM_GAME=$BASE/doom-deck
 CHIPTUNE_PLAYER=$BASE/chiptune-deck
 CHIPTUNE_DIRECTORY=/mnt/data/chiptunes
@@ -143,10 +142,6 @@ if [ ! -x "$GB_EMULATOR" ]; then
 fi
 if [ ! -x "$ZX_EMULATOR" ]; then
 	log_message "ZX Spectrum emulator is missing or not executable: $ZX_EMULATOR"
-	exit 1
-fi
-if [ ! -x "$DECK_GAME" ]; then
-	log_message "Deck game is missing or not executable: $DECK_GAME"
 	exit 1
 fi
 if [ ! -x "$CHIPTUNE_PLAYER" ]; then
@@ -344,7 +339,6 @@ exec "$MENU" \
 	--nes-emulator "$NES_EMULATOR" \
 	--gb-emulator "$GB_EMULATOR" \
 	--zx-emulator "$ZX_EMULATOR" \
-	--deck-game "$DECK_GAME" \
 	--chiptune-player "$CHIPTUNE_PLAYER" \
 	--chiptune-directory "$CHIPTUNE_DIRECTORY" \
 	--volume-state "$VOLUME_STATE" \

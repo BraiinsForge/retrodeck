@@ -39,10 +39,6 @@ grep -Fq "[[ -f \$activate_script && ! -L \$activate_script ]]" "$deployer" ||
   fail 'deployer does not validate the activation script'
 grep -Fq 'cp "$chiptune/bin/chiptune-deck" "$payload/nes-deck/chiptune-deck"' \
   "$deployer" || fail 'deployer does not stage the chiptune executable'
-grep -Fq '"$stage/nes-deck/ten-seconds-deck" extra' "$activation" ||
-  fail 'activation does not preflight the staged 10 Seconds executable'
-grep -Fq '[ "$ten_seconds_output" = "usage: ten-seconds-deck" ]' \
-  "$activation" || fail 'activation does not check the 10 Seconds usage result'
 grep -Fq '"$stage/nes-deck/chiptune-deck" extra extra' "$activation" ||
   fail 'activation does not preflight the staged chiptune executable'
 grep -Fq '[ "$chiptune_output" = "usage: chiptune-deck CHIPTUNE_DIRECTORY" ]' \
@@ -73,7 +69,7 @@ grep -Fq 'cp -Rp "$stage/nes-deck/covers/." "$base/covers/"' "$activation" ||
 if grep -Fq 'rm -rf "$base/covers"' "$activation"; then
   fail 'activation deletes the persistent cover cache'
 fi
-grep -Fq 'nes-deck gb-deck zx-deck gba-deck doom-deck tamagotchi-deck ten-seconds-deck' \
+grep -Fq 'nes-deck gb-deck zx-deck gba-deck doom-deck tamagotchi-deck' \
   "$activation" || fail 'activation does not validate the staged Deck hosts'
 grep -Fq 'cp -p "$stage/nes-deck/doom-deck" "$base/doom-deck"' "$activation" ||
   fail 'activation does not install the DOOM host'

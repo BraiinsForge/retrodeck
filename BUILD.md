@@ -39,8 +39,8 @@ cd retrodeck
 The first Nix build downloads the pinned cross toolchain and may take several
 minutes. Later builds reuse the Nix store.
 
-The dashboard (`deck-menu`), uploader (`rom-uploader`), timer, chiptune
-player, and catalog compiler are standalone Rust executables. The console emulators are Rust libretro hosts
+The dashboard (`deck-menu`), uploader (`rom-uploader`), chiptune player, and
+catalog compiler are standalone Rust executables. The console emulators are Rust libretro hosts
 (`native/src/bin/retro-host/`) with the
 pinned FCEUmm, Gambatte, Fuse, and gpSP cores statically linked, one binary per
 console. The `libretro-host-smoke` flake check runs a representative ARM host
@@ -72,7 +72,6 @@ Use `--no-link` to avoid leaving `result-*` symlinks in the repository:
 ```sh
 nix build --no-link --print-out-paths .#deck-menu
 nix build --no-link --print-out-paths .#rom-uploader
-nix build --no-link --print-out-paths .#ten-seconds-deck
 nix build --no-link --print-out-paths .#chiptune-deck
 nix build --no-link --print-out-paths .#compile-catalog
 nix build --no-link --print-out-paths .#nes-deck
@@ -94,7 +93,6 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 | --- | --- |
 | `deck-menu` | `bin/deck-menu`, standalone Rust dashboard |
 | `rom-uploader` | `bin/rom-uploader`, standalone Rust HTTP service |
-| `ten-seconds-deck` | `bin/ten-seconds-deck`, standalone Rust |
 | `chiptune-deck` | `bin/chiptune-deck`, standalone Rust |
 | `compile-catalog` | `bin/compile-catalog`, standalone Rust |
 | `nes-deck` | `bin/nes-deck` |
@@ -112,7 +110,7 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 
 ### Standalone applications
 
-The dashboard, uploader, timer, chiptune player, and catalog compiler are Rust
+The dashboard, uploader, chiptune player, and catalog compiler are Rust
 executables. Shared rendering, audio, controller, process, and widget mechanisms
 live in `native/src/`. The dashboard owns UI state and managed-child recovery;
 the uploader owns its HTTP routes, authentication, ROM intake, and palette edits.
@@ -146,8 +144,7 @@ tests/run-host-tests.sh
 It covers dashboard state and menu-sound policy, the Rust menu-tone renderer, NES mixer, APU
 noise, SRAM codec, controller and keyboard input, dashboard geometry and
 behavior, ROM catalog, cover cache, Wi-Fi profile helper, rlwrap-backed
-terminal lifecycle, shared framebuffer/audio runtime, and timer
-configuration.
+terminal lifecycle, and shared framebuffer/audio runtime.
 
 `tests/uploader-rust-http.sh` exercises the standalone uploader's full HTTP
 contract against a host binary. ARM/QEMU checks validate the deployed password
@@ -250,9 +247,9 @@ require a physical check.
 
 Audio uses `/dev/dsp` through the Deck's ALSA OSS bridge. All streams use
 signed 16-bit little-endian samples. Emulator and chiptune streams are stereo;
-the menu and timer cues are mono. FCEUmm reports 48 kHz. The OSS device stays at its
+menu cues are mono. FCEUmm reports 48 kHz. The OSS device stays at its
 required nominal 48 kHz while the runtime resamples to the measured 47,328
-frames/s application clock. Fuse, the timer, menu cues, and chiptunes
+frames/s application clock. Fuse, menu cues, and chiptunes
 use 44.1 kHz. Gambatte produces 32,768 Hz and is explicitly resampled to the
 Deck's verified 32 kHz OSS rate. Gain is applied in the native mixer because
 the kernel OSS path bypasses ALSA userspace soft volume.

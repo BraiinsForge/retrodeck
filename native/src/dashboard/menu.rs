@@ -388,7 +388,6 @@ fn draw_logo_or_cartridge(b: Bounds, g: &Game) {
         return;
     }
     match g.id.as_str() {
-        "ten-seconds" => ui::centered_in_rect(b.x, b.y, b.width, b.height, "10.00", 5, c),
         "lisp-repl" => ui::centered_in_rect(b.x, b.y, b.width, b.height, "(LISP)", 4, c),
         "lua-repl" => {
             ui::pixel_panel(
@@ -432,21 +431,6 @@ fn draw_logo_or_cartridge(b: Bounds, g: &Game) {
             ui::centered_in_rect(x, y, w, 96, ">_", 5, ui::color("text"));
             ui::fill(cx - 6, y + 96, 12, 18, c);
             ui::fill(cx - 44, y + 114, 88, 4, c);
-        }
-        "node-mode" => {
-            for (x, y, w, h) in [
-                (-48, -72, 96, 12),
-                (-60, -60, 120, 12),
-                (-72, -48, 144, 96),
-                (-60, 48, 120, 12),
-                (-48, 60, 96, 12),
-            ] {
-                ui::fill(cx + x, cy + y, w, h, c);
-            }
-            let white = ui::color("white");
-            ui::fill(cx - 22, cy - 58, 6, 116, white);
-            ui::fill(cx - 6, cy - 58, 6, 116, white);
-            ui::centered_in_rect(b.x, b.y, b.width, b.height, "B", 14, white);
         }
         "reboot" => {
             for (x, y, w, h) in [

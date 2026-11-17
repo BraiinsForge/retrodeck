@@ -58,7 +58,6 @@ The launcher also expects:
 - `/mnt/data/nes-deck/nes-deck`
 - `/mnt/data/nes-deck/gb-deck`
 - `/mnt/data/nes-deck/zx-deck`
-- `/mnt/data/nes-deck/ten-seconds-deck`
 - `/mnt/data/nes-deck/doom-deck` (optional; a missing DOOM host is logged as a
   warning and only its own card fails to launch)
 - `/mnt/data/nes-deck/chiptune-deck`
@@ -153,10 +152,6 @@ time, since Libretro has no box art for a Deck entry. Its savegames are
 written below `/mnt/data/doom`, which activation never replaces. Controller mapping and the always-run setting are applied after the
 engine reads its configuration, so neither a stale config nor fbDOOM's
 compiled-out configuration writer can restore keyboard-only bindings.
-
-The Deck-native **10 SECONDS** game owns touch while it runs and has its own
-BACK action. Physical A on either controller also starts and stops it. Short
-start and result chiptunes follow the dashboard volume.
 
 The settings computer icon and DECK terminal entry launch
 `/mnt/data/nes-deck/terminal/retro-terminal`; the control subtitle identifies

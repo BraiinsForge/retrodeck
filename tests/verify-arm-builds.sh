@@ -72,8 +72,6 @@ build_flake .#checks.x86_64-linux.uploader-password-smoke >/dev/null
 echo "uploader-password-smoke: OK"
 verify_package compile-catalog bin/compile-catalog
 build_flake .#checks.x86_64-linux.catalog-smoke >/dev/null
-verify_package ten-seconds-deck bin/ten-seconds-deck
-build_flake .#checks.x86_64-linux.ten-seconds-smoke >/dev/null
 verify_package chiptune-deck bin/chiptune-deck
 build_flake .#checks.x86_64-linux.chiptune-smoke >/dev/null
 verify_package tamagotchi-deck bin/tamagotchi-deck

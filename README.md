@@ -4,8 +4,8 @@ A touch-first game and program launcher for the Braiins Forge Deck. Runs as a
 native fullscreen BMC widget, with a direct-framebuffer fallback.
 
 Includes NES, Game Boy, Game Boy Color and ZX Spectrum emulators; DOOM;
-10 Seconds; a terminal; chiptunes; and ECL Common Lisp, Chibi Scheme, Lua and
-MicroPython REPLs. The dashboard and services are standalone Rust applications.
+a terminal; chiptunes; and ECL Common Lisp, Chibi Scheme, Lua and MicroPython
+REPLs. The dashboard and services are standalone Rust applications.
 Two THEGamepad controllers provide Player 1 and Player 2 input.
 
 ## Install

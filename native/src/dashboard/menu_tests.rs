@@ -29,26 +29,20 @@ fn reference_frame(transcript: &str) -> u64 {
 }
 
 #[test]
-fn builtin_carousel_matches_legacy_frames() {
-    let references = [
-        include_str!("oracles/menu-0.txt"),
-        include_str!("oracles/menu-1.txt"),
-        include_str!("oracles/menu-2.txt"),
-        include_str!("oracles/menu-3.txt"),
-        include_str!("oracles/menu-4.txt"),
-        include_str!("oracles/menu-5.txt"),
-        include_str!("oracles/menu-6.txt"),
-        include_str!("oracles/menu-7.txt"),
-    ];
+fn builtin_carousel_maps_each_app_to_its_touch_target() {
     let games = super::super::policy::builtins();
-    for (position, reference) in references.into_iter().enumerate() {
-        let expected = reference_frame(reference);
-        MenuRenderer::default().render(&games, System::Deck, position, "STATE READY");
-        assert_eq!(
-            canvas::rgb565_hash(),
-            expected,
-            "builtin carousel position {position}"
-        );
+    let renderer = MenuRenderer::default();
+    for position in 0..games.len() {
+        let layout = renderer.render(&games, System::Deck, position, "STATE READY");
+        assert_eq!(layout.shown_game_index, Some(position));
+        assert_eq!(layout.game_indices.len(), games.len());
+        assert!(layout.visible_game_indices.contains(&position));
+        for (bounds, index) in layout.game_buttons.iter().zip(&layout.visible_game_indices) {
+            assert_eq!(
+                layout.target_at(bounds.x + 1, bounds.y + 1),
+                Some(Target::Game(*index))
+            );
+        }
     }
 }
 

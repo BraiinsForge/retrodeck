@@ -26,9 +26,4 @@
    :active "#503311"
    :control-surface "#303030"
    :muted "#949494")
-  :games
-   ((:id "ten-seconds"
-     :title "10 SECONDS"
-     :system :deck
-     :rom "/mnt/data/nes-deck/games/ten-seconds"
-     :color "#FFAF87")))
+  :games ())

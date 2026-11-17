@@ -5,7 +5,6 @@ menu transcripts through the shared Rust canvas, then compare full-frame RGB565
 hashes with the current renderer in `menu_tests.rs`. `parity_tests.rs` checks frozen
 full-frame hashes for settings, Wi-Fi and credits.
 
-- `menu-0.txt` through `menu-7.txt`: all eight built-in carousel positions.
 - `menu-cases.txt`: console, empty, card-count, tab and status cases.
 - `menu-raster.txt`: PNG, custom-cover and tint cases.
 - `credits.tsv`: credits from `d202a1f`, frozen independently of production credits.

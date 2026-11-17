@@ -45,7 +45,7 @@ cmp -s "$fixture/games.tsv" "$root/deploy/menu/games.tsv" ||
 cmp -s "$fixture/palette.tsv" "$root/deploy/menu/palette.tsv" ||
   fail 'checked-in palette.tsv differs from games.sexp'
 
-sed 's#/mnt/data/nes-deck/games/ten-seconds#/tmp/ten-seconds#' \
+sed 's|:games ()|:games ((:id "unsafe-app" :title "Unsafe app" :system :deck :rom "/tmp/app.bin" :color "#FFAF87"))|' \
   "$root/deploy/menu/games.sexp" >"$fixture/unsafe.sexp"
 if compile_catalog "$fixture/unsafe.sexp" "$fixture/unsafe.tsv" \
   "$fixture/unsafe-palette.tsv" >/dev/null 2>&1; then

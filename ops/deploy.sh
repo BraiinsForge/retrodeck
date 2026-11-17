@@ -92,7 +92,6 @@ doom=$(build_flake .#doom-deck)
 tamagotchi=$(build_flake .#tamagotchi-deck)
 menu=$(build_flake .#deck-menu)
 uploader=$(build_flake .#rom-uploader)
-ten_seconds=$(build_flake .#ten-seconds-deck)
 chiptune=$(build_flake .#chiptune-deck)
 catalog_compiler=$(build_flake .#compile-catalog)
 fbterm=$(build_flake .#fbterm-deck)
@@ -134,7 +133,6 @@ cp "$zx/bin/zx-deck" "$payload/nes-deck/zx-deck"
 cp "$gba/bin/gba-deck" "$payload/nes-deck/gba-deck"
 cp "$doom/bin/doom-deck" "$payload/nes-deck/doom-deck"
 cp "$tamagotchi/bin/tamagotchi-deck" "$payload/nes-deck/tamagotchi-deck"
-cp "$ten_seconds/bin/ten-seconds-deck" "$payload/nes-deck/ten-seconds-deck"
 cp "$chiptune/bin/chiptune-deck" "$payload/nes-deck/chiptune-deck"
 cp "$menu/bin/deck-menu" "$payload/nes-deck/menu/deck-menu"
 cp "$uploader/bin/rom-uploader" "$payload/nes-deck/uploader/rom-uploader"
@@ -164,7 +162,7 @@ cp deploy/menu/games.sexp deploy/menu/games.tsv deploy/menu/credits.tsv \
   deploy/menu/palette.tsv \
   deploy/menu/ASSETS.md \
   deploy/menu/deck-menu-launcher \
-  deploy/menu/fetch-covers deploy/menu/node-mode "$payload/nes-deck/menu/"
+  deploy/menu/fetch-covers "$payload/nes-deck/menu/"
 cp "$catalog_compiler/bin/compile-catalog" "$payload/nes-deck/menu/compile-catalog"
 cp assets/settings-cog/gear-knekko-09.png \
   "$payload/nes-deck/menu/settings-icon.png"
@@ -248,7 +246,6 @@ fi
 find "$payload/nes-deck" -type f \( \
   -name 'nes-deck' -o -name 'gb-deck' -o -name 'zx-deck' -o -name 'gba-deck' -o \
   -name 'doom-deck' -o -name 'tamagotchi-deck' -o \
-  -name 'ten-seconds-deck' -o \
   -name 'chiptune-deck' -o -name 'rom-uploader' -o \
   -name 'deck-menu' -o -name 'compile-catalog' -o \
   -name 'deck-menu-launcher' -o -name 'fetch-covers' -o \

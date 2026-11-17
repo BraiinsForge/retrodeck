@@ -10,7 +10,7 @@ executable Lisp.
 * Project profile
 
 RetroDeck is an exact migration, not a redesign. First-party dashboard,
-uploader, timer, chiptunes, and catalog code use standalone Rust executables.
+uploader, chiptunes, and catalog code use standalone Rust executables.
 The Common Lisp REPL is a separate ECL app.
 Reuse the existing native mechanisms and preserve visual and interaction parity.
 Native widget compatibility is documented in =docs/upstream-rust-migration.md=.
@@ -77,7 +77,7 @@ never swept into a migration commit.
   emulator is running; compare workload PIDs and network health before and after.
 - Scope and location: Tracked project workflow note in this file. No active-image
   mutation and no credential retention.
-- Verification: A live Node Mode session retained its Core and dashboard PIDs and
+- Verification: The running workload retained its Core and dashboard PIDs and
   healthy network while 43 local profiles were atomically merged at mode =0600=.
 - Removal condition: Remove when provisioning owns all profile synchronization
   and exposes a credential-safe device-health channel independent of Wi-Fi.

@@ -125,13 +125,6 @@ pub fn builtins() -> Vec<Game> {
             0x5f87af,
             Some("shell"),
         ),
-        builtin(
-            "node-mode",
-            "NODE MODE",
-            "/mnt/data/nes-deck/menu/node-mode",
-            0xfe6c27,
-            None,
-        ),
         builtin("reboot", "REBOOT", "/sbin/reboot", 0xd75f5f, None),
     ]
 }
@@ -224,11 +217,7 @@ pub fn load_games(path: &Path) -> Result<Vec<Game>, String> {
             return Err("Manifest contains more than 64 games".into());
         }
     }
-    if out.is_empty() {
-        Err("Manifest contains no games".into())
-    } else {
-        Ok(out)
-    }
+    Ok(out)
 }
 pub fn load_palette(path: &Path) -> Result<Palette, String> {
     let t = bounded(path, MAX_PALETTE_BYTES, "Palette")?;
@@ -326,7 +315,6 @@ pub struct LaunchConfig {
     pub gb_emulator: Option<String>,
     pub gba_emulator: Option<String>,
     pub zx_emulator: Option<String>,
-    pub deck_game: Option<String>,
     pub doom_deck: Option<String>,
     pub tamagotchi_deck: Option<String>,
     pub chiptune_player: Option<String>,
@@ -342,7 +330,6 @@ impl LaunchConfig {
             "gb" => self.gb_emulator.as_deref(),
             "gba" => self.gba_emulator.as_deref(),
             "zx" => self.zx_emulator.as_deref(),
-            "deck" => self.deck_game.as_deref(),
             "doom" => self.doom_deck.as_deref(),
             "tamagotchi" => self.tamagotchi_deck.as_deref(),
             "chiptunes" => self.chiptune_player.as_deref(),
@@ -411,7 +398,6 @@ pub fn launch_plan(
         System::Gb | System::Gbc => "gb",
         System::Gba => "gba",
         System::Zx => "zx",
-        System::Deck if g.id == "node-mode" => "node-mode",
         System::Deck if g.id == "tamagotchi" => "tamagotchi",
         System::Deck if g.id == "chiptunes" => "chiptunes",
         System::Deck if wad_application(g) => "doom",
@@ -422,11 +408,10 @@ pub fn launch_plan(
         "gb" => "/mnt/data/nes-deck/gb-deck",
         "gba" => "/mnt/data/nes-deck/gba-deck",
         "zx" => "/mnt/data/nes-deck/zx-deck",
-        "node-mode" => "/mnt/data/nes-deck/menu/node-mode",
         "tamagotchi" => "/mnt/data/nes-deck/tamagotchi-deck",
         "chiptunes" => "/mnt/data/nes-deck/chiptune-deck",
         "doom" => "/mnt/data/nes-deck/doom-deck",
-        _ => "/mnt/data/nes-deck/ten-seconds-deck",
+        _ => g.rom.as_str(),
     };
     let mut environment = vec![("RETRO_DECK_VOLUME_PERCENT".into(), volume.to_string())];
     let has_rom_arg =
@@ -532,13 +517,31 @@ mod tests {
     }
 
     #[test]
+    fn header_only_manifest_bootstraps_builtin_apps() {
+        let manifest =
+            std::env::temp_dir().join(format!("retrodeck-empty-manifest-{}", std::process::id()));
+        std::fs::write(&manifest, "id\ttitle\tsystem\trom\tcolor\n").unwrap();
+        let result = load_bootstrap(
+            &manifest,
+            Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../deploy/menu/palette.tsv"
+            )),
+        );
+        std::fs::remove_file(manifest).unwrap();
+        let (games, palette, custom_palette) = result.unwrap();
+        assert_eq!(games, builtins());
+        assert_eq!(palette.colors.len(), DEFAULT_PALETTE_VALUES.len());
+        assert!(custom_palette);
+    }
+
+    #[test]
     fn launch_contract_covers_all_routes_and_overrides() {
         let c = LaunchConfig {
             nes_emulator: Some("nes-x".into()),
             gb_emulator: Some("gb-x".into()),
             gba_emulator: Some("gba-x".into()),
             zx_emulator: Some("zx-x".into()),
-            deck_game: Some("deck-x".into()),
             doom_deck: Some("doom-x".into()),
             tamagotchi_deck: Some("tama-x".into()),
             chiptune_player: Some("chip-x".into()),
@@ -555,11 +558,13 @@ mod tests {
         let gba = p(game("a", System::Gba, "/rom/a.gba"));
         assert_eq!(gba.executable, "gba-x");
         assert_eq!(p(game("z", System::Zx, "/rom/z.tap")).executable, "zx-x");
-        let deck = p(game("d", System::Deck, "/rom/d"));
-        assert_eq!(deck.executable, "deck-x");
+        let deck = p(game(
+            "custom-app",
+            System::Deck,
+            "/mnt/data/nes-deck/games/custom/app.bin",
+        ));
+        assert_eq!(deck.executable, "/mnt/data/nes-deck/games/custom/app.bin");
         assert!(deck.arguments.is_empty());
-        let node = p(game("node-mode", System::Deck, "/node"));
-        assert_eq!(node.executable, "/mnt/data/nes-deck/menu/node-mode");
         let tama = p(game("tamagotchi", System::Deck, "/games/tama"));
         assert_eq!(tama.arguments, vec!["/games/tama"]);
         assert!(

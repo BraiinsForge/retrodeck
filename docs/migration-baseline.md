@@ -45,23 +45,7 @@ traces; physical panel navigation was not observed.
 | Wi-Fi: uppercase password field, `NETWORK`, masked `password` | `a5c18f4c41654088` |
 | Wi-Fi: symbol keyboard with the same populated fields | `f919741f85fe2c31` |
 
-## 10 Seconds frames
-
-The reference layout scales 624x224 to 1280x480 with nearest-neighbor sampling.
-Historical ARM/ECL canvas comparisons matched these independent C++ frames;
-those comparisons did not establish physical input or timing acceptance.
-
-| Reference fixture | RGB565 FNV-1a |
-| --- | --- |
-| Ready, 00.00 | `562ba370a3b4da05` |
-| Running, 01.23 | `802225e33aea53b5` |
-| Exact, 10.00 | `171e4a78d40d458d` |
-| Late, 10.03 | `0171d3938f410bd5` |
-| Capped, 99.99 | `d8877f2ba172c415` |
-
 ## Historical audio fingerprints
 
-- Timer three-note cue: C++ waveform match, 5,732 samples,
-  FNV-1a `b572c4d4420310d4`.
 - Ogg preview: four-block hash `E58BD71B6BD7E1CD`; recorded matches through
   host, ARM/ECL and the BMC Wayland gameplay layer.

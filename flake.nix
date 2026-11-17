@@ -589,11 +589,6 @@ PATCH
           description = "Bounded non-evaluating RetroDeck catalog compiler";
         };
 
-        ten-seconds-deck = staticRustTool {
-          name = "ten-seconds-deck";
-          description = "Standalone Rust 10 Seconds game for the Deck";
-        };
-
         chiptune-deck = staticRustTool {
           name = "chiptune-deck";
           description = "Standalone Rust GME/Vorbis player for the Deck";
@@ -1023,18 +1018,6 @@ PATCH
           fi
           cmp games.tsv ${./deploy/menu/games.tsv}
           cmp palette.tsv ${./deploy/menu/palette.tsv}
-          touch $out
-        '';
-
-        ten-seconds-smoke = pkgs.runCommand "ten-seconds-smoke" { } ''
-          binary=${self.packages.${system}.ten-seconds-deck}/bin/ten-seconds-deck
-          ${pkgs.binutils}/bin/readelf -h "$binary" | grep -q 'Machine:.*ARM'
-          ! ${pkgs.binutils}/bin/readelf -l "$binary" | grep -q INTERP
-          ! ${pkgs.binutils}/bin/readelf -d "$binary" | grep -q NEEDED
-          status=0
-          output=$(${pkgs.qemu-user}/bin/qemu-arm "$binary" extra 2>&1) || status=$?
-          test "$status" -eq 2
-          test "$output" = 'usage: ten-seconds-deck'
           touch $out
         '';
 

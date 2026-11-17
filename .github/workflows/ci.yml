@@ -54,7 +54,6 @@ jobs:
             deploy/terminal/retro-terminal \
             deploy/widget/retro-deck \
             deploy/menu/fetch-covers \
-            deploy/menu/node-mode \
             deploy/menu/deck-keyboard-quirks \
             deploy/menu/nes-deck-keyboard.hotplug \
             deploy/menu/nes-deck.init \

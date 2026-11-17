@@ -205,9 +205,9 @@ fn read_form(source: &str) -> Result<Form> {
 }
 fn list<'a>(form: &'a Form, limit: usize, context: &str) -> Result<&'a [Form]> {
     match form {
-        Form::List(values) if !values.is_empty() && values.len() <= limit => Ok(values),
+        Form::List(values) if values.len() <= limit => Ok(values),
         _ => Err(invalid(format!(
-            "{context} must be a nonempty proper list of at most {limit} elements"
+            "{context} must be a proper list of at most {limit} elements"
         ))),
     }
 }
@@ -422,6 +422,9 @@ pub fn parse_appearance_override(source: &str) -> Result<Vec<(String, String)>> 
 }
 impl Catalog {
     pub fn games_tsv(&self) -> String {
+        if self.games.is_empty() {
+            return "id\ttitle\tsystem\trom\tcolor\n".into();
+        }
         let mut result = String::new();
         for game in &self.games {
             result.push_str(&format!(
@@ -597,7 +600,6 @@ mod tests {
                 ":background \"#123456\"",
                 ":background \"#123456\" :background \"#123456\"",
             ),
-            catalog_with_games(""),
             catalog_with_games(&format!("{GAME} {GAME}")),
             catalog_with_games(&format!(
                 "{GAME} {}",
@@ -613,6 +615,9 @@ mod tests {
     }
     #[test]
     fn game_count_and_order_are_preserved() {
+        let empty = parse_catalog(&catalog_with_games("")).unwrap();
+        assert!(empty.games.is_empty());
+        assert_eq!(empty.games_tsv(), "id\ttitle\tsystem\trom\tcolor\n");
         let games = (0..64)
             .map(|n| GAME.replace("example", &format!("game-{n}")))
             .collect::<Vec<_>>();
@@ -646,7 +651,7 @@ mod tests {
             "/mnt/data/nes-deck/games/doom/example.wad",
         );
         assert!(parse_catalog(&catalog_with_games(&deck)).is_ok());
-        for tail in ["ten-seconds", "doom/example.wad", "custom/app.bin"] {
+        for tail in ["app", "doom/example.wad", "custom/app.bin"] {
             let path = format!("/mnt/data/nes-deck/games/{tail}");
             assert!(
                 parse_catalog(&catalog_with_games(
@@ -802,7 +807,7 @@ mod tests {
     #[test]
     fn file_compilation_and_override_preserve_games() {
         let fixture = Fixture::new();
-        fs::write(fixture.path("source"), SOURCE).unwrap();
+        fs::write(fixture.path("source"), catalog_with_games(GAME)).unwrap();
         assert_eq!(fixture.compile().unwrap(), (1, 22));
         let games = fs::read(fixture.path("games")).unwrap();
         fs::write(

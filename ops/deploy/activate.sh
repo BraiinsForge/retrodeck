@@ -73,7 +73,7 @@ esac
 
 # Validate the complete payload before stopping a running service.
 for executable in \
-  nes-deck gb-deck zx-deck gba-deck doom-deck tamagotchi-deck ten-seconds-deck \
+  nes-deck gb-deck zx-deck gba-deck doom-deck tamagotchi-deck \
   chiptune-deck; do
   [ -x "$stage/nes-deck/$executable" ] || {
     echo "Staged executable is missing: $executable" >&2
@@ -160,14 +160,6 @@ printf '%s\n' "$ecl_result" | grep -q 'ecl-repl-smoke: 42' || {
   echo "Staged Common Lisp interpreter failed its smoke test" >&2
   exit 1
 }
-ten_seconds_status=0
-ten_seconds_output=$("$stage/nes-deck/ten-seconds-deck" extra 2>&1) || \
-  ten_seconds_status=$?
-[ "$ten_seconds_status" -eq 2 ] && \
-  [ "$ten_seconds_output" = "usage: ten-seconds-deck" ] || {
-  echo "Staged 10 Seconds entrypoint failed its usage smoke test" >&2
-  exit 1
-}
 chiptune_status=0
 chiptune_output=$("$stage/nes-deck/chiptune-deck" extra extra 2>&1) || \
   chiptune_status=$?
@@ -224,8 +216,7 @@ cp -p "$stage/nes-deck/zx-deck" "$base/zx-deck"
 cp -p "$stage/nes-deck/gba-deck" "$base/gba-deck"
 cp -p "$stage/nes-deck/doom-deck" "$base/doom-deck"
 cp -p "$stage/nes-deck/tamagotchi-deck" "$base/tamagotchi-deck"
-rm -f "$base/ten-seconds-deck"
-cp -p "$stage/nes-deck/ten-seconds-deck" "$base/ten-seconds-deck"
+rm -f "$base/ten-seconds-deck" "$base/menu/node-mode"
 rm -f "$base/chiptune-deck"
 cp -p "$stage/nes-deck/chiptune-deck" "$base/chiptune-deck"
 rm -rf "$base/lisp" "$base/uploader/lisp-libraries"
