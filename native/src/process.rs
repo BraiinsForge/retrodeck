@@ -1,4 +1,4 @@
-use crate::{fbdev, input, wayland};
+use crate::{fbdev, wayland};
 use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
@@ -15,7 +15,6 @@ use std::time::{Duration, Instant};
 const POLL_INTERVAL: Duration = Duration::from_millis(40);
 const TOUCH_HOLD: Duration = Duration::from_secs(2);
 const TERM_GRACE: Duration = Duration::from_secs(4);
-const TOUCH_RECONNECT: Duration = Duration::from_secs(1);
 const CONSOLE_FRAME_INTERVAL: Duration = Duration::from_millis(100);
 const KDGKBMODE: libc::c_ulong = 0x4b44;
 const KDSKBMODE: libc::c_ulong = 0x4b45;
@@ -166,27 +165,17 @@ struct ChildInteraction {
     touch_supervision: bool,
     mirror_console: bool,
     next_console_frame: Instant,
-    last_touch_attempt: Option<Instant>,
-    last_touch_error: String,
     hold: TouchHold,
 }
 
 impl ChildInteraction {
     fn new(touch_supervision: bool, mirror_console: bool) -> Self {
         let uses_wayland = wayland::size().is_some();
-        if !uses_wayland {
-            fbdev::close();
-            if !touch_supervision {
-                input::close_touch();
-            }
-        }
         Self {
             uses_wayland,
             touch_supervision,
             mirror_console: uses_wayland && mirror_console,
             next_console_frame: Instant::now(),
-            last_touch_attempt: None,
-            last_touch_error: String::new(),
             hold: TouchHold::new(),
         }
     }
@@ -211,8 +200,6 @@ impl ChildInteraction {
                     self.hold.update(report.down, report.x, report.y);
                 }
             }
-        } else if self.touch_supervision {
-            self.poll_evdev(timeout);
         } else {
             thread::sleep(timeout);
         }
@@ -233,39 +220,6 @@ impl ChildInteraction {
             StopRequest::Touch
         } else {
             StopRequest::None
-        }
-    }
-
-    fn poll_evdev(&mut self, timeout: Duration) {
-        let now = Instant::now();
-        let reconnect_due = self
-            .last_touch_attempt
-            .is_none_or(|last| now.duration_since(last) >= TOUCH_RECONNECT);
-        if !input::touch_open() && reconnect_due {
-            self.last_touch_attempt = Some(now);
-            if let Err(error) = input::open_touch()
-                && error != self.last_touch_error
-            {
-                eprintln!("retrodeck: {error}");
-                self.last_touch_error = error;
-            }
-        }
-        if input::touch_open() {
-            if let Err(error) = input::dispatch_touch(duration_ms(timeout)) {
-                eprintln!("retrodeck: {error}");
-                input::close_touch();
-                self.hold.reset();
-            }
-            let mut received_report = false;
-            while let Some(report) = input::next_touch() {
-                received_report = true;
-                self.hold.update(report.down, report.x, report.y);
-            }
-            if !received_report && let Some(report) = input::current_touch() {
-                self.hold.update(report.down, report.x, report.y);
-            }
-        } else {
-            thread::sleep(timeout);
         }
     }
 }
@@ -406,7 +360,7 @@ pub fn run_child(
 ) -> ChildResult {
     let mut interaction = ChildInteraction::new(touch_supervision, mirror_console);
     let widget_child = widget_child_requested(environment);
-    if widget_child && !interaction.uses_wayland {
+    if !interaction.uses_wayland {
         return ChildResult {
             error: Some("BMC widget launch requires an open dashboard widget".to_owned()),
             ..ChildResult::default()
@@ -415,7 +369,7 @@ pub fn run_child(
     if widget_child {
         interaction.yield_widget_to_child();
     }
-    let tty = TtySnapshot::capture();
+    let tty = mirror_console.then(TtySnapshot::capture);
     eprintln!("retrodeck: launching {label}");
     let result = spawn_and_supervise(
         executable,
@@ -426,7 +380,9 @@ pub fn run_child(
         POLL_INTERVAL,
         TERM_GRACE,
     );
-    tty.restore();
+    if let Some(tty) = tty {
+        tty.restore();
+    }
     if widget_child {
         // Discard the replaced connection. Dashboard recovery opens a fresh
         // surface with the same BMC_WIDGET_KEY after the child has exited.
@@ -612,8 +568,6 @@ mod tests {
             touch_supervision: true,
             mirror_console: true,
             next_console_frame: Instant::now(),
-            last_touch_attempt: None,
-            last_touch_error: String::new(),
             hold: TouchHold::new(),
         };
         interaction.hold.update(true, 10, 10);

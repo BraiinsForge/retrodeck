@@ -20,7 +20,6 @@ Install these files and build outputs without changing their basenames:
 | `deck-menu-launcher` | `/mnt/data/nes-deck/menu/deck-menu-launcher` |
 | `deck-keyboard-quirks` | `/usr/sbin/deck-keyboard-quirks` |
 | `nes-deck-keyboard.hotplug` | `/etc/hotplug.d/usb/90-nes-deck-keyboard` |
-| `nes-deck.init` | `/etc/init.d/nes-deck` |
 | `nes-deck-swap.init` | `/etc/init.d/nes-deck-swap` |
 
 The separate uploader bundle installs `nes-deck-uploader.init` as
@@ -40,8 +39,7 @@ Native children inherit those values, use the same configured scene, and return
 to the dashboard after exit. Existing configuration and instance IDs are
 preserved; the first edit creates `config.json.retro-deck.bak` beside the config.
 
-Select `--presentation stock-bmc` (the default) for the stock compositor, or
-`--presentation framebuffer` for a Deck without BMC. See
+The deployment always uses the stock BMC compositor. See
 [BUILD.md](../../BUILD.md#stock-bmc-installation) for prerequisites.
 
 The BMC installation also enables a private 64 MiB swapfile at
@@ -84,10 +82,8 @@ live under `/mnt/data/nes-deck/state`. A bounded persistent launcher log is kept
 at `/mnt/data/nes-deck/log/deck-menu.log`.
 The native menu appends child start, exit-status, and signal details there;
 launcher milestones are also sent to logd.
-The launcher disables the Linux console's ten-minute blank timer at each boot,
-and the native menu explicitly unblanks fb0 whenever it reopens the display.
-Every managed child return also hides the Linux console cursor and keeps
-console blanking disabled, including after the framebuffer terminal exits.
+The dashboard and its children use the managed BMC Wayland compositor. The
+launcher does not access Linux framebuffer devices or disable console blanking.
 When the uploader catalog is present, the launcher combines it with the
 generated repository catalog and asks `deck-menu --validate-manifest` to
 validate the complete file and every ROM before using it. An invalid upload

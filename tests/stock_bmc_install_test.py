@@ -288,11 +288,11 @@ printf '%s\\n' "$MENU" "$COMPILER" "$CREDITS" "$SETTINGS_ICON" "$FALLBACK_PALETT
 
     def health(self):
         source = (REPO / "ops/check-deck.sh").read_text()
-        source = source.split("# Presentation state", 1)[1].split("# End presentation check.", 1)[0]
-        source = source[source.index("dashboard_expected="):]
+        source = source.split("\n# Presentation state: managed BMC compositor.\n", 1)[1]
+        source = source.split("\n# End presentation check.", 1)[0]
         for path in ("/mnt/data/", "/run/current-profile/", "/etc/"):
             source = source.replace(path, str(self.root) + path)
-        result = subprocess.run(["sh", "-c", 'failures=0; report() { printf "%s %s\\n" "$1" "$2"; };\n' + source + '\nexit "$failures"'], capture_output=True, text=True)
+        result = subprocess.run(["sh", "-c", 'failures=0; dashboard_expected=1; report() { printf "%s %s\\n" "$1" "$2"; };\n' + source + '\nexit "$failures"'], capture_output=True, text=True)
         return result
 
     def test_stock_health_requires_profile_and_configured_instance(self):

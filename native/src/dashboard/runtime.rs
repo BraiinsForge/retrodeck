@@ -3,7 +3,7 @@ use super::{
     app::{App, Cue, Effect, Event, Pending, View},
     cli, credits, menu, policy, settings, ui, wifi,
 };
-use crate::{audio, canvas, controls, fbdev, input, network, polling, process, wayland};
+use crate::{audio, canvas, controls, network, polling, process, wayland};
 use std::{
     ffi::OsString,
     path::{Path, PathBuf},
@@ -46,20 +46,13 @@ impl Paths {
         p
     }
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Backend {
-    Widget,
-    Fbdev,
-}
 /// Ownership flags are set immediately after acquiring each process-global native resource.
 /// Drop unwinds partial startup and runtime failures as well as normal shutdown.
 pub struct Runtime {
     paths: Paths,
     launch_config: policy::LaunchConfig,
     display: Option<PathBuf>,
-    backend: Option<Backend>,
     presentation_owned: bool,
-    touch_owned: bool,
     controls_owned: bool,
     audio_owned: bool,
     sound_active: bool,
@@ -150,9 +143,7 @@ impl Runtime {
             paths: Paths::from_options(options),
             launch_config: options.launch_config(),
             display,
-            backend: None,
             presentation_owned: false,
-            touch_owned: false,
             controls_owned: false,
             audio_owned: false,
             sound_active: false,
@@ -165,37 +156,16 @@ impl Runtime {
             now: 0,
         })
     }
-    fn widget(&self) -> bool {
-        self.backend == Some(Backend::Widget)
-    }
     fn open_presentation(&mut self) -> Result<(), String> {
-        let widget_required =
-            std::env::var_os("RETRO_DECK_PRESENTATION").is_some_and(|mode| mode == "widget");
-        if let Some(display) = &self.display {
-            if wayland::size().is_some() {
-                self.backend = Some(Backend::Widget);
-                return Ok(());
-            }
-            match wayland::open_widget_at(display) {
-                Ok(()) => {
-                    self.backend = Some(Backend::Widget);
-                    self.presentation_owned = true;
-                    return Ok(());
-                }
-                Err(error) if widget_required => return Err(error),
-                Err(error) => {
-                    eprintln!("retrodeck: {error}; Wayland widget unavailable; trying fbdev")
-                }
-            }
+        if wayland::size().is_some() {
+            return Ok(());
         }
-        if widget_required {
-            return Err("WAYLAND_DISPLAY is required for widget presentation".into());
-        }
-        if fbdev::size().is_none() {
-            fbdev::open()?;
-            self.presentation_owned = true;
-        }
-        self.backend = Some(Backend::Fbdev);
+        let display = self
+            .display
+            .as_deref()
+            .ok_or("WAYLAND_DISPLAY is required for the dashboard")?;
+        wayland::open_widget_at(display)?;
+        self.presentation_owned = true;
         Ok(())
     }
     fn initialize(&mut self, app: &mut App) -> Result<(), String> {
@@ -213,11 +183,6 @@ impl Runtime {
         };
         app.settings.keymap = settings::load_keymap(&self.paths.keymap)?;
         self.open_presentation()?;
-        if !self.widget() {
-            input::open_touch()?;
-            self.touch_owned = true;
-            app.touch_connected = true;
-        }
         self.controls_owned = true;
         controls::scan()?;
         app.last_scan = Some(self.now);
@@ -264,13 +229,7 @@ impl Runtime {
         Ok(())
     }
     fn present(&self) -> Result<(), String> {
-        canvas::with_pixels(|pixels| {
-            if self.widget() {
-                wayland::present_rgba(pixels)
-            } else {
-                fbdev::present_rgba(pixels)
-            }
-        })
+        canvas::with_pixels(wayland::present_rgba)
     }
     fn cue(&mut self, cue: Cue, volume: u8) -> bool {
         if volume == 0 {
@@ -315,19 +274,10 @@ impl Runtime {
             self.controls_owned = false;
             controls::close();
         }
-        if self.touch_owned {
-            self.touch_owned = false;
-            input::close_touch();
-        }
         if self.presentation_owned {
             self.presentation_owned = false;
-            if self.widget() {
-                wayland::close();
-            } else {
-                fbdev::close();
-            }
+            wayland::close();
         }
-        self.backend = None;
         self.layout = None;
         self.running = false;
     }
@@ -384,13 +334,7 @@ impl Runtime {
                 self.controls_owned = false;
                 None
             }
-            Effect::ReconnectTouch => match input::open_touch() {
-                Ok(()) => {
-                    self.touch_owned = true;
-                    Some(Event::TouchReconnected)
-                }
-                Err(_) => None,
-            },
+            Effect::ReconnectTouch => None,
             Effect::OpenPresentation => {
                 self.open_presentation()?;
                 Some(Event::PresentationOpened)
@@ -429,7 +373,7 @@ impl Runtime {
                     &game,
                     app.settings.volume,
                     &app.settings.keymap,
-                    self.widget(),
+                    true,
                     Some(&self.paths.volume),
                     &self.launch_config,
                 );
@@ -441,9 +385,6 @@ impl Runtime {
                 };
                 let plan = &active.plan;
                 let touch_disconnected = !plan.touch_supervision;
-                if !self.widget() && !self.presentation_owned {
-                    return Err("Dashboard cannot launch with borrowed fbdev presentation".into());
-                }
                 let arguments: Vec<_> = plan.arguments.iter().map(OsString::from).collect();
                 let environment: Vec<_> = plan
                     .environment
@@ -511,21 +452,17 @@ impl Runtime {
             app,
             Event::Begin {
                 now: self.now,
-                wayland: self.widget(),
+                wayland: true,
                 rescan,
             },
             &mut outcome,
         )?;
-        let poll = polling::dispatch(self.widget(), app.poll_timeout(now_ms()))?;
+        let poll = polling::dispatch(app.poll_timeout(now_ms()))?;
         self.now = now_ms();
         let reports: Vec<_> = (0..poll.touch_count)
             .map(|_| {
-                if self.widget() {
-                    wayland::next_touch()
-                } else {
-                    input::next_touch()
-                }
-                .ok_or_else(|| "Dashboard native touch queue ended early".to_owned())
+                wayland::next_touch()
+                    .ok_or_else(|| "Dashboard Wayland touch queue ended early".to_owned())
             })
             .collect::<Result<_, _>>()?;
         let mut control_reports = Vec::new();
@@ -545,13 +482,6 @@ impl Runtime {
         self.rescan |= poll.rescan;
         self.step(app, Event::Tick(self.now), &mut outcome)?;
         if poll.ready {
-            if poll.touch_lost {
-                if self.touch_owned {
-                    input::close_touch();
-                    self.touch_owned = false;
-                }
-                self.step(app, Event::TouchLost, &mut outcome)?;
-            }
             let (gamepad, keyboard) = super::app::collect_actions(&control_reports);
             self.step(
                 app,
@@ -582,10 +512,7 @@ impl Runtime {
                 }
             }
         }
-        if poll.shutdown
-            || process::shutdown_requested()
-            || self.widget() && wayland::shutdown_requested()
-        {
+        if poll.shutdown || process::shutdown_requested() || wayland::shutdown_requested() {
             self.shutdown();
         }
         Ok(())

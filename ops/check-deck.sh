@@ -90,8 +90,7 @@ else
   failures=$((failures + 1))
 fi
 
-# Presentation state is written by deployment, never inferred from a fork.
-dashboard_expected=1
+# Presentation state: managed BMC compositor.
 presentation_mode=$(cat /mnt/data/nes-deck/presentation 2>/dev/null || :)
 case "$presentation_mode" in
   stock-bmc)
@@ -129,15 +128,6 @@ case "$presentation_mode" in
       fi
     else
       report WIDGET-KEY 'CONFIGURED INSTANCE MISSING OR INVALID'
-      failures=$((failures + 1))
-    fi
-    ;;
-  framebuffer)
-    presentation='direct framebuffer'
-    if /etc/init.d/nes-deck status >/dev/null 2>&1; then
-      report PRESENTATION "$presentation service running"
-    else
-      report PRESENTATION "$presentation service NOT RUNNING"
       failures=$((failures + 1))
     fi
     ;;

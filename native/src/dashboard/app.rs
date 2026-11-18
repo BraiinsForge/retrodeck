@@ -1,6 +1,6 @@
 //! Deterministic dashboard state transitions. Native I/O belongs in `runtime`.
 use super::{credits, menu, policy, settings, wifi};
-use crate::{controls, input::TouchReport, network::NetworkStatus, process::ChildResult};
+use crate::{controls, network::NetworkStatus, process::ChildResult, wayland::TouchReport};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum View {

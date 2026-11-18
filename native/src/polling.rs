@@ -1,4 +1,4 @@
-use crate::{input, process, wayland};
+use crate::{process, wayland};
 use rustix::event::{PollFd, Timespec, poll};
 use rustix::time::{ClockId, clock_gettime};
 use std::time::{Duration, Instant};
@@ -21,12 +21,8 @@ pub fn monotonic_nanoseconds() -> u64 {
     now.tv_sec as u64 * 1_000_000_000 + now.tv_nsec as u64
 }
 
-pub fn dispatch(wayland_backend: bool, timeout_ms: u32) -> Result<InputDispatch, String> {
-    let mut dispatch = if wayland_backend {
-        wayland::dispatch_inputs(timeout_ms)?
-    } else {
-        input::dispatch_inputs(timeout_ms)?
-    };
+pub fn dispatch(timeout_ms: u32) -> Result<InputDispatch, String> {
+    let mut dispatch = wayland::dispatch_inputs(timeout_ms)?;
     dispatch.shutdown |= process::shutdown_requested();
     Ok(dispatch)
 }
@@ -56,7 +52,6 @@ pub(crate) fn wait_for(descriptors: &mut [PollFd<'_>], timeout: Duration) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::controls;
     use rustix::event::PollFlags;
     use std::io::Write;
     use std::os::fd::AsFd;
@@ -71,12 +66,5 @@ mod tests {
         let mut descriptors = [PollFd::from_borrowed_fd(reader.as_fd(), PollFlags::IN)];
         assert_eq!(wait(&mut descriptors, 0).unwrap(), 1);
         assert!(descriptors[0].revents().contains(PollFlags::IN));
-    }
-
-    #[test]
-    fn closed_fbdev_inputs_form_an_empty_snapshot() {
-        controls::close();
-        input::close_touch();
-        assert_eq!(dispatch(false, 0).unwrap(), InputDispatch::default());
     }
 }

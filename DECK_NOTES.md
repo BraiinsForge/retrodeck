@@ -36,24 +36,19 @@ details when they are needed for archaeology.
   Each physical row therefore includes 80 padding bytes. Code must use the
   reported stride, not `xres * bytes-per-pixel`.
 - The panel is portrait hardware used as a 1280 by 480 logical landscape
-  display. The fbdev fallback rotates pixels in software.
+  display. The terminal mirror rotates its read-only scanout in software.
 - The touchscreen already reports logical landscape coordinates from X
   0 through 1279 and Y 0 through 479. No touch rotation is needed.
 - Native content uses a 16-pixel safe inset for the rounded panel corners.
   fbterm uses a 1248 by 448 viewport for the same reason.
 - On BMC, the dashboard mirrors fbterm's rotated framebuffer into its existing
   Wayland widget surface; fbterm keeps tty1 keyboard input and its fixed font.
-- With BMC installed, the dashboard is a full-screen swipeable widget. Games
-  use a full-screen black layer-shell surface plus a centered game surface.
-  Those temporary surfaces disappear when the game exits, restoring scene
-  swiping.
+- The dashboard is a fullscreen widget. Games attach to the same keyed BMC
+  widget instance. The dashboard reconnects after the game exits.
 - Emulators expand source pixels to the integer-scaled layer buffer before
   submitting it. `patches/bmc-nearest-neighbor-filter.patch` also selects
   nearest-neighbor minification and magnification in Smithay. Apply it with
   `ops/bmc/apply-local-patches.sh` before building the BMC core.
-- The menu disables Linux console blanking whenever it starts and unblanks the
-  framebuffer after a child returns. The display should never time out while
-  Retro Deck is active.
 
 ## Dashboard and programs
 
@@ -93,9 +88,8 @@ details when they are needed for archaeology.
   320 by 200; nothing widescreen is available without changing DOOM's own
   resolution assumptions.
 - DOOM's own framebuffer, rotation, and BGR565 patches are unused. Its
-  platform layer lives in `native/doom/` and hands finished frames to the
-  same scaler and presentation paths as the emulators, so it works on the
-  BMC compositor as well as the framebuffer fallback.
+  Rust host hands finished frames to the
+  same Wayland scaler and presentation path as the emulators.
 - DOOM audio is one 44.1 kHz stereo stream: sound effects are point-resampled
   from their original 11 kHz DMX lumps and summed on top of the emulated OPL
   music.

@@ -1,9 +1,7 @@
 //! Standalone chiptune player, using the shared GME/Vorbis and OSS mechanisms.
 mod render;
 
-use crate::{
-    audio, canvas, chiptune, controls, fbdev, input, polling, process, state_file, wayland,
-};
+use crate::{audio, canvas, chiptune, controls, polling, process, state_file, wayland};
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -399,7 +397,6 @@ fn report_commands(report: controls::ControlReport) -> Vec<Command> {
 }
 
 struct Session {
-    widget: bool,
     io_owned: bool,
     audio_owned: bool,
     volume: i32,
@@ -420,12 +417,7 @@ impl Drop for Session {
             return;
         }
         controls::close();
-        input::close_touch();
-        if self.widget {
-            wayland::close();
-        } else {
-            fbdev::close();
-        }
+        wayland::close();
     }
 }
 
@@ -552,30 +544,21 @@ impl Session {
     }
 
     fn present(&mut self) -> Result<(), String> {
-        if self.widget && wayland::size().is_none() {
+        if wayland::size().is_none() {
             wayland::open_game_widget()?;
         }
-        canvas::with_pixels(|pixels| {
-            if self.widget {
-                wayland::present_rgba(pixels)
-            } else {
-                fbdev::present_rgba(pixels)
-            }
-        })
+        canvas::with_pixels(wayland::present_rgba)
     }
 }
 
 pub fn run(directory: &Path) -> Result<(), String> {
     process::install_signal_handlers()?;
-    let widget = std::env::var_os("RETRO_DECK_PRESENTATION").is_some_and(|value| value == "widget")
-        && std::env::var_os("WAYLAND_DISPLAY").is_some_and(|value| !value.is_empty());
     let volume =
         volume(std::env::var_os("RETRO_DECK_VOLUME_PERCENT").as_deref()).unwrap_or_else(|| {
             eprintln!("chiptune-deck: volume must be an integer from 0 through 100; playing muted");
             0
         });
     let mut session = Session {
-        widget,
         io_owned: true,
         audio_owned: false,
         volume,
@@ -586,10 +569,7 @@ pub fn run(directory: &Path) -> Result<(), String> {
         next_render: 0,
         dirty: true,
     };
-    if !widget {
-        fbdev::open()?;
-    }
-    input::open_touch()?;
+    wayland::open_game_widget()?;
     let gamepads = controls::scan_gamepads().unwrap_or_else(|error| {
         eprintln!("chiptune-deck: controller input unavailable: {error}");
         0
@@ -630,19 +610,16 @@ pub fn run(directory: &Path) -> Result<(), String> {
             session.present()?;
             session.next_render = now.saturating_add(RENDER_NS);
         }
-        if widget {
-            wayland::dispatch(0)?;
-            while wayland::next_touch().is_some() {}
-            if wayland::shutdown_requested() {
-                break;
-            }
-        }
         let timeout = if decoded && state.pending.is_none() {
             0
         } else {
             8
         };
-        let poll = polling::dispatch(false, timeout)?;
+        let poll = polling::dispatch(timeout)?;
+        if poll.touch_lost {
+            return Err("Chiptune Wayland connection lost".to_owned());
+        }
+        session.dirty |= poll.refresh;
         let mut commands = Vec::new();
         for _ in 0..poll.control_count {
             let report = controls::next_report()
@@ -654,8 +631,8 @@ pub fn run(directory: &Path) -> Result<(), String> {
             }
         }
         for _ in 0..poll.touch_count {
-            let touch =
-                input::next_touch().ok_or_else(|| "Chiptune touch queue ended early".to_owned())?;
+            let touch = wayland::next_touch()
+                .ok_or_else(|| "Chiptune Wayland touch queue ended early".to_owned())?;
             if let Some(command) = touch
                 .pressed
                 .then(|| touch_command(touch.x, touch.y))
@@ -665,9 +642,6 @@ pub fn run(directory: &Path) -> Result<(), String> {
                     commands.push(command);
                 }
             }
-        }
-        if poll.touch_lost {
-            return Err("Chiptune touchscreen disconnected".to_owned());
         }
         if poll.shutdown || session.apply(&mut state, &commands) {
             break;
@@ -781,7 +755,6 @@ mod tests {
         );
         assert!(state.open_index(0));
         let mut session = Session {
-            widget: false,
             io_owned: false,
             audio_owned: false,
             volume: 50,
@@ -832,7 +805,6 @@ mod tests {
         let mut state = PlayerState::new(vec![path], 1, String::new());
         assert!(state.open_index(0));
         let mut session = Session {
-            widget: false,
             io_owned: false,
             audio_owned: true,
             volume: 50,
@@ -868,7 +840,6 @@ mod tests {
         assert_eq!(state.metadata.as_ref().unwrap().length_ms, 50851);
         assert!(!state.switch_track(1));
         let mut session = Session {
-            widget: false,
             io_owned: false,
             audio_owned: false,
             volume: 0,

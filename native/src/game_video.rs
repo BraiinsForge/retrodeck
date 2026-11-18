@@ -1,68 +1,12 @@
-//! Emulator video: integer nearest-neighbour scaling into the rotated Deck
-//! framebuffer, the normal BMC widget surface, or a headless test target.
+//! Emulator video via the keyed BMC widget surface, with a headless test target.
 
-use crate::fbdev_abi::{query_geometry, validate_rgb565_geometry};
 use std::ffi::c_void;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 const LOGICAL_WIDTH: usize = 1280;
 const LOGICAL_HEIGHT: usize = 480;
-const SAFE_INSET: usize = 16;
-
-struct Layout {
-    x: usize,
-    y: usize,
-    width: usize,
-    height: usize,
-    scale: usize,
-}
-
-fn compute_scaled_layout(source_width: usize, source_height: usize) -> Option<Layout> {
-    let usable_width = LOGICAL_WIDTH - 2 * SAFE_INSET;
-    let usable_height = LOGICAL_HEIGHT - 2 * SAFE_INSET;
-    if source_width == 0
-        || source_height == 0
-        || source_width > usable_width
-        || source_height > usable_height
-    {
-        return None;
-    }
-    let scale = (usable_width / source_width).min(usable_height / source_height);
-    if scale < 1 {
-        return None;
-    }
-    let width = source_width * scale;
-    let height = source_height * scale;
-    let x = (LOGICAL_WIDTH - width) / 2;
-    let y = (LOGICAL_HEIGHT - height) / 2;
-    (x >= SAFE_INSET
-        && y >= SAFE_INSET
-        && x + width <= LOGICAL_WIDTH - SAFE_INSET
-        && y + height <= LOGICAL_HEIGHT - SAFE_INSET)
-        .then_some(Layout {
-            x,
-            y,
-            width,
-            height,
-            scale,
-        })
-}
-
-struct FbTarget {
-    _fd: OwnedFd,
-    memory: *mut u16,
-    map_bytes: usize,
-    row_words: usize,
-    staging: Vec<u16>,
-    exit_hint: bool,
-}
-
-unsafe impl Send for FbTarget {}
-
 enum Target {
-    Fb(FbTarget),
     WidgetLazy,
     Widget { converted: Vec<u32> },
     Headless { frame: Vec<u16>, hash: u64 },
@@ -70,7 +14,6 @@ enum Target {
 
 struct Video {
     target: Target,
-    last_source: (usize, usize),
     exit_hint: bool,
     exit_hold_started: Option<Instant>,
 }
@@ -82,155 +25,6 @@ fn rgb888_to_565(color: u32) -> u16 {
     let green = (color >> 8) & 0xff;
     let blue = color & 0xff;
     (((red & 0xf8) << 8) | ((green & 0xfc) << 3) | (blue >> 3)) as u16
-}
-
-fn open_fb() -> Result<FbTarget, String> {
-    let raw = unsafe { libc::open(c"/dev/fb0".as_ptr(), libc::O_RDWR | libc::O_CLOEXEC) };
-    if raw < 0 {
-        return Err(format!(
-            "cannot open /dev/fb0: {}",
-            std::io::Error::last_os_error()
-        ));
-    }
-    let fd = unsafe { OwnedFd::from_raw_fd(raw) };
-    let (var, fix) = query_geometry(fd.as_raw_fd())
-        .map_err(|error| format!("cannot query /dev/fb0: {error}"))?;
-    let geometry = validate_rgb565_geometry(&var, &fix).map_err(|_| {
-        "unsupported framebuffer; expected 600x1280 RGB565 with a valid stride".to_owned()
-    })?;
-    let map_bytes = geometry.map_size;
-    let line_length = geometry.stride;
-    let memory = unsafe {
-        libc::mmap(
-            std::ptr::null_mut(),
-            map_bytes,
-            libc::PROT_READ | libc::PROT_WRITE,
-            libc::MAP_SHARED,
-            fd.as_raw_fd(),
-            0,
-        )
-    };
-    if memory == libc::MAP_FAILED {
-        return Err(format!(
-            "cannot map /dev/fb0: {}",
-            std::io::Error::last_os_error()
-        ));
-    }
-    unsafe { std::ptr::write_bytes(memory.cast::<u8>(), 0, map_bytes) };
-    Ok(FbTarget {
-        _fd: fd,
-        memory: memory.cast(),
-        map_bytes,
-        row_words: line_length / 2,
-        staging: vec![0_u16; map_bytes / 2],
-        exit_hint: std::env::var("RETRO_DECK_EXIT_HINT").is_ok_and(|value| value == "1"),
-    })
-}
-
-impl Drop for FbTarget {
-    fn drop(&mut self) {
-        unsafe { libc::munmap(self.memory.cast::<c_void>(), self.map_bytes) };
-    }
-}
-
-fn draw_exit_hint(memory: *mut u16, row_words: usize) {
-    if row_words < 600 {
-        return;
-    }
-    let fill = |logical_x: isize, logical_y: isize, size: isize, color: u16| {
-        for y in logical_y..logical_y + size {
-            for x in logical_x..logical_x + size {
-                if (0..1280).contains(&x) && (0..480).contains(&y) {
-                    let row = 1279 - x as usize;
-                    unsafe {
-                        *memory.add(row * row_words + y as usize) = color;
-                    }
-                }
-            }
-        }
-    };
-    for step in 0..9_isize {
-        fill(20 + step * 4 - 2, 20 + step * 4 - 2, 8, 0x0000);
-        fill(20 + (8 - step) * 4 - 2, 20 + step * 4 - 2, 8, 0x0000);
-    }
-    for step in 0..9_isize {
-        fill(20 + step * 4, 20 + step * 4, 4, 0xffff);
-        fill(20 + (8 - step) * 4, 20 + step * 4, 4, 0xffff);
-    }
-}
-
-impl FbTarget {
-    fn begin_frame(&mut self, width: usize, height: usize, last: &mut (usize, usize)) {
-        if *last != (width, height) {
-            self.staging.fill(0);
-            unsafe { std::ptr::write_bytes(self.memory.cast::<u8>(), 0, self.map_bytes) };
-            *last = (width, height);
-        }
-    }
-
-    fn publish(&mut self, layout: &Layout) {
-        let first_physical_row = LOGICAL_WIDTH - layout.x - layout.width;
-        for row in 0..layout.width {
-            let offset = (first_physical_row + row) * self.row_words + layout.y;
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    self.staging.as_ptr().add(offset),
-                    self.memory.add(offset),
-                    layout.height,
-                );
-            }
-        }
-        if self.exit_hint {
-            draw_exit_hint(self.memory, self.row_words);
-        }
-    }
-
-    fn draw_rgb565(&mut self, data: *const c_void, layout: &Layout, height: usize, pitch: usize) {
-        let source = data.cast::<u8>();
-        for source_x in 0..layout.width / layout.scale {
-            let first_physical_row = 1279 - layout.x - source_x * layout.scale;
-            for duplicate in 0..layout.scale {
-                let row = first_physical_row - duplicate;
-                let mut offset = row * self.row_words + layout.y;
-                for source_y in 0..height {
-                    let pixel = unsafe {
-                        source
-                            .add(source_y * pitch + source_x * 2)
-                            .cast::<u16>()
-                            .read_unaligned()
-                    };
-                    for _ in 0..layout.scale {
-                        self.staging[offset] = pixel;
-                        offset += 1;
-                    }
-                }
-            }
-        }
-    }
-
-    fn draw_xrgb(&mut self, data: *const c_void, layout: &Layout, height: usize, pitch: usize) {
-        let source = data.cast::<u8>();
-        for source_x in 0..layout.width / layout.scale {
-            let first_physical_row = 1279 - layout.x - source_x * layout.scale;
-            for source_y in 0..height {
-                let color = unsafe {
-                    source
-                        .add(source_y * pitch + source_x * 4)
-                        .cast::<u32>()
-                        .read_unaligned()
-                };
-                let pixel = rgb888_to_565(color);
-                for duplicate in 0..layout.scale {
-                    let row = first_physical_row - duplicate;
-                    let mut offset = row * self.row_words + layout.y + source_y * layout.scale;
-                    for _ in 0..layout.scale {
-                        self.staging[offset] = pixel;
-                        offset += 1;
-                    }
-                }
-            }
-        }
-    }
 }
 
 fn convert_to_xrgb(
@@ -271,14 +65,11 @@ pub fn open(headless: bool) -> Result<(), String> {
             frame: Vec::new(),
             hash: 0xcbf2_9ce4_8422_2325,
         }
-    } else if std::env::var("RETRO_DECK_PRESENTATION").is_ok_and(|value| value == "widget") {
-        Target::WidgetLazy
     } else {
-        Target::Fb(open_fb()?)
+        Target::WidgetLazy
     };
     *VIDEO.lock().expect("video lock") = Some(Video {
         target,
-        last_source: (0, 0),
         exit_hint,
         exit_hold_started: None,
     });
@@ -362,18 +153,6 @@ pub unsafe fn present(
         Target::Widget { converted } => {
             convert_to_xrgb(data, width, height, pitch, rgb565, converted);
             crate::wayland::present_game_xrgb(converted, width, height)
-        }
-        Target::Fb(fb) => {
-            let layout = compute_scaled_layout(width, height)
-                .ok_or_else(|| "video frame does not fit the Deck safe area".to_owned())?;
-            fb.begin_frame(width, height, &mut video.last_source);
-            if rgb565 {
-                fb.draw_rgb565(data, &layout, height, pitch);
-            } else {
-                fb.draw_xrgb(data, &layout, height, pitch);
-            }
-            fb.publish(&layout);
-            Ok(())
         }
     }
 }
@@ -545,32 +324,6 @@ impl FrameClock {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn matches_the_cpp_layout_fixture() {
-        let cases = [
-            (160, 144, 3, 400, 24, 480, 432),
-            (256, 224, 2, 384, 16, 512, 448),
-            (288, 216, 2, 352, 24, 576, 432),
-            (64, 32, 14, 192, 16, 896, 448),
-            (128, 64, 7, 192, 16, 896, 448),
-        ];
-        for (sw, sh, scale, x, y, w, h) in cases {
-            let layout = compute_scaled_layout(sw, sh).unwrap();
-            assert_eq!(
-                (
-                    layout.scale,
-                    layout.x,
-                    layout.y,
-                    layout.width,
-                    layout.height
-                ),
-                (scale, x, y, w, h)
-            );
-        }
-        assert!(compute_scaled_layout(2000, 1000).is_none());
-        assert!(compute_scaled_layout(0, 100).is_none());
-    }
 
     #[test]
     fn converts_colors_with_truncation() {

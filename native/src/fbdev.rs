@@ -1,44 +1,17 @@
+//! Read-only scanout capture for the fbterm Wayland mirror.
+
 use crate::canvas;
-#[cfg(test)]
-use crate::fbdev_abi::FbBitfield;
-use crate::fbdev_abi::{FB_BLANK_UNBLANK, FBIOBLANK, FbFixedScreenInfo, FbVariableScreenInfo};
-#[cfg(test)]
-use crate::fbdev_abi::{FB_TYPE_PACKED_PIXELS, FB_VISUAL_TRUECOLOR};
+use crate::fbdev_abi::{FbFixedScreenInfo, FbVariableScreenInfo, Geometry, query_geometry};
 use rustix::mm::{MapFlags, ProtFlags, mmap, munmap};
-use std::cell::RefCell;
-use std::ffi::{c_int, c_ulong, c_void};
-use std::fs::{File, OpenOptions};
-use std::io;
+use std::ffi::c_void;
+use std::fs::File;
 use std::os::fd::AsRawFd;
-use std::path::Path;
 use std::ptr;
 
 const LOGICAL_WIDTH: usize = canvas::WIDTH as usize;
 const LOGICAL_HEIGHT: usize = canvas::HEIGHT as usize;
 const PHYSICAL_WIDTH: usize = 600;
 const PHYSICAL_HEIGHT: usize = 1280;
-const EINVAL: i32 = 22;
-const ENOTTY: i32 = 25;
-
-unsafe extern "C" {
-    fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
-}
-
-use crate::fbdev_abi::{Geometry, query_geometry};
-
-fn validate_geometry(
-    variable: &FbVariableScreenInfo,
-    fixed: &FbFixedScreenInfo,
-) -> Result<Geometry, String> {
-    let geometry = crate::fbdev_abi::validate_rgb565_geometry(variable, fixed)?;
-    // The dashboard's scanout path also passes strides through a C int.
-    if fixed.line_length > c_int::MAX as u32 {
-        return Err(
-            "unsupported framebuffer; expected 600x1280 RGB565 with a valid stride".to_owned(),
-        );
-    }
-    Ok(geometry)
-}
 
 fn validate_console_geometry(
     variable: &FbVariableScreenInfo,
@@ -73,17 +46,12 @@ struct Mapping {
 }
 
 impl Mapping {
-    fn new(
-        file: &File,
-        size: usize,
-        protections: ProtFlags,
-        context: &str,
-    ) -> Result<Self, String> {
+    fn new(file: &File, size: usize, context: &str) -> Result<Self, String> {
         let pointer = unsafe {
             mmap(
                 ptr::null_mut(),
                 size,
-                protections,
+                ProtFlags::READ,
                 MapFlags::SHARED,
                 file,
                 0,
@@ -101,121 +69,6 @@ impl Drop for Mapping {
         }
     }
 }
-
-struct Framebuffer {
-    _file: File,
-    mapping: Mapping,
-    stride: usize,
-    pixels: Vec<u16>,
-    frame: Vec<u16>,
-}
-
-impl Framebuffer {
-    fn open(path: &Path) -> Result<Self, String> {
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path)
-            .map_err(|error| format!("cannot open {}: {error}", path.display()))?;
-        let (variable, fixed) = query_geometry(file.as_raw_fd())
-            .map_err(|error| format!("cannot query framebuffer geometry: {error}"))?;
-        let geometry = validate_geometry(&variable, &fixed)?;
-        let mapping = Mapping::new(
-            &file,
-            geometry.map_size,
-            ProtFlags::READ | ProtFlags::WRITE,
-            "cannot map /dev/fb0",
-        )?;
-        let blank_result = unsafe { ioctl(file.as_raw_fd(), FBIOBLANK, FB_BLANK_UNBLANK) };
-        if blank_result != 0 {
-            let error = io::Error::last_os_error();
-            if !matches!(error.raw_os_error(), Some(EINVAL | ENOTTY)) {
-                eprintln!("retrodeck: warning: cannot unblank framebuffer: {error}");
-            }
-        }
-        Ok(Self {
-            _file: file,
-            mapping,
-            stride: geometry.stride,
-            pixels: vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT],
-            frame: vec![0; geometry.map_size / 2],
-        })
-    }
-
-    fn present_rgba(&mut self, rgba: &[u8]) -> Result<(), String> {
-        if !convert_rgba_to_rgb565(rgba, &mut self.pixels) {
-            return Err("native canvas dimensions are invalid".to_owned());
-        }
-        self.publish()
-    }
-
-    fn publish(&mut self) -> Result<(), String> {
-        let row_words = self.stride / 2;
-        if !stage_canvas_for_scanout(&self.pixels, row_words, &mut self.frame) {
-            return Err("framebuffer staging buffer is unavailable".to_owned());
-        }
-        let active_row_bytes = LOGICAL_HEIGHT * 2;
-        for physical_row in 0..PHYSICAL_HEIGHT {
-            let source = unsafe {
-                self.frame
-                    .as_ptr()
-                    .add(physical_row * row_words)
-                    .cast::<u8>()
-            };
-            let destination = unsafe {
-                self.mapping
-                    .pointer
-                    .cast::<u8>()
-                    .add(physical_row * self.stride)
-            };
-            unsafe {
-                ptr::copy_nonoverlapping(source, destination, active_row_bytes);
-            }
-        }
-        Ok(())
-    }
-}
-
-fn rgb565(color: u32) -> u16 {
-    let red = (color >> 16) & 0xff;
-    let green = (color >> 8) & 0xff;
-    let blue = color & 0xff;
-    (((red & 0xf8) << 8) | ((green & 0xfc) << 3) | (blue >> 3)) as u16
-}
-
-fn convert_rgba_to_rgb565(rgba: &[u8], pixels: &mut [u16]) -> bool {
-    if rgba.len() != LOGICAL_WIDTH * LOGICAL_HEIGHT * 4
-        || pixels.len() != LOGICAL_WIDTH * LOGICAL_HEIGHT
-    {
-        return false;
-    }
-    for (pixel, color) in pixels.iter_mut().zip(rgba.chunks_exact(4)) {
-        *pixel =
-            rgb565((u32::from(color[0]) << 16) | (u32::from(color[1]) << 8) | u32::from(color[2]));
-    }
-    true
-}
-
-fn stage_canvas_for_scanout(canvas: &[u16], row_words: usize, frame: &mut [u16]) -> bool {
-    let Some(required) = row_words.checked_mul(PHYSICAL_HEIGHT) else {
-        return false;
-    };
-    if canvas.len() != LOGICAL_WIDTH * LOGICAL_HEIGHT
-        || row_words < PHYSICAL_WIDTH
-        || frame.len() < required
-    {
-        return false;
-    }
-    for logical_x in 0..LOGICAL_WIDTH {
-        let physical_row = PHYSICAL_HEIGHT - 1 - logical_x;
-        let destination = &mut frame[physical_row * row_words..][..LOGICAL_HEIGHT];
-        for logical_y in 0..LOGICAL_HEIGHT {
-            destination[logical_y] = canvas[logical_y * LOGICAL_WIDTH + logical_x];
-        }
-    }
-    true
-}
-
 fn read_scanout_into_canvas(frame: &[u16], row_words: usize, canvas: &mut [u16]) -> bool {
     let Some(required) = row_words.checked_mul(PHYSICAL_HEIGHT) else {
         return false;
@@ -236,20 +89,13 @@ fn read_scanout_into_canvas(frame: &[u16], row_words: usize, canvas: &mut [u16])
     true
 }
 
-pub fn read_console_scanout() -> Result<Vec<u16>, String> {
-    let file = OpenOptions::new()
-        .read(true)
-        .open("/dev/fb0")
+pub(crate) fn read_console_scanout() -> Result<Vec<u16>, String> {
+    let file = File::open("/dev/fb0")
         .map_err(|error| format!("cannot open console framebuffer: {error}"))?;
     let (variable, fixed) = query_geometry(file.as_raw_fd())
         .map_err(|error| format!("cannot query console framebuffer: {error}"))?;
     let geometry = validate_console_geometry(&variable, &fixed)?;
-    let mapping = Mapping::new(
-        &file,
-        geometry.map_size,
-        ProtFlags::READ,
-        "cannot map console framebuffer",
-    )?;
+    let mapping = Mapping::new(&file, geometry.map_size, "cannot map console framebuffer")?;
     let frame =
         unsafe { std::slice::from_raw_parts(mapping.pointer.cast::<u16>(), geometry.map_size / 2) };
     let mut canvas = vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT];
@@ -259,169 +105,48 @@ pub fn read_console_scanout() -> Result<Vec<u16>, String> {
     Ok(canvas)
 }
 
-thread_local! {
-    static FRAMEBUFFER: RefCell<Option<Framebuffer>> = const { RefCell::new(None) };
-}
-
-pub fn open() -> Result<(), String> {
-    FRAMEBUFFER.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if slot.is_none() {
-            *slot = Some(Framebuffer::open(Path::new("/dev/fb0"))?);
-        }
-        Ok(())
-    })
-}
-
-pub fn close() {
-    FRAMEBUFFER.with(|slot| *slot.borrow_mut() = None);
-}
-
-pub fn present_rgba(rgba: &[u8]) -> Result<(), String> {
-    FRAMEBUFFER.with(|slot| {
-        slot.borrow_mut()
-            .as_mut()
-            .ok_or_else(|| "fbdev display is not open".to_owned())?
-            .present_rgba(rgba)
-    })
-}
-
-pub fn size() -> Option<(u32, u32)> {
-    FRAMEBUFFER.with(|slot| {
-        slot.borrow()
-            .as_ref()
-            .map(|_| (LOGICAL_WIDTH as u32, LOGICAL_HEIGHT as u32))
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::fnv1a;
 
-    fn canvas_hash(canvas: &[u16]) -> u64 {
-        fnv1a(canvas.iter().flat_map(|pixel| pixel.to_le_bytes()))
-    }
-
-    fn bitfield(offset: u32, length: u32) -> FbBitfield {
-        FbBitfield {
-            offset,
-            length,
-            msb_right: 0,
-        }
-    }
-
-    fn valid_geometry() -> (FbVariableScreenInfo, FbFixedScreenInfo) {
+    #[test]
+    fn accepts_padded_console_stride_and_rejects_short_mapping() {
         let variable = FbVariableScreenInfo {
             xres: PHYSICAL_WIDTH as u32,
             yres: PHYSICAL_HEIGHT as u32,
-            xres_virtual: PHYSICAL_WIDTH as u32,
-            yres_virtual: PHYSICAL_HEIGHT as u32,
             bits_per_pixel: 16,
-            red: bitfield(11, 5),
-            green: bitfield(5, 6),
-            blue: bitfield(0, 5),
-            ..FbVariableScreenInfo::default()
+            ..Default::default()
         };
-        let fixed = FbFixedScreenInfo {
-            smem_len: (PHYSICAL_WIDTH * PHYSICAL_HEIGHT * 2) as u32,
-            kind: FB_TYPE_PACKED_PIXELS,
-            visual: FB_VISUAL_TRUECOLOR,
-            line_length: (PHYSICAL_WIDTH * 2) as u32,
-            ..FbFixedScreenInfo::default()
+        let mut fixed = FbFixedScreenInfo {
+            line_length: 1216,
+            smem_len: 1216 * PHYSICAL_HEIGHT as u32,
+            ..Default::default()
         };
-        (variable, fixed)
-    }
-
-    #[test]
-    fn accepts_native_and_console_geometry() {
-        let (variable, fixed) = valid_geometry();
-        let geometry = validate_geometry(&variable, &fixed).unwrap();
-        assert_eq!(geometry.stride, 1200);
-        assert_eq!(geometry.map_size, 1_536_000);
-        let console_geometry = validate_console_geometry(&variable, &fixed).unwrap();
-        assert_eq!(console_geometry.stride, 1200);
-        assert_eq!(console_geometry.map_size, 1_536_000);
-    }
-
-    #[test]
-    fn rejects_incompatible_framebuffer_geometry() {
-        let (mut variable, fixed) = valid_geometry();
-        variable.red.offset = 10;
-        assert!(validate_geometry(&variable, &fixed).is_err());
-
-        let (variable, mut fixed) = valid_geometry();
-        fixed.line_length = 1198;
-        assert!(validate_geometry(&variable, &fixed).is_err());
-
-        let (mut variable, mut fixed) = valid_geometry();
-        variable.xoffset = 1;
-        variable.red.offset = 10;
-        assert!(validate_geometry(&variable, &fixed).is_err());
-        assert!(validate_console_geometry(&variable, &fixed).is_ok());
-
-        variable.xoffset = 0;
-        variable.red.offset = 11;
-        variable.yres_virtual = 0;
-        fixed.line_length = 1216;
-        fixed.smem_len = 1216 * 1280;
-        assert_eq!(validate_geometry(&variable, &fixed).unwrap().stride, 1216);
+        let geometry = validate_console_geometry(&variable, &fixed).unwrap();
+        assert_eq!(geometry.stride, 1216);
+        assert_eq!(geometry.map_size, 1216 * PHYSICAL_HEIGHT);
         fixed.smem_len -= 1;
-        assert!(validate_geometry(&variable, &fixed).is_err());
         assert!(validate_console_geometry(&variable, &fixed).is_err());
     }
 
     #[test]
-    fn matches_cpp_ui_fixture() {
-        canvas::clear(0x000000);
-        canvas::fill_rect(104, 100, 192, 80, 0xfe6c27);
-        canvas::fill_rect(100, 104, 200, 72, 0xfe6c27);
-        canvas::fill_rect(108, 104, 184, 72, 0x121212);
-        canvas::fill_rect(104, 108, 192, 64, 0x121212);
-        canvas::fill_rect(340, 100, 180, 4, 0xeeeeee);
-        canvas::fill_rect(340, 176, 180, 4, 0xeeeeee);
-        canvas::fill_rect(340, 100, 4, 80, 0xeeeeee);
-        canvas::fill_rect(516, 100, 4, 80, 0xeeeeee);
-        for (index, character) in b"RETRO".iter().enumerate() {
-            canvas::draw_glyph(171 + index as i32 * 12, 133, *character, 2, 0xeeeeee);
-        }
-        for (index, character) in b"ABCDE...".iter().enumerate() {
-            canvas::draw_glyph(383 + index as i32 * 12, 133, *character, 2, 0xeeeeee);
-        }
-        canvas::draw_glyph(10, 10, b'A', 1, 0xffffaf);
-        canvas::draw_glyph(16, 10, b'?', 1, 0xffffaf);
-
-        let mut pixels = vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT];
-        canvas::with_pixels(|rgba| assert!(convert_rgba_to_rgb565(rgba, &mut pixels)));
-        // Shared with tests/menu_ui_test.cpp.
-        assert_eq!(canvas_hash(&pixels), 0x4140_7945_3e13_44d5);
-    }
-
-    #[test]
-    fn rotates_the_logical_canvas_into_rgb565_scanout() {
-        assert_eq!(rgb565(0x000000), 0x0000);
-        assert_eq!(rgb565(0xffffff), 0xffff);
-        assert_eq!(rgb565(0xfe6c27), 0xfb64);
-        let mut rgba = vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT * 4];
-        rgba[..4].copy_from_slice(&[0xfe, 0x6c, 0x27, 0xff]);
-        let mut pixels = vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT];
-        assert!(convert_rgba_to_rgb565(&rgba, &mut pixels));
-        assert_eq!(pixels[0], 0xfb64);
-
+    fn rotates_console_capture_without_reading_row_padding() {
         let row_words = PHYSICAL_WIDTH + 3;
+        let mut frame = vec![0; row_words * PHYSICAL_HEIGHT];
+        frame[(PHYSICAL_HEIGHT - 1) * row_words] = 0x1234;
+        frame[LOGICAL_HEIGHT - 1] = 0xabcd;
+        for row in frame.chunks_exact_mut(row_words) {
+            row[PHYSICAL_WIDTH..].fill(0xdead);
+        }
         let mut canvas = vec![0; LOGICAL_WIDTH * LOGICAL_HEIGHT];
-        canvas[0] = 0x1234;
-        let last = canvas.len() - 1;
-        canvas[last] = 0xabcd;
-        let mut frame = vec![0xdead; row_words * PHYSICAL_HEIGHT];
-        assert!(stage_canvas_for_scanout(&canvas, row_words, &mut frame));
-        assert_eq!(frame[(PHYSICAL_HEIGHT - 1) * row_words], 0x1234);
-        assert_eq!(frame[LOGICAL_HEIGHT - 1], 0xabcd);
-        assert_eq!(frame[LOGICAL_HEIGHT], 0xdead);
-        assert_eq!(frame[row_words - 1], 0xdead);
-
-        let mut restored = vec![0; canvas.len()];
-        assert!(read_scanout_into_canvas(&frame, row_words, &mut restored));
-        assert_eq!(restored, canvas);
+        assert!(read_scanout_into_canvas(&frame, row_words, &mut canvas));
+        assert_eq!(canvas[0], 0x1234);
+        assert_eq!(canvas[canvas.len() - 1], 0xabcd);
+        assert!(!canvas.contains(&0xdead));
+        assert!(!read_scanout_into_canvas(
+            &frame[..frame.len() - 1],
+            row_words,
+            &mut canvas
+        ));
     }
 }

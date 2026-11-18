@@ -421,9 +421,8 @@ ssh -o BatchMode=yes "$target" "
   set -eu
   /etc/init.d/deck-wifi status >/dev/null
   /etc/init.d/deck-wireguard status >/dev/null
-  /etc/init.d/nes-deck status >/dev/null
+  /etc/init.d/bmc-compositor status >/dev/null
   /etc/init.d/nes-deck-uploader status >/dev/null
-  pidof deck-menu >/dev/null
   pidof rom-uploader >/dev/null
   ip route get 10.0.0.1 | grep -q 'dev wg0.*src $wireguard_address'
 "

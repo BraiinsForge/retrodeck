@@ -6,7 +6,7 @@ set -euo pipefail
 export LC_ALL=C
 
 usage() {
-  echo "Usage: $0 [--config PATH] [--check-config] [--presentation stock-bmc|framebuffer] [root@DECK-IP]" >&2
+  echo "Usage: $0 [--config PATH] [--check-config] [root@DECK-IP]" >&2
   exit 2
 }
 
@@ -27,8 +27,8 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --presentation)
-      [[ $# -ge 2 ]] || usage
-      case $2 in stock-bmc|framebuffer) presentation=$2 ;; *) usage ;; esac
+      [[ $# -ge 2 && $2 == stock-bmc ]] || usage
+      presentation=stock-bmc
       shift 2
       ;;
     --check-config)
@@ -102,9 +102,7 @@ python=$(build_flake .#python-deck)
 chibi=$(build_flake .#chibi-deck)
 runtime_licenses=$(build_flake .#runtime-licenses)
 ecl=$(build_flake .#ecl-arm-network)
-if [[ $presentation == stock-bmc ]]; then
-  widget=$(build_flake .#retro-deck-widget)
-fi
+widget=$(build_flake .#retro-deck-widget)
 
 mkdir -p \
   "$payload/nes-deck/menu" \
@@ -121,12 +119,10 @@ mkdir -p \
   "$payload/usr/sbin" \
   "$payload/etc/init.d"
 printf '%s\n' "$presentation" >"$payload/presentation"
-if [[ $presentation == stock-bmc ]]; then
-  printf '%s\n' "$widget" >"$payload/widget-store-path"
-  # Static ARM dashboard, compiler and resources form one reference-free
-  # package; external applications and owner data stay in the payload below.
-  nix-store --export "$widget" >"$payload/widget.nar"
-fi
+printf '%s\n' "$widget" >"$payload/widget-store-path"
+# Static ARM dashboard, compiler and resources form one reference-free
+# package; external applications and owner data stay in the payload below.
+nix-store --export "$widget" >"$payload/widget.nar"
 
 cp "$nes/bin/nes-deck" "$payload/nes-deck/nes-deck"
 cp "$gb/bin/gb-deck" "$payload/nes-deck/gb-deck"
@@ -174,7 +170,6 @@ cp ops/deck-wifi/deck-wifi-profile-add \
 cp ops/deck-wifi/deck-wifi-select ops/deck-wifi/deck-wifi-watch \
   "$payload/usr/sbin/"
 cp ops/deck-wifi/deck-wifi.init "$payload/etc/init.d/deck-wifi"
-cp deploy/menu/nes-deck.init "$payload/etc/init.d/nes-deck"
 cp deploy/menu/nes-deck-swap.init "$payload/etc/init.d/nes-deck-swap"
 mkdir -p "$payload/etc/hotplug.d/usb"
 cp deploy/menu/nes-deck-keyboard.hotplug \
@@ -265,7 +260,6 @@ chmod 0700 "$payload/usr/bin/ecl" \
   "$payload/usr/sbin/deck-wifi-watch" \
   "$payload/etc/hotplug.d/usb/90-nes-deck-keyboard" \
   "$payload/etc/init.d/deck-wifi" \
-  "$payload/etc/init.d/nes-deck" \
   "$payload/etc/init.d/nes-deck-swap" \
   "$payload/etc/init.d/nes-deck-uploader"
 

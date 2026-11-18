@@ -1,13 +1,9 @@
 //! Linux framebuffer ioctl ABI shared by the dashboard and emulator targets.
 
-use std::ffi::{c_int, c_ulong};
+use std::ffi::c_ulong;
 
 pub(super) const FBIOGET_VSCREENINFO: c_ulong = 0x4600;
 pub(super) const FBIOGET_FSCREENINFO: c_ulong = 0x4602;
-pub(super) const FBIOBLANK: c_ulong = 0x4611;
-pub(super) const FB_BLANK_UNBLANK: c_int = 0;
-pub(super) const FB_TYPE_PACKED_PIXELS: u32 = 0;
-pub(super) const FB_VISUAL_TRUECOLOR: u32 = 2;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -80,50 +76,6 @@ const _: [(); 68] = [(); std::mem::size_of::<FbFixedScreenInfo>()];
 pub(super) struct Geometry {
     pub(super) stride: usize,
     pub(super) map_size: usize,
-}
-
-pub(super) fn validate_rgb565_geometry(
-    variable: &FbVariableScreenInfo,
-    fixed: &FbFixedScreenInfo,
-) -> Result<Geometry, String> {
-    let rows = if variable.yres_virtual == 0 {
-        variable.yres
-    } else {
-        variable.yres_virtual
-    } as usize;
-    let stride = fixed.line_length as usize;
-    let required = stride
-        .checked_mul(rows)
-        .ok_or_else(|| "framebuffer geometry overflows the address space".to_owned())?;
-    let map_size = fixed.smem_len as usize;
-
-    if variable.xres != 600
-        || variable.yres != 1280
-        || variable.bits_per_pixel != 16
-        || variable.xoffset != 0
-        || variable.yoffset != 0
-        || rows < 1280
-        || fixed.kind != FB_TYPE_PACKED_PIXELS
-        || fixed.visual != FB_VISUAL_TRUECOLOR
-        || stride < 600 * 2
-        || !stride.is_multiple_of(2)
-        || map_size < required
-        || variable.red.offset != 11
-        || variable.red.length != 5
-        || variable.red.msb_right != 0
-        || variable.green.offset != 5
-        || variable.green.length != 6
-        || variable.green.msb_right != 0
-        || variable.blue.offset != 0
-        || variable.blue.length != 5
-        || variable.blue.msb_right != 0
-        || variable.transparency.length != 0
-    {
-        return Err(
-            "unsupported framebuffer; expected 600x1280 RGB565 with a valid stride".to_owned(),
-        );
-    }
-    Ok(Geometry { stride, map_size })
 }
 
 /// Query the Linux framebuffer ABI without imposing a consumer's format policy.

@@ -1,7 +1,7 @@
 # Retro Deck
 
 A touch-first game and program launcher for the Braiins Forge Deck. Runs as a
-native fullscreen BMC widget, with a direct-framebuffer fallback.
+native fullscreen BMC widget.
 
 Includes NES, Game Boy, Game Boy Color, Game Boy Advance, Super NES and ZX Spectrum
 emulators; DOOM; a terminal; chiptunes; and ECL Common Lisp, Chibi Scheme, Lua and
@@ -34,8 +34,7 @@ Update and check an existing installation:
 ```
 
 Deployment preserves scenes, instance identities, saves and user content.
-For a Deck without BMC, provision with `--network-only`, then deploy with
-`--presentation framebuffer`. Build and test commands are in [BUILD.md](BUILD.md).
+Build and test commands are in [BUILD.md](BUILD.md).
 
 ## Use
 

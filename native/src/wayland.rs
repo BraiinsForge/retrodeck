@@ -1,4 +1,3 @@
-use crate::input::TouchReport;
 use crate::protocol::deck_widget::{deck_widget_manager_v3, deck_widget_surface_v2};
 use crate::{canvas, controls, polling};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
@@ -23,6 +22,14 @@ use wayland_client::protocol::{
 };
 use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum, delegate_noop};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TouchReport {
+    pub x: i32,
+    pub y: i32,
+    pub down: bool,
+    pub pressed: bool,
+    pub released: bool,
+}
 const BUFFER_COUNT: usize = 3;
 const CONFIGURE_TIMEOUT: Duration = Duration::from_secs(2);
 const GAME_INSET: usize = 16;

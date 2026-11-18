@@ -31,22 +31,10 @@ grep -q ' /mnt/data ' /proc/mounts || {
   exit 1
 }
 
-service_needs_restart=0
 uploader_needs_restart=0
-bmc_mode=0
-compositor_needs_restart=0
 restore_service_after_failure() {
   result=$?
   trap - EXIT
-  if [ "$result" -ne 0 ] && [ "$service_needs_restart" -eq 1 ]; then
-    echo "Activation failed; restarting Retro Deck" >&2
-    /etc/init.d/nes-deck start >/dev/null 2>&1 || :
-  fi
-  if [ "$result" -ne 0 ] && \
-     [ "$compositor_needs_restart" -eq 1 ]; then
-    echo "Activation failed; restarting BMC compositor" >&2
-    /etc/init.d/bmc-compositor restart >/dev/null 2>&1 || :
-  fi
   if [ "$result" -ne 0 ] && [ "$uploader_needs_restart" -eq 1 ] && \
      [ -x /etc/init.d/nes-deck-uploader ]; then
     echo "Activation failed; restarting ROM uploader" >&2
@@ -60,13 +48,6 @@ presentation=$(cat "$stage/presentation")
 case "$presentation" in
   stock-bmc)
     sh "$stage/install-stock-widget.sh" check "$stage"
-    bmc_mode=1
-    ;;
-  framebuffer)
-    if [ -x /etc/init.d/bmc-compositor ]; then
-      echo 'Stock compositor is installed; refusing framebuffer mode' >&2
-      exit 1
-    fi
     ;;
   *) echo 'Invalid staged presentation mode' >&2; exit 1 ;;
 esac
@@ -201,12 +182,10 @@ if [ -x /etc/init.d/nes-deck-uploader ]; then
 fi
 uploader_needs_restart=1
 
-/etc/init.d/nes-deck stop 2>/dev/null || :
-if [ "$bmc_mode" -eq 1 ]; then
-  /etc/init.d/bmc-compositor stop 2>/dev/null || :
-  compositor_needs_restart=1
-else
-  service_needs_restart=1
+# Retire the standalone dashboard service on older installations.
+if [ -x /etc/init.d/nes-deck ]; then
+  /etc/init.d/nes-deck stop 2>/dev/null || :
+  /etc/init.d/nes-deck disable
 fi
 
 # Install application runtimes and repository-managed assets.
@@ -288,7 +267,6 @@ cp -p "$stage/usr/sbin/deck-wifi-profile-add" \
 cp -p "$stage/usr/sbin/deck-wifi-select" /usr/sbin/deck-wifi-select
 cp -p "$stage/usr/sbin/deck-wifi-watch" /usr/sbin/deck-wifi-watch
 cp -p "$stage/etc/init.d/deck-wifi" /etc/init.d/deck-wifi
-cp -p "$stage/etc/init.d/nes-deck" /etc/init.d/nes-deck
 cp -p "$stage/etc/init.d/nes-deck-swap" /etc/init.d/nes-deck-swap
 cp -p "$stage/etc/init.d/nes-deck-uploader" \
   /etc/init.d/nes-deck-uploader
@@ -301,34 +279,21 @@ chmod 0700 /usr/bin/ecl /usr/sbin/deck-wifi-profile-add \
   /usr/sbin/deck-keyboard-quirks \
   /etc/hotplug.d/usb/90-nes-deck-keyboard \
   /etc/init.d/deck-wifi \
-  /etc/init.d/nes-deck /etc/init.d/nes-deck-swap \
+  /etc/init.d/nes-deck-swap \
   /etc/init.d/nes-deck-uploader
 
-# Select the compositor or direct-framebuffer service owner and restart it.
-if [ -x /etc/init.d/bmc ]; then
-  /etc/init.d/bmc stop 2>/dev/null || :
-  /etc/init.d/bmc disable 2>/dev/null || :
-fi
+# Install the managed BMC widget and perform one compositor reload.
 /etc/init.d/deck-wifi enable
 /etc/init.d/deck-wifi restart
 # Remove links created with an older START or STOP value before re-enabling.
 rm -f /etc/rc.d/S??nes-deck-swap /etc/rc.d/K??nes-deck-swap
-if [ "$bmc_mode" -eq 1 ]; then
-  /etc/init.d/nes-deck disable
-  /etc/init.d/nes-deck-swap enable
-  /etc/init.d/nes-deck-swap start
-  # Profile activation can start/reload BMC through upstream hooks.
-  sh "$stage/install-stock-widget.sh" install "$stage"
-  service_needs_restart=0
-  /etc/init.d/bmc-compositor enable
-  # Hooks may already have started the old configuration during activation.
-  /etc/init.d/bmc-compositor restart
-else
-  /etc/init.d/nes-deck-swap stop 2>/dev/null || :
-  /etc/init.d/nes-deck-swap disable
-  /etc/init.d/nes-deck enable
-  /etc/init.d/nes-deck start
-fi
+/etc/init.d/nes-deck-swap enable
+/etc/init.d/nes-deck-swap start
+# Profile activation can start/reload BMC through upstream hooks.
+sh "$stage/install-stock-widget.sh" install "$stage"
+/etc/init.d/bmc-compositor enable
+# Hooks may already have started the old configuration during activation.
+/etc/init.d/bmc-compositor restart
 /etc/init.d/nes-deck-uploader enable
 /etc/init.d/nes-deck-uploader start
 
@@ -337,21 +302,14 @@ fi
 # before deck-menu starts. Keep this bounded, but allow the first fill to
 # finish on the target CPU instead of rolling back a healthy installation.
 dashboard_expected=1
-if [ "$bmc_mode" -eq 1 ]; then
-  enabled_widget_ids=$("$base/langs/python" "$base/install-bmc-scene.py" \
-    --enabled-widget-ids /etc/bmc/config.json)
-  [ -n "$enabled_widget_ids" ] || dashboard_expected=0
-fi
+enabled_widget_ids=$("$base/langs/python" "$base/install-bmc-scene.py" \
+  --enabled-widget-ids /etc/bmc/config.json)
+[ -n "$enabled_widget_ids" ] || dashboard_expected=0
 attempt=0
 while [ "$attempt" -lt 120 ]; do
   dashboard_ready=0
-  if [ "$bmc_mode" -eq 1 ] && \
-     /etc/init.d/bmc-compositor status >/dev/null 2>&1 && \
+  if /etc/init.d/bmc-compositor status >/dev/null 2>&1 && \
      { [ "$dashboard_expected" -eq 0 ] || pidof deck-menu >/dev/null 2>&1; }; then
-    dashboard_ready=1
-  elif [ "$bmc_mode" -eq 0 ] && \
-       /etc/init.d/nes-deck status >/dev/null 2>&1 && \
-       pidof deck-menu >/dev/null 2>&1; then
     dashboard_ready=1
   fi
   if [ "$dashboard_ready" -eq 1 ] && \
@@ -363,17 +321,10 @@ while [ "$attempt" -lt 120 ]; do
   sleep 1
 done
 
-if [ "$bmc_mode" -eq 1 ]; then
-  /etc/init.d/bmc-compositor status >/dev/null 2>&1 || {
-    echo "BMC compositor did not restart" >&2
-    exit 1
-  }
-else
-  /etc/init.d/nes-deck status >/dev/null 2>&1 || {
-    echo "Retro Deck service did not start" >&2
-    exit 1
-  }
-fi
+/etc/init.d/bmc-compositor status >/dev/null 2>&1 || {
+  echo "BMC compositor did not restart" >&2
+  exit 1
+}
 /etc/init.d/deck-wifi status >/dev/null 2>&1 || {
   echo "Deck Wi-Fi watcher did not start" >&2
   exit 1
@@ -392,13 +343,7 @@ wget -q -O /dev/null http://127.0.0.1:8080/ 2>/dev/null || {
   exit 1
 }
 
-service_needs_restart=0
 uploader_needs_restart=0
-compositor_needs_restart=0
 rm -rf "$stage"
-if [ "$bmc_mode" -eq 1 ]; then
-  echo "Retro Deck widget is installed and the BMC compositor is running."
-else
-  echo "Retro Deck and its ROM uploader are running."
-fi
+echo "Retro Deck widget is installed and the BMC compositor is running."
 tail -n 12 "$base/log/deck-menu.log" || :

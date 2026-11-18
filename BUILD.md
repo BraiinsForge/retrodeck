@@ -146,7 +146,7 @@ tests/run-host-tests.sh
 It covers dashboard state and menu-sound policy, the Rust menu-tone renderer, NES mixer, APU
 noise, SRAM codec, controller and keyboard input, dashboard geometry and
 behavior, ROM catalog, cover cache, Wi-Fi profile helper, rlwrap-backed
-terminal lifecycle, and shared framebuffer/audio runtime.
+terminal lifecycle, and shared Wayland and audio runtime.
 
 `tests/uploader-rust-http.sh` exercises the standalone uploader's full HTTP
 contract against a host binary. ARM/QEMU checks validate the deployed password
@@ -252,10 +252,8 @@ and launched native applications connect using the same key. The dashboard
 reconnects after its child returns. No upstream PID-registration or compositor
 patch is needed for the keyed protocol.
 
-For an installation without BMC, select `--presentation framebuffer` explicitly.
-Deployment refuses that mode when a compositor service is installed. Health
-checks read the recorded mode, inspect the active-profile widget, report its
-configured instance UUID and require the dashboard process when its scene is enabled.
+Health checks inspect the active-profile widget, report its configured instance
+UUID and require the dashboard process when its scene is enabled.
 
 Stock composition uses upstream filtering. For an optional nearest-neighbor
 pixel-sampling experiment, run `ops/bmc/apply-local-patches.sh` against a separate
@@ -272,10 +270,9 @@ use 44.1 kHz. Gambatte produces 32,768 Hz and is explicitly resampled to the
 Deck's verified 32 kHz OSS rate. Gain is applied in the native mixer because
 the kernel OSS path bypasses ALSA userspace soft volume.
 
-The framebuffer has no page-flip API. Frontends build complete frames in
-cacheable memory and copy finished rows to fb0 to reduce tearing and protect
-audio timing. `RETRO_DECK_RUNTIME_DIAGNOSTICS=1` logs 60-frame timing windows
-from the shared libretro frontend.
+Frontends draw into memory and submit completed buffers to BMC over Wayland.
+`RETRO_DECK_RUNTIME_DIAGNOSTICS=1` logs 60-frame timing windows from the shared
+libretro frontend.
 
 ## Source layout
 
