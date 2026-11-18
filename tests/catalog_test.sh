@@ -71,11 +71,11 @@ fi
 # The launcher itself also performs device setup and is not executed here.
 sed -n '/^write_state() {$/,/^}$/p' \
   "$root/deploy/menu/deck-menu-launcher" >"$fixture/catalog-selection.sh"
-sed -n '/^manifest=\$FALLBACK_MANIFEST$/,/^if \[ -s "\$UPLOAD_MANIFEST"/p' \
+sed -n '/^manifest=\$FALLBACK_MANIFEST$/,/^if \[ -x "\$COVER_FETCHER"/p' \
   "$root/deploy/menu/deck-menu-launcher" | sed '$d' \
   >>"$fixture/catalog-selection.sh"
 [ -s "$fixture/catalog-selection.sh" ] || fail 'catalog selection block missing'
-printf '#!/bin/sh\ntest -s "$2"\n' >"$fixture/menu-validator"
+printf '#!/bin/sh\ntest -s "$2" && ! grep -q "^invalid" "$2"\n' >"$fixture/menu-validator"
 chmod +x "$fixture/menu-validator"
 cp "$root/deploy/menu/games.sexp" "$fixture/current.sexp"
 select_catalog() (
@@ -87,6 +87,10 @@ select_catalog() (
   FALLBACK_MANIFEST=$root/deploy/menu/games.tsv
   FALLBACK_PALETTE=$root/deploy/menu/palette.tsv
   PALETTE_OVERRIDE=$fixture/no-override.sexp
+  UPLOAD_MANIFEST=$fixture/upload.tsv
+  COMBINED_MANIFEST=$fixture/combined.tsv
+  LOCAL_MANIFEST=$fixture/local.tsv
+  LOCAL_COMBINED_MANIFEST=$fixture/local-combined.tsv
   LOG_FILE=$fixture/catalog-selection.log
   log_message() { :; }
   . "$fixture/catalog-selection.sh"
@@ -129,4 +133,14 @@ cmp -s "$fixture/cached-games.tsv" "$fixture/cached-games-before.tsv" ||
 cmp -s "$fixture/cached-palette.tsv" "$fixture/cached-palette-before.tsv" ||
   fail 'failed compilation changed cached palette'
 
+printf 'upload\tUpload\tsnes\t/mnt/data/roms/snes/upload.sfc\t#005FFF\n' >"$fixture/upload.tsv"
+printf 'local\tLocal\tsnes\t/mnt/data/roms/snes/local.sfc\t#005FFF\n' >"$fixture/local.tsv"
+selected=$(select_catalog "$fixture/no-compiler")
+[ "$selected" = "$(printf '%s\t%s' "$fixture/local-combined.tsv" "$root/deploy/menu/palette.tsv")" ] ||
+  fail 'local catalog was not selected'
+cat "$root/deploy/menu/games.tsv" "$fixture/upload.tsv" "$fixture/local.tsv" >"$fixture/expected.tsv"
+cmp -s "$fixture/expected.tsv" "$fixture/local-combined.tsv" || fail 'local catalog replaced existing entries'
+printf 'invalid\n' >"$fixture/local.tsv"
+[ "$(select_catalog "$fixture/no-compiler")" = "$(printf '%s\t%s' "$fixture/combined.tsv" "$root/deploy/menu/palette.tsv")" ] ||
+  fail 'invalid local catalog hid valid upload entries'
 echo 'catalog-test: OK'

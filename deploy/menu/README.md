@@ -90,6 +90,11 @@ validate the complete file and every ROM before using it. An invalid upload
 catalog is logged and ignored rather than preventing the dashboard from
 starting.
 
+Add local entries in `/mnt/data/nes-deck/state/local-games.tsv`, using the same
+five tab-separated fields as `games.tsv`. The launcher validates them against
+both the repository and uploader entries. Duplicate or invalid local entries
+reject the local layer without changing either catalog.
+
 At boot, `fetch-covers` fills the persistent cover cache once per game. It
 prefers Libretro box art, then falls back to a title screen and finally a
 gameplay snapshot when a system's box-art set is incomplete. Cached images,

@@ -32,6 +32,8 @@ PALETTE_OVERRIDE=$STATE_DIR/dashboard-palette.sexp
 UPLOAD_DIR=$BASE/uploads
 UPLOAD_MANIFEST=$UPLOAD_DIR/games.tsv
 COMBINED_MANIFEST=$STATE_DIR/combined-games.tsv
+LOCAL_MANIFEST=$STATE_DIR/local-games.tsv
+LOCAL_COMBINED_MANIFEST=$STATE_DIR/local-combined-games.tsv
 COVER_DIR=$BASE/covers
 SETTINGS_ICON=$MENU_DIR/settings-icon.png
 COVER_FETCHER=$MENU_DIR/fetch-covers
@@ -312,6 +314,19 @@ if [ -s "$UPLOAD_MANIFEST" ] && [ ! -L "$UPLOAD_MANIFEST" ]; then
 	else
 		rm -f "$combined_temporary"
 		log_message "ROM upload catalog is invalid; ignoring uploaded entries"
+	fi
+fi
+
+if [ -s "$LOCAL_MANIFEST" ] && [ ! -L "$LOCAL_MANIFEST" ]; then
+	local_temporary=$LOCAL_COMBINED_MANIFEST.tmp.$$
+	if cat "$manifest" "$LOCAL_MANIFEST" > "$local_temporary" &&
+		"$MENU" --validate-manifest "$local_temporary" >> "$LOG_FILE" 2>&1 &&
+		mv -f "$local_temporary" "$LOCAL_COMBINED_MANIFEST"; then
+		manifest=$LOCAL_COMBINED_MANIFEST
+		log_message 'using validated local game catalog'
+	else
+		rm -f "$local_temporary"
+		log_message 'local game catalog is invalid; ignoring local entries'
 	fi
 fi
 
