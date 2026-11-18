@@ -212,12 +212,7 @@ struct GamepadDevice {
 }
 
 impl GamepadDevice {
-    fn open(path: &Path) -> Option<Self> {
-        let device = open_device(path)?;
-        let identity = device.input_id();
-        if identity.vendor() != GAMEPAD_VENDOR || identity.product() != GAMEPAD_PRODUCT {
-            return None;
-        }
+    fn from_device(path: &Path, device: RawDevice) -> Option<Self> {
         let (mut x, mut y) = gamepad_axes(&device).ok()?;
         x.value = 0;
         y.value = 0;
@@ -283,17 +278,13 @@ struct KeyboardDevice {
 }
 
 impl KeyboardDevice {
-    fn open(path: &Path) -> Option<Self> {
-        let device = open_device(path)?;
-        if !keyboard_capabilities(&device) {
-            return None;
-        }
-        Some(Self {
+    fn from_device(path: &Path, device: RawDevice) -> Self {
+        Self {
             path: path.to_owned(),
             device,
             state: KeyboardState::default(),
             grabbed: false,
-        })
+        }
     }
 
     fn activate(&mut self) {
@@ -348,49 +339,120 @@ impl Drop for KeyboardDevice {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct InputNode {
+    path: PathBuf,
+    device: u64,
+    inode: u64,
+    number: u64,
+    changed: (i64, i64),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct InputCensus {
+    include_keyboards: bool,
+    nodes: Vec<InputNode>,
+}
+
+impl InputCensus {
+    fn replaced(&self, next: &Self, path: &Path) -> bool {
+        let at = |census: &Self| {
+            census
+                .nodes
+                .binary_search_by(|node| node.path.as_path().cmp(path))
+                .ok()
+        };
+        match (at(self), at(next)) {
+            (Some(old), Some(new)) => self.nodes[old] != next.nodes[new],
+            _ => false,
+        }
+    }
+}
 #[derive(Default)]
 pub(crate) struct Controls {
     gamepads: Vec<GamepadDevice>,
     keyboards: Vec<KeyboardDevice>,
     reports: VecDeque<ControlReport>,
+    census: Option<InputCensus>,
     rescan_requested: bool,
 }
 
 impl Controls {
     fn scan(&mut self, include_keyboards: bool) -> Result<(usize, usize), String> {
-        let paths = match event_paths() {
-            Ok(paths) => paths,
+        self.scan_directory(Path::new(INPUT_DIRECTORY), include_keyboards)
+    }
+
+    fn scan_directory(
+        &mut self,
+        directory: &Path,
+        include_keyboards: bool,
+    ) -> Result<(usize, usize), String> {
+        let nodes = match input_nodes(directory) {
+            Ok(nodes) => nodes,
             Err(error) => {
                 self.rescan_requested = true;
                 return Err(error);
             }
         };
+        let census = InputCensus {
+            include_keyboards,
+            nodes,
+        };
+        // Even dropping an otherwise idle evdev handle can wait for an RCU
+        // grace period in the kernel. Do not reopen unchanged input nodes
+        // on the dashboard thread just to check for hotplug.
+        if !self.rescan_requested && self.census.as_ref() == Some(&census) {
+            return Ok((self.gamepads.len(), self.keyboards.len()));
+        }
         self.rescan_requested = false;
-        let mut gamepads = paths
-            .iter()
-            .filter_map(|path| GamepadDevice::open(path))
-            .collect::<Vec<_>>();
+        let mut complete = true;
+        let mut gamepads = Vec::new();
+        let mut keyboards = Vec::new();
+        for node in &census.nodes {
+            let Some(device) = open_device(&node.path) else {
+                complete = false;
+                continue;
+            };
+            let identity = device.input_id();
+            let gamepad =
+                identity.vendor() == GAMEPAD_VENDOR && identity.product() == GAMEPAD_PRODUCT;
+            let keyboard = include_keyboards && keyboard_capabilities(&device);
+            if gamepad {
+                if let Some(device) = GamepadDevice::from_device(&node.path, device) {
+                    gamepads.push(device);
+                } else {
+                    complete = false;
+                }
+                if keyboard {
+                    if let Some(device) = open_device(&node.path) {
+                        keyboards.push(KeyboardDevice::from_device(&node.path, device));
+                    } else {
+                        complete = false;
+                    }
+                }
+            } else if keyboard {
+                keyboards.push(KeyboardDevice::from_device(&node.path, device));
+            }
+        }
         gamepads.sort_by(|left, right| {
             left.physical_path
                 .cmp(&right.physical_path)
                 .then_with(|| left.path.cmp(&right.path))
         });
         gamepads.truncate(MAXIMUM_GAMEPADS);
-
-        let mut keyboards = if include_keyboards {
-            paths
-                .iter()
-                .filter_map(|path| KeyboardDevice::open(path))
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
         keyboards.sort_by(|left, right| left.path.cmp(&right.path));
         keyboards.truncate(MAXIMUM_KEYBOARDS);
 
+        let replaced = |path: &Path| {
+            self.census
+                .as_ref()
+                .is_some_and(|old| old.replaced(&census, path))
+        };
         let gamepads_changed = self.gamepads.len() != gamepads.len()
             || self.gamepads.iter().zip(&gamepads).any(|(left, right)| {
-                left.path != right.path || left.physical_path != right.physical_path
+                left.path != right.path
+                    || left.physical_path != right.physical_path
+                    || replaced(&left.path)
             });
         if gamepads_changed {
             self.gamepads.clear();
@@ -405,7 +467,7 @@ impl Controls {
                 .keyboards
                 .iter()
                 .zip(&keyboards)
-                .any(|(left, right)| left.path != right.path);
+                .any(|(left, right)| left.path != right.path || replaced(&left.path));
         if keyboards_changed {
             self.keyboards.clear();
             self.keyboards = keyboards;
@@ -417,6 +479,7 @@ impl Controls {
         if gamepads_changed || keyboards_changed {
             self.reports.clear();
         }
+        self.census = complete.then_some(census);
         Ok((self.gamepads.len(), self.keyboards.len()))
     }
 
@@ -526,15 +589,28 @@ pub fn next_report() -> Option<ControlReport> {
     CONTROLS.with(|controls| controls.borrow_mut().reports.pop_front())
 }
 
-fn event_paths() -> Result<Vec<PathBuf>, String> {
-    let entries = fs::read_dir(INPUT_DIRECTORY)
-        .map_err(|error| format!("cannot open {INPUT_DIRECTORY}: {error}"))?;
-    let mut paths = entries
+fn input_nodes(directory: &Path) -> Result<Vec<InputNode>, String> {
+    use std::os::unix::fs::MetadataExt;
+    let entries = fs::read_dir(directory)
+        .map_err(|error| format!("cannot open {}: {error}", directory.display()))?;
+    let mut nodes = Vec::new();
+    for path in entries
         .filter_map(Result::ok)
         .filter_map(|entry| event_path(entry.path()))
-        .collect::<Vec<_>>();
-    paths.sort();
-    Ok(paths)
+    {
+        let Ok(meta) = fs::metadata(&path) else {
+            continue;
+        };
+        nodes.push(InputNode {
+            path,
+            device: meta.dev(),
+            inode: meta.ino(),
+            number: meta.rdev(),
+            changed: (meta.ctime(), meta.ctime_nsec()),
+        });
+    }
+    nodes.sort_unstable_by(|left, right| left.path.cmp(&right.path));
+    Ok(nodes)
 }
 
 fn event_path(path: PathBuf) -> Option<PathBuf> {
@@ -569,6 +645,36 @@ fn keyboard_snapshot(device: &RawDevice) -> io::Result<(bool, bool)> {
 mod tests {
     use super::*;
     use evdev::EventType;
+    #[test]
+    fn idle_scans_reuse_the_input_census_but_hotplug_rechecks_nodes() {
+        let dir = crate::test_support::fixture_directory("controls-census");
+        // Fake nodes cannot be opened as evdev devices. This distinguishes
+        // a directory-only check from a scan that tries to probe them.
+        std::fs::write(dir.join("event1"), []).unwrap();
+        let mut controls = Controls {
+            census: Some(InputCensus {
+                include_keyboards: true,
+                nodes: input_nodes(&dir).unwrap(),
+            }),
+            ..Controls::default()
+        };
+        assert_eq!(controls.scan_directory(&dir, true).unwrap(), (0, 0));
+        assert!(controls.census.is_some());
+        std::fs::write(dir.join("event2"), []).unwrap();
+        controls.scan_directory(&dir, true).unwrap();
+        assert!(controls.census.is_none(), "a new device must be probed");
+        controls.census = Some(InputCensus {
+            include_keyboards: true,
+            nodes: input_nodes(&dir).unwrap(),
+        });
+        controls.rescan_requested = true;
+        controls.scan_directory(&dir, true).unwrap();
+        assert!(
+            controls.census.is_none(),
+            "device loss must trigger a fresh probe"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     fn event(event_type: EventType, code: u16, value: i32) -> InputEvent {
         InputEvent::new(event_type.0, code, value)
