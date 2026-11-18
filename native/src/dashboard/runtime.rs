@@ -634,6 +634,8 @@ pub fn main(arguments: impl IntoIterator<Item = String>) -> i32 {
     let reduced_motion =
         std::env::var_os("RETRO_DECK_REDUCED_MOTION").is_some_and(|s| !s.is_empty());
     let mut app = App::new(games, credits, reduced_motion);
+    app.settings.volume_wifi =
+        std::env::var_os("RETRO_DECK_SETTINGS_VOLUME_WIFI").is_some_and(|value| value == "1");
     let result = (|| {
         process::install_signal_handlers()?;
         let mut runtime = Runtime::new(&options)?;

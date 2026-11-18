@@ -231,3 +231,11 @@ cmp palette.tsv /tmp/palette.tsv
 At deployment, make the launcher, menu, emulator, and init script executable.
 The init script is intentionally installed under the existing service name so
 it replaces the old direct-ROM S99 launcher rather than racing it.
+
+### Optional volume and Wi-Fi settings
+
+Volume and Wi-Fi controls are hidden by default. To enable them on a development
+Deck, write `1` followed by a newline to
+`/mnt/data/nes-deck/state/settings-volume-wifi`, then restart the menu. An explicit
+`RETRO_DECK_SETTINGS_VOLUME_WIFI` environment value takes precedence; only `1`
+enables the controls.

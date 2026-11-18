@@ -62,7 +62,12 @@ if [ -n "${RETRO_DECK_WIDGET_ROOT:-}" ]; then
 fi
 
 export PATH LC_ALL TMPDIR
-export RETRO_DECK_VOLUME_PERCENT=$VOLUME_ON
+export RETRO_DECK_VOLUME_PERCENT="$VOLUME_ON"
+# An explicit environment value overrides the device-local setting.
+if [ -z "${RETRO_DECK_SETTINGS_VOLUME_WIFI+x}" ] && [ -f "$STATE_DIR/settings-volume-wifi" ]; then
+	IFS= read -r RETRO_DECK_SETTINGS_VOLUME_WIFI < "$STATE_DIR/settings-volume-wifi" || RETRO_DECK_SETTINGS_VOLUME_WIFI=0
+fi
+export RETRO_DECK_SETTINGS_VOLUME_WIFI="${RETRO_DECK_SETTINGS_VOLUME_WIFI:-0}"
 
 umask 077
 

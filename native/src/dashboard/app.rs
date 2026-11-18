@@ -367,6 +367,14 @@ impl App {
         Vec::new()
     }
     fn settings_plan(&mut self, plan: settings::Effect, touch_batch: bool) -> Vec<Effect> {
+        if !self.settings.volume_wifi
+            && matches!(
+                plan.action,
+                settings::Action::Volume(_) | settings::Action::Wifi
+            )
+        {
+            return Vec::new();
+        }
         match plan.action {
             settings::Action::Close => {
                 self.set_view(View::Dashboard);
@@ -415,7 +423,7 @@ impl App {
                 self.cancel_reboot();
                 let opening = self.view != View::Settings;
                 if opening {
-                    self.settings.selected = settings::Target::VolumeDown;
+                    self.settings.selected = self.settings.initial_target();
                 }
                 self.set_view(if opening {
                     View::Settings
@@ -520,7 +528,7 @@ impl App {
                 screen(Some(Cue::Confirm))
             }
             Some(menu::Target::Settings) => {
-                self.settings.selected = settings::Target::VolumeDown;
+                self.settings.selected = self.settings.initial_target();
                 self.set_view(View::Settings);
                 self.set_status("");
                 screen(Some(Cue::Confirm))
@@ -664,9 +672,10 @@ impl App {
                     self.dashboard_touch(report, layout.ok_or("Dashboard has no menu layout")?, now)
                 }
                 View::Settings => {
+                    let layout = settings::Layout::for_settings(&self.settings);
                     if let Some(plan) = settings::touch(
                         &mut self.settings,
-                        &settings::Layout::default(),
+                        &layout,
                         report.x,
                         report.y,
                         report.pressed,
@@ -976,6 +985,31 @@ mod tests {
     use super::*;
     fn app() -> App {
         App::new(policy::builtins(), credits::Credits::empty(), false)
+    }
+    #[test]
+    fn hidden_settings_cannot_be_focused_or_activated() {
+        let mut a = app();
+        a.command(Command::Settings, 100);
+        assert_eq!(a.settings.selected, settings::Target::Terminal);
+        a.command(Command::Next, 100);
+        assert_eq!(a.settings.selected, settings::Target::Keymap);
+        a.command(Command::Next, 100);
+        assert_eq!(a.settings.selected, settings::Target::Terminal);
+        let layout = settings::Layout::for_settings(&a.settings);
+        for (target, rect) in [
+            (settings::Target::Wifi, layout.wifi),
+            (settings::Target::VolumeDown, layout.volume_down),
+            (settings::Target::VolumeUp, layout.volume_up),
+        ] {
+            assert_eq!(
+                settings::target_at(&a.settings, &layout, rect.x + 1, rect.y + 1),
+                None
+            );
+            a.settings.selected = target;
+            assert!(a.command(Command::Confirm, 100).is_empty());
+            assert!(a.pending.is_none());
+            assert_eq!(a.view, View::Settings);
+        }
     }
     #[test]
     fn credits_render_on_deadlines_without_catching_up_missed_frames() {

@@ -65,6 +65,16 @@ pub struct Layout {
     pub terminal: Rect,
     pub keymap: Rect,
 }
+impl Layout {
+    pub fn for_settings(s: &State) -> Self {
+        let mut layout = Self::default();
+        if !s.volume_wifi {
+            layout.terminal.x = 394;
+            layout.keymap.x = 774;
+        }
+        layout
+    }
+}
 impl Default for Layout {
     fn default() -> Self {
         Self {
@@ -79,6 +89,7 @@ impl Default for Layout {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct State {
+    pub volume_wifi: bool,
     pub open: bool,
     pub selected: Target,
     pub pressed: Option<Target>,
@@ -88,12 +99,25 @@ pub struct State {
     pub status: String,
 }
 impl State {
+    pub fn initial_target(&self) -> Target {
+        if self.volume_wifi {
+            Target::VolumeDown
+        } else {
+            Target::Terminal
+        }
+    }
+
+    pub fn available(&self, target: Target) -> bool {
+        self.volume_wifi || !matches!(target, Target::VolumeDown | Target::VolumeUp | Target::Wifi)
+    }
+
     pub fn new(volume: u8, keymap: &str) -> Self {
         assert!(volume <= 100, "volume must be 0..100");
         assert!(matches!(keymap, "us" | "cz"), "unknown terminal keymap");
         Self {
             open: true,
-            selected: Target::VolumeDown,
+            volume_wifi: false,
+            selected: Target::Terminal,
             pressed: None,
             volume,
             last_audible_volume: if volume == 0 { VOLUME_DEFAULT } else { volume },
@@ -188,7 +212,7 @@ pub fn load_volume(path: &Path, default: u8) -> Result<u8, String> {
     Ok(value)
 }
 
-pub fn target_at(l: &Layout, x: i32, y: i32) -> Option<Target> {
+pub fn target_at(s: &State, l: &Layout, x: i32, y: i32) -> Option<Target> {
     [
         (Target::Close, l.close),
         (Target::VolumeDown, l.volume_down),
@@ -199,7 +223,7 @@ pub fn target_at(l: &Layout, x: i32, y: i32) -> Option<Target> {
     ]
     .iter()
     .copied()
-    .find_map(|(t, r)| r.contains(x, y).then_some(t))
+    .find_map(|(t, r)| (s.available(t) && r.contains(x, y)).then_some(t))
 }
 pub fn activate(s: &State, t: Target) -> Effect {
     let cue = match t {
@@ -275,11 +299,13 @@ pub fn move_selection(s: &mut State, d: Direction) -> Cue {
         Target::Keymap,
         Target::Wifi,
     ];
-    let i = O.iter().position(|x| *x == s.selected).unwrap_or(0);
-    s.selected = O[match d {
-        Direction::Previous => (i + O.len() - 1) % O.len(),
-        Direction::Next => (i + 1) % O.len(),
-    }];
+    let order = if s.volume_wifi { &O[..] } else { &O[2..4] };
+    let index = order.iter().position(|x| *x == s.selected);
+    s.selected = match (index, d) {
+        (Some(i), Direction::Previous) => order[(i + order.len() - 1) % order.len()],
+        (Some(i), Direction::Next) => order[(i + 1) % order.len()],
+        (None, _) => s.initial_target(),
+    };
     s.status.clear();
     if matches!(d, Direction::Previous) {
         Cue::Previous
@@ -295,7 +321,7 @@ pub fn touch(
     pressed: bool,
     released: bool,
 ) -> Option<Effect> {
-    let t = target_at(l, x, y);
+    let t = target_at(s, l, x, y);
     if pressed {
         s.pressed = t
     }
@@ -354,148 +380,171 @@ pub fn render_with_network(s: &State, network: &crate::network::NetworkStatus) -
     let surface = super::ui::color("control-surface");
     let active = super::ui::color("active");
     let accent = super::ui::color("accent");
-    o.push(DrawOp::Text {
-        i32_: 64,
-        y: 22,
-        text: "ACTIVE WIFI".into(),
-        scale: 1,
-        color: muted,
-    });
-    o.push(DrawOp::Text {
-        i32_: 64,
-        y: 44,
-        text: super::ui::fit_text_width(
-            if network.ssid.is_empty() {
-                "NOT CONNECTED"
+    let layout = Layout::for_settings(s);
+    if s.volume_wifi {
+        o.push(DrawOp::Text {
+            i32_: 64,
+            y: 22,
+            text: "ACTIVE WIFI".into(),
+            scale: 1,
+            color: muted,
+        });
+        o.push(DrawOp::Text {
+            i32_: 64,
+            y: 44,
+            text: super::ui::fit_text_width(
+                if network.ssid.is_empty() {
+                    "NOT CONNECTED"
+                } else {
+                    &network.ssid
+                },
+                300,
+                3,
+            ),
+            scale: 3,
+            color: text,
+        });
+        o.push(DrawOp::Text {
+            i32_: 392,
+            y: 22,
+            text: "WLAN0".into(),
+            scale: 1,
+            color: muted,
+        });
+        o.push(DrawOp::Text {
+            i32_: 392,
+            y: 44,
+            text: if network.wlan_ipv4.is_empty() {
+                "NO ADDRESS".into()
             } else {
-                &network.ssid
+                network.wlan_ipv4.clone()
             },
-            300,
-            3,
-        ),
-        scale: 3,
-        color: text,
-    });
-    o.push(DrawOp::Text {
-        i32_: 392,
-        y: 22,
-        text: "WLAN0".into(),
-        scale: 1,
-        color: muted,
-    });
-    o.push(DrawOp::Text {
-        i32_: 392,
-        y: 44,
-        text: if network.wlan_ipv4.is_empty() {
-            "NO ADDRESS".into()
-        } else {
-            network.wlan_ipv4.clone()
-        },
-        scale: 2,
-        color: text,
-    });
-    o.push(DrawOp::Text {
-        i32_: 620,
-        y: 22,
-        text: "WIREGUARD".into(),
-        scale: 1,
-        color: muted,
-    });
-    o.push(DrawOp::Text {
-        i32_: 620,
-        y: 44,
-        text: if network.wireguard_ipv4.is_empty() {
-            "NO ADDRESS".into()
-        } else {
-            network.wireguard_ipv4.clone()
-        },
-        scale: 2,
-        color: text,
-    });
-    o.push(DrawOp::Text {
-        i32_: 64,
-        y: 88,
-        text: super::ui::fit_text_width(&format!("AUTO WIFI: {}", network.selector), 790, 1),
-        scale: 1,
-        color: super::ui::color("footer"),
-    });
-    let layout = Layout::default();
-    let wifi = layout.wifi;
-    pixel_panel(
-        &mut o,
-        wifi,
-        if s.selected == Target::Wifi {
-            active
-        } else {
-            surface
-        },
-        if s.selected == Target::Wifi {
-            accent
-        } else {
-            border
-        },
-    );
-    let controls = [
-        (layout.volume_down, Target::VolumeDown),
-        (layout.volume_up, Target::VolumeUp),
-        (layout.terminal, Target::Terminal),
-        (layout.keymap, Target::Keymap),
-    ];
-    for (r, t) in controls {
+            scale: 2,
+            color: text,
+        });
+        o.push(DrawOp::Text {
+            i32_: 620,
+            y: 22,
+            text: "WIREGUARD".into(),
+            scale: 1,
+            color: muted,
+        });
+        o.push(DrawOp::Text {
+            i32_: 620,
+            y: 44,
+            text: if network.wireguard_ipv4.is_empty() {
+                "NO ADDRESS".into()
+            } else {
+                network.wireguard_ipv4.clone()
+            },
+            scale: 2,
+            color: text,
+        });
+        o.push(DrawOp::Text {
+            i32_: 64,
+            y: 88,
+            text: super::ui::fit_text_width(&format!("AUTO WIFI: {}", network.selector), 790, 1),
+            scale: 1,
+            color: super::ui::color("footer"),
+        });
+        let wifi = layout.wifi;
         pixel_panel(
             &mut o,
-            r,
-            if s.selected == t { active } else { surface },
-            if s.selected == t { accent } else { border },
+            wifi,
+            if s.selected == Target::Wifi {
+                active
+            } else {
+                surface
+            },
+            if s.selected == Target::Wifi {
+                accent
+            } else {
+                border
+            },
         );
-    }
-    // Wi-Fi card geometry is relative to the card, as in the legacy renderer.
-    for (dx, dy, w, h) in [
-        (-6, 0, 12, 5),
-        (-12, 5, 6, 5),
-        (6, 5, 6, 5),
-        (-18, 10, 6, 5),
-        (12, 10, 6, 5),
-        (-6, 22, 12, 5),
-        (-12, 27, 6, 5),
-        (6, 27, 6, 5),
-        (-3, 36, 6, 6),
-    ] {
-        o.push(DrawOp::Fill(
-            Rect::new(938 + 27 + dx, 44 + 5 + dy, w as u32, h as u32),
-            text,
-        ));
-    }
-    o.push(DrawOp::Text {
-        i32_: 1004,
-        y: 48,
-        text: "WIFI".into(),
-        scale: 3,
-        color: text,
-    });
-    o.push(DrawOp::Text {
-        i32_: 1004,
-        y: 84,
-        text: "SETTINGS".into(),
-        scale: 2,
-        color: muted,
-    });
-    for (r, loud) in [(layout.volume_down, false), (layout.volume_up, true)] {
-        let x = r.x + 24;
-        let y = r.y + (r.h as i32 / 2);
+        let controls = [
+            (layout.volume_down, Target::VolumeDown),
+            (layout.volume_up, Target::VolumeUp),
+        ];
+        for (r, t) in controls {
+            pixel_panel(
+                &mut o,
+                r,
+                if s.selected == t { active } else { surface },
+                if s.selected == t { accent } else { border },
+            );
+        }
+        // Wi-Fi card geometry is relative to the card, as in the legacy renderer.
         for (dx, dy, w, h) in [
-            (0, -12, 12, 24),
-            (12, -20, 12, 40),
-            (24, -28, 8, 56),
-            (40, -16, 4, 32),
-            (44, -12, 4, 24),
+            (-6, 0, 12, 5),
+            (-12, 5, 6, 5),
+            (6, 5, 6, 5),
+            (-18, 10, 6, 5),
+            (12, 10, 6, 5),
+            (-6, 22, 12, 5),
+            (-12, 27, 6, 5),
+            (6, 27, 6, 5),
+            (-3, 36, 6, 6),
         ] {
-            o.push(DrawOp::Fill(Rect::new(x + dx, y + dy, w, h), text));
+            o.push(DrawOp::Fill(
+                Rect::new(938 + 27 + dx, 44 + 5 + dy, w as u32, h as u32),
+                text,
+            ));
         }
-        if loud {
-            o.push(DrawOp::Fill(Rect::new(x + 56, y - 24, 4, 48), text));
-            o.push(DrawOp::Fill(Rect::new(x + 60, y - 16, 4, 32), text));
+        o.push(DrawOp::Text {
+            i32_: 1004,
+            y: 48,
+            text: "WIFI".into(),
+            scale: 3,
+            color: text,
+        });
+        o.push(DrawOp::Text {
+            i32_: 1004,
+            y: 84,
+            text: "SETTINGS".into(),
+            scale: 2,
+            color: muted,
+        });
+        for (r, loud) in [(layout.volume_down, false), (layout.volume_up, true)] {
+            let x = r.x + 24;
+            let y = r.y + (r.h as i32 / 2);
+            for (dx, dy, w, h) in [
+                (0, -12, 12, 24),
+                (12, -20, 12, 40),
+                (24, -28, 8, 56),
+                (40, -16, 4, 32),
+                (44, -12, 4, 24),
+            ] {
+                o.push(DrawOp::Fill(Rect::new(x + dx, y + dy, w, h), text));
+            }
+            if loud {
+                o.push(DrawOp::Fill(Rect::new(x + 56, y - 24, 4, 48), text));
+                o.push(DrawOp::Fill(Rect::new(x + 60, y - 16, 4, 32), text));
+            }
         }
+    } else {
+        o.push(DrawOp::Text {
+            i32_: 64,
+            y: 44,
+            text: "SETTINGS".into(),
+            scale: 3,
+            color: text,
+        });
+    }
+    for (rect, target) in [
+        (layout.terminal, Target::Terminal),
+        (layout.keymap, Target::Keymap),
+    ] {
+        pixel_panel(
+            &mut o,
+            rect,
+            if s.selected == target {
+                active
+            } else {
+                surface
+            },
+            if s.selected == target { accent } else { border },
+        );
     }
     let terminal_x = layout.terminal.x + layout.terminal.w as i32 / 2;
     let terminal_y = layout.terminal.y;
@@ -537,27 +586,29 @@ pub fn render_with_network(s: &State, network: &crate::network::NetworkStatus) -
             color: colour,
         })
     };
-    let volume_x = (layout.volume_down.x + layout.volume_up.x + layout.volume_up.w as i32) / 2;
     let keys_x = layout.keymap.x + layout.keymap.w as i32 / 2;
     let caption = |x, w: u32, y, h| Rect::new(x - w as i32 / 2, y, w, h);
-    centered(
-        &mut o,
-        caption(volume_x, 276, 328, 34),
-        if s.volume == 0 {
-            "OFF".into()
-        } else {
-            s.volume.to_string()
-        },
-        3,
-        text,
-    );
-    centered(
-        &mut o,
-        caption(volume_x, 276, 366, 28),
-        "VOLUME".into(),
-        2,
-        muted,
-    );
+    if s.volume_wifi {
+        let volume_x = (layout.volume_down.x + layout.volume_up.x + layout.volume_up.w as i32) / 2;
+        centered(
+            &mut o,
+            caption(volume_x, 276, 328, 34),
+            if s.volume == 0 {
+                "OFF".into()
+            } else {
+                s.volume.to_string()
+            },
+            3,
+            text,
+        );
+        centered(
+            &mut o,
+            caption(volume_x, 276, 366, 28),
+            "VOLUME".into(),
+            2,
+            muted,
+        );
+    }
     centered(
         &mut o,
         caption(terminal_x, 196, 328, 34),
@@ -638,7 +689,7 @@ pub fn execute_draw_ops(ops: &[DrawOp]) {
 pub fn render_frame(s: &State, network: &crate::network::NetworkStatus) -> Layout {
     let ops = render_with_network(s, network);
     execute_draw_ops(&ops);
-    Layout::default()
+    Layout::for_settings(s)
 }
 #[cfg(test)]
 mod tests {
@@ -650,7 +701,11 @@ mod tests {
     }
     #[test]
     fn controller_cycles_through_settings_actions_in_both_directions() {
-        let mut state = State::default();
+        let mut state = State {
+            volume_wifi: true,
+            selected: Target::VolumeDown,
+            ..State::default()
+        };
         let order = [
             Target::VolumeDown,
             Target::VolumeUp,
@@ -688,7 +743,11 @@ mod tests {
     #[test]
     fn touch_activates_the_released_control_and_cancels_a_drag() {
         let layout = Layout::default();
-        let mut state = State::default();
+        let mut state = State {
+            volume_wifi: true,
+            selected: Target::VolumeDown,
+            ..State::default()
+        };
         for (target, rect) in [
             (Target::VolumeDown, layout.volume_down),
             (Target::VolumeUp, layout.volume_up),
@@ -699,7 +758,7 @@ mod tests {
         ] {
             let x = rect.x + rect.w as i32 / 2;
             let y = rect.y + rect.h as i32 / 2;
-            assert_eq!(target_at(&layout, x, y), Some(target));
+            assert_eq!(target_at(&state, &layout, x, y), Some(target));
             assert_eq!(touch(&mut state, &layout, x, y, true, false), None);
             let expected = activate(&state, target);
             assert_eq!(

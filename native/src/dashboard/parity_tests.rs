@@ -187,6 +187,7 @@ mod tests {
         ];
         let observed = fixtures.map(|(volume, keymap, selected, status, _)| {
             let mut state = settings::State::new(volume, keymap);
+            state.volume_wifi = true;
             state.selected = selected;
             state.status = status.into();
             settings::render_frame(&state, &network);
