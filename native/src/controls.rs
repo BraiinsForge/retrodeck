@@ -4,14 +4,13 @@ use crate::evdev_input::{
 };
 use evdev::raw_stream::RawDevice;
 use evdev::{AbsoluteAxisCode, EventSummary, InputEvent, KeyCode, SynchronizationCode};
-use rustix::event::{PollFd, PollFlags, Timespec, poll};
+use rustix::event::{PollFd, PollFlags};
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs;
 use std::io::{self, ErrorKind};
 use std::os::fd::AsFd;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
 
 pub const KEYBOARD_REPORT: u32 = 0;
 pub const GAMEPAD_REPORT: u32 = 1;
@@ -444,36 +443,6 @@ impl Controls {
         }));
     }
 
-    fn dispatch(&mut self, timeout_ms: u32) -> Result<(usize, bool), String> {
-        if !self.reports.is_empty() || self.gamepads.is_empty() && self.keyboards.is_empty() {
-            return Ok((self.reports.len(), self.rescan_requested));
-        }
-        let deadline = Instant::now() + Duration::from_millis(u64::from(timeout_ms));
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            let timeout = Timespec {
-                tv_sec: remaining.as_secs() as i64,
-                tv_nsec: i64::from(remaining.subsec_nanos()),
-            };
-            let mut descriptors = Vec::with_capacity(self.gamepads.len() + self.keyboards.len());
-            self.append_poll_descriptors(&mut descriptors);
-            match poll(&mut descriptors, Some(&timeout)) {
-                Ok(0) => return Ok((self.reports.len(), self.rescan_requested)),
-                Ok(_) => {
-                    let ready = descriptors.iter().map(PollFd::revents).collect::<Vec<_>>();
-                    drop(descriptors);
-                    self.read_ready(&ready);
-                    return Ok((self.reports.len(), self.rescan_requested));
-                }
-                Err(rustix::io::Errno::INTR) if Instant::now() < deadline => continue,
-                Err(rustix::io::Errno::INTR) => {
-                    return Ok((self.reports.len(), self.rescan_requested));
-                }
-                Err(error) => return Err(format!("cannot poll controller input: {error}")),
-            }
-        }
-    }
-
     pub(crate) fn read_ready(&mut self, ready: &[PollFlags]) {
         let first_keyboard = self.gamepads.len();
         let mut lost_gamepads = Vec::new();
@@ -551,10 +520,6 @@ pub fn scan_gamepads() -> Result<usize, String> {
 
 pub fn close() {
     CONTROLS.with(|controls| *controls.borrow_mut() = Controls::default());
-}
-
-pub fn dispatch(timeout_ms: u32) -> Result<(usize, bool), String> {
-    CONTROLS.with(|controls| controls.borrow_mut().dispatch(timeout_ms))
 }
 
 pub fn next_report() -> Option<ControlReport> {
