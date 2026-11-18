@@ -292,13 +292,6 @@
         hash = "sha256-ieYfr4TYVRGUVriK/duN+iOlr8oAIAxz4IfnbG4hOis=";
       };
 
-      # The license text fbDOOM's source headers point at. The fork ships no
-      # COPYING of its own.
-      gpl2Text = pkgs.fetchurl {
-        url = "https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt";
-        hash = "sha256-7a72Msu2Q+TnoiFxemxEGkwafJGObk1W3rw9hzmyM/Y=";
-      };
-
       # The DOOM engine as a static archive. Everything platform-specific is
       # dropped here and supplied by native/doom instead: the fork's
       # framebuffer backend would fight the BMC compositor for the panel, its
@@ -475,9 +468,9 @@ PATCH
             install -Dm644 libdoom.a $out/lib/libdoom.a
             install -Dm644 ../README.TXT \
               $out/share/licenses/doom-deck/fbDOOM-README.TXT
-            # Neither fbDOOM nor the Deck fork ships a license file, so the
-            # GPL-2.0 text their headers refer to is pinned by hash here.
-            install -Dm644 ${gpl2Text} \
+            # fbDOOM's headers refer to this GPL-2.0 text but its source tree
+            # does not include a copy. Bundle the verbatim GNU text.
+            install -Dm644 ${./nix/licenses/gpl-2.0.txt} \
               $out/share/licenses/doom-deck/DOOM-COPYING
             # The OPL emulator, MIDI reader, and MUS converter.
             install -Dm644 ${chocolate-doom-src}/COPYING \
