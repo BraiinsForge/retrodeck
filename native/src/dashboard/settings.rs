@@ -1,23 +1,17 @@
 /// Pure settings reducer and persistence. Rendering is represented as deterministic draw ops.
 use std::path::Path;
 
-use crate::{control_file, state_file};
+use crate::state_file;
 
 pub const VOLUME_DEFAULT: u8 = 42;
 pub const VOLUME_STEP: u8 = 5;
-pub const BRIGHTNESS_DEFAULT: u8 = 100;
 pub const VOLUME_STATE: &str = "/mnt/data/nes-deck/state/menu-volume.state";
-pub const BRIGHTNESS_STATE: &str = "/mnt/data/nes-deck/state/menu-brightness.state";
-pub const BRIGHTNESS_DEVICE: &str = "/sys/class/backlight/display-bl/brightness";
-pub const BRIGHTNESS_MAXIMUM: &str = "/sys/class/backlight/display-bl/max_brightness";
 pub const KEYMAP_STATE: &str = "/mnt/data/nes-deck/state/terminal-keymap.state";
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Target {
     Close,
     VolumeDown,
     VolumeUp,
-    BrightnessDown,
-    BrightnessUp,
     Terminal,
     Keymap,
     Wifi,
@@ -38,7 +32,6 @@ pub enum Cue {
 pub enum Action {
     Close,
     Volume(u8),
-    Brightness(u8),
     Keymap(String),
     Terminal,
     Wifi,
@@ -69,8 +62,6 @@ pub struct Layout {
     pub wifi: Rect,
     pub volume_down: Rect,
     pub volume_up: Rect,
-    pub brightness_down: Rect,
-    pub brightness_up: Rect,
     pub terminal: Rect,
     pub keymap: Rect,
 }
@@ -81,8 +72,6 @@ impl Default for Layout {
             wifi: Rect::new(926, 20, 262, 108),
             volume_down: Rect::new(108, 208, 104, 104),
             volume_up: Rect::new(228, 208, 104, 104),
-            brightness_down: Rect::new(438, 208, 104, 104),
-            brightness_up: Rect::new(558, 208, 104, 104),
             terminal: Rect::new(792, 208, 112, 104),
             keymap: Rect::new(1036, 208, 112, 104),
         }
@@ -95,14 +84,12 @@ pub struct State {
     pub pressed: Option<Target>,
     pub volume: u8,
     pub last_audible_volume: u8,
-    pub brightness: u8,
     pub keymap: String,
     pub status: String,
 }
 impl State {
-    pub fn new(volume: u8, brightness: u8, keymap: &str) -> Self {
+    pub fn new(volume: u8, keymap: &str) -> Self {
         assert!(volume <= 100, "volume must be 0..100");
-        assert!(brightness <= 100, "brightness must be 0..100");
         assert!(matches!(keymap, "us" | "cz"), "unknown terminal keymap");
         Self {
             open: true,
@@ -110,7 +97,6 @@ impl State {
             pressed: None,
             volume,
             last_audible_volume: if volume == 0 { VOLUME_DEFAULT } else { volume },
-            brightness,
             keymap: keymap.into(),
             status: String::new(),
         }
@@ -118,7 +104,7 @@ impl State {
 }
 impl Default for State {
     fn default() -> Self {
-        Self::new(VOLUME_DEFAULT, 100, "us")
+        Self::new(VOLUME_DEFAULT, "us")
     }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -175,60 +161,8 @@ pub fn parse_volume_state(s: &str) -> Result<u8, String> {
         .map(|x| x as u8)
         .ok_or("volume state outside 0..100".into())
 }
-pub fn brightness_valid(v: u8) -> bool {
-    (10..=100).contains(&v) && v % 10 == 0
-}
-pub fn brightness_state_text(v: u8) -> Result<String, String> {
-    if brightness_valid(v) {
-        Ok(format!("{v}\n"))
-    } else {
-        Err("brightness must be a 10-point step from 10 through 100".into())
-    }
-}
-pub fn parse_brightness_state(s: &str) -> Result<u8, String> {
-    let v = parse_volume_state(s)?;
-    if brightness_valid(v) {
-        Ok(v)
-    } else {
-        Err("brightness state must contain a 10-point step from 10 through 100 followed by a newline".into())
-    }
-}
-pub fn brightness_raw_value(percent: u32, max: u32) -> u32 {
-    if max == 0 {
-        0
-    } else {
-        (((percent as u64 * max as u64 + 50) / 100) as u32).clamp(1, max)
-    }
-}
-
-pub fn observed_brightness_percent(cur: u32, max: u32) -> Result<u8, String> {
-    if max == 0 || cur > max {
-        return Err("brightness is outside the backlight range".into());
-    }
-    let observed = ((cur as u64 * 100 + (max / 2) as u64) / max as u64) as u32;
-    Ok((((observed + 5) / 10) * 10).clamp(10, 100) as u8)
-}
-
-fn control_integer(bytes: &[u8], role: &str) -> Result<u32, String> {
-    let text = std::str::from_utf8(bytes)
-        .map_err(|_| format!("{role} must contain an unsigned integer"))?;
-    let text = text.trim_matches(|c: char| matches!(c, '\u{9}'..='\u{d}' | ' '));
-    if text.is_empty() {
-        return Err(format!("{role} is empty"));
-    }
-    if !text.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(format!("{role} must contain an unsigned integer"));
-    }
-    text.parse::<u32>()
-        .map_err(|_| format!("{role} is too large"))
-}
-
 pub fn save_volume(path: &Path, v: u8) -> Result<(), String> {
     state_file::write(path, volume_state_text(v)?.as_bytes())
-}
-
-pub fn save_brightness(path: &Path, v: u8) -> Result<(), String> {
-    state_file::write(path, brightness_state_text(v)?.as_bytes())
 }
 
 pub fn load_volume(path: &Path, default: u8) -> Result<u8, String> {
@@ -254,57 +188,11 @@ pub fn load_volume(path: &Path, default: u8) -> Result<u8, String> {
     Ok(value)
 }
 
-pub fn set_backlight(
-    device: &Path,
-    state: &Path,
-    maximum: Option<u32>,
-    percent: u8,
-) -> Result<(), String> {
-    let maximum = maximum.ok_or_else(|| "brightness maximum is unknown".to_owned())?;
-    if maximum == 0 || !brightness_valid(percent) {
-        return Err("brightness must be a 10-point step from 10 through 100".into());
-    }
-    control_file::write(
-        device,
-        format!("{}\n", brightness_raw_value(percent as u32, maximum)).as_bytes(),
-    )
-    .map_err(|_| format!("cannot write brightness {}", device.display()))?;
-    save_brightness(state, percent)
-        .map_err(|_| format!("cannot save brightness state {}", state.display()))?;
-    Ok(())
-}
-
-pub fn load_backlight(
-    device: &Path,
-    maximum_path: &Path,
-    state: &Path,
-) -> Result<(u8, Option<u32>), String> {
-    let maximum = control_integer(&control_file::read(maximum_path)?, "maximum brightness")?;
-    if maximum == 0 {
-        return Err("brightness is outside the backlight range".into());
-    }
-    let current = control_integer(&control_file::read(device)?, "brightness")?;
-    if current > maximum {
-        return Err("brightness is outside the backlight range".into());
-    }
-    let percent = match state_file::read(state)? {
-        state_file::StateRead::Value(bytes) => {
-            let text = std::str::from_utf8(&bytes)
-                .map_err(|_| "brightness state is not UTF-8".to_owned())?;
-            parse_brightness_state(text)?
-        }
-        state_file::StateRead::Missing => observed_brightness_percent(current, maximum)?,
-    };
-    set_backlight(device, state, Some(maximum), percent)?;
-    Ok((percent, Some(maximum)))
-}
 pub fn target_at(l: &Layout, x: i32, y: i32) -> Option<Target> {
     [
         (Target::Close, l.close),
         (Target::VolumeDown, l.volume_down),
         (Target::VolumeUp, l.volume_up),
-        (Target::BrightnessDown, l.brightness_down),
-        (Target::BrightnessUp, l.brightness_up),
         (Target::Terminal, l.terminal),
         (Target::Keymap, l.keymap),
         (Target::Wifi, l.wifi),
@@ -316,8 +204,8 @@ pub fn target_at(l: &Layout, x: i32, y: i32) -> Option<Target> {
 pub fn activate(s: &State, t: Target) -> Effect {
     let cue = match t {
         Target::Close => Cue::Back,
-        Target::VolumeDown | Target::BrightnessDown => Cue::Previous,
-        Target::VolumeUp | Target::BrightnessUp => Cue::Next,
+        Target::VolumeDown => Cue::Previous,
+        Target::VolumeUp => Cue::Next,
         _ => Cue::Confirm,
     };
     let action = match t {
@@ -328,8 +216,6 @@ pub fn activate(s: &State, t: Target) -> Effect {
         } else {
             (s.volume + VOLUME_STEP).min(100)
         }),
-        Target::BrightnessDown => Action::Brightness(s.brightness.saturating_sub(10).max(10)),
-        Target::BrightnessUp => Action::Brightness((s.brightness + 10).min(100)),
         Target::Terminal => Action::Terminal,
         Target::Keymap => Action::Keymap(if s.keymap == "cz" {
             "us".into()
@@ -366,14 +252,6 @@ pub fn complete(s: &mut State, e: &Effect, ok: bool, tone_ok: bool) {
                 s.status = "VOLUME STATE ERROR".into()
             }
         }
-        Action::Brightness(v) => {
-            if ok {
-                s.brightness = *v;
-                s.status = format!("BRIGHTNESS {v}")
-            } else {
-                s.status = "BRIGHTNESS ERROR - CHECK LOG".into()
-            }
-        }
         Action::Keymap(v) => {
             if ok {
                 s.keymap = v.clone();
@@ -390,19 +268,17 @@ pub fn complete(s: &mut State, e: &Effect, ok: bool, tone_ok: bool) {
     }
 }
 pub fn move_selection(s: &mut State, d: Direction) -> Cue {
-    const O: [Target; 7] = [
+    const O: [Target; 5] = [
         Target::VolumeDown,
         Target::VolumeUp,
-        Target::BrightnessDown,
-        Target::BrightnessUp,
         Target::Terminal,
         Target::Keymap,
         Target::Wifi,
     ];
     let i = O.iter().position(|x| *x == s.selected).unwrap_or(0);
     s.selected = O[match d {
-        Direction::Previous => (i + 6) % 7,
-        Direction::Next => (i + 1) % 7,
+        Direction::Previous => (i + O.len() - 1) % O.len(),
+        Direction::Next => (i + 1) % O.len(),
     }];
     s.status.clear();
     if matches!(d, Direction::Previous) {
@@ -561,8 +437,6 @@ pub fn render_with_network(s: &State, network: &crate::network::NetworkStatus) -
     let controls = [
         (Rect::new(108, 208, 104, 104), Target::VolumeDown),
         (Rect::new(228, 208, 104, 104), Target::VolumeUp),
-        (Rect::new(438, 208, 104, 104), Target::BrightnessDown),
-        (Rect::new(558, 208, 104, 104), Target::BrightnessUp),
         (Rect::new(792, 208, 112, 104), Target::Terminal),
         (Rect::new(1036, 208, 112, 104), Target::Keymap),
     ];
@@ -625,42 +499,6 @@ pub fn render_with_network(s: &State, network: &crate::network::NetworkStatus) -
             o.push(DrawOp::Fill(Rect::new(x + 60, y - 16, 4, 32), text));
         }
     }
-    for (r, bright) in [
-        (Rect::new(438, 208, 104, 104), false),
-        (Rect::new(558, 208, 104, 104), true),
-    ] {
-        let cx = r.x + r.w as i32 / 2;
-        let cy = r.y + r.h as i32 / 2;
-        let half = if bright { 16 } else { 12 };
-        let reach = if bright { 34 } else { 28 };
-        let size = (half * 2) as u32;
-        o.push(DrawOp::Fill(
-            Rect::new(cx - half + 4, cy - half, size - 8, size),
-            text,
-        ));
-        o.push(DrawOp::Fill(
-            Rect::new(cx - half, cy - half + 4, size, size - 8),
-            text,
-        ));
-        for (x, y, w, h) in [
-            (cx - 3, cy - reach, 6, 10),
-            (cx - 3, cy + reach - 10, 6, 10),
-            (cx - reach, cy - 3, 10, 6),
-            (cx + reach - 10, cy - 3, 10, 6),
-        ] {
-            o.push(DrawOp::Fill(Rect::new(x, y, w, h), text));
-        }
-        if bright {
-            for (x, y) in [
-                (cx - 25, cy - 25),
-                (cx + 18, cy - 25),
-                (cx - 25, cy + 18),
-                (cx + 18, cy + 18),
-            ] {
-                o.push(DrawOp::Fill(Rect::new(x, y, 7, 7), text));
-            }
-        }
-    }
     o.push(DrawOp::Outline(Rect::new(825, 238, 46, 34), text, 3));
     o.push(DrawOp::Fill(Rect::new(845, 272, 6, 7), text));
     o.push(DrawOp::Fill(Rect::new(816, 279, 64, 3), text));
@@ -704,20 +542,6 @@ pub fn render_with_network(s: &State, network: &crate::network::NetworkStatus) -
         &mut o,
         Rect::new(82, 366, 276, 28),
         "VOLUME".into(),
-        2,
-        muted,
-    );
-    centered(
-        &mut o,
-        Rect::new(412, 328, 276, 34),
-        s.brightness.to_string(),
-        3,
-        text,
-    );
-    centered(
-        &mut o,
-        Rect::new(412, 366, 276, 28),
-        "BRIGHTNESS".into(),
         2,
         muted,
     );
@@ -806,14 +630,67 @@ mod tests {
         assert!(parse_volume_state("042\n").is_err())
     }
     #[test]
-    fn wrap() {
-        let mut s = State::default();
-        move_selection(&mut s, Direction::Previous);
-        assert_eq!(s.selected, Target::Wifi)
+    fn controller_cycles_through_settings_actions_in_both_directions() {
+        let mut state = State::default();
+        let order = [
+            Target::VolumeDown,
+            Target::VolumeUp,
+            Target::Terminal,
+            Target::Keymap,
+            Target::Wifi,
+        ];
+        for expected in order.into_iter().cycle().skip(1).take(order.len()) {
+            assert_eq!(controller(&mut state, Command::Next), None);
+            assert_eq!(state.selected, expected);
+        }
+        for expected in order.into_iter().rev() {
+            assert_eq!(controller(&mut state, Command::Previous), None);
+            assert_eq!(state.selected, expected);
+        }
+        for (target, action) in [
+            (Target::VolumeDown, Action::Volume(37)),
+            (Target::VolumeUp, Action::Volume(47)),
+            (Target::Terminal, Action::Terminal),
+            (Target::Keymap, Action::Keymap("cz".into())),
+            (Target::Wifi, Action::Wifi),
+        ] {
+            state.selected = target;
+            assert_eq!(
+                controller(&mut state, Command::Confirm).unwrap().action,
+                action
+            );
+        }
+        assert_eq!(
+            controller(&mut state, Command::Back).unwrap().action,
+            Action::Close
+        );
     }
+
     #[test]
-    fn raw() {
-        assert_eq!(brightness_raw_value(50, 255), 128)
+    fn touch_activates_the_released_control_and_cancels_a_drag() {
+        let layout = Layout::default();
+        let mut state = State::default();
+        for (target, rect) in [
+            (Target::VolumeDown, layout.volume_down),
+            (Target::VolumeUp, layout.volume_up),
+            (Target::Terminal, layout.terminal),
+            (Target::Keymap, layout.keymap),
+            (Target::Wifi, layout.wifi),
+            (Target::Close, layout.close),
+        ] {
+            let x = rect.x + rect.w as i32 / 2;
+            let y = rect.y + rect.h as i32 / 2;
+            assert_eq!(target_at(&layout, x, y), Some(target));
+            assert_eq!(touch(&mut state, &layout, x, y, true, false), None);
+            let expected = activate(&state, target);
+            assert_eq!(
+                touch(&mut state, &layout, x, y, false, true),
+                Some(expected)
+            );
+        }
+        assert_eq!(touch(&mut state, &layout, 160, 260, true, false), None);
+        assert_eq!(touch(&mut state, &layout, 280, 260, false, true), None);
+        assert_eq!(state.pressed, None);
     }
 }
 

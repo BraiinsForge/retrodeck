@@ -77,14 +77,11 @@ The launcher also expects:
 - `/mnt/data/nes-deck/uploads/games.tsv` for validated web uploads
 
 The launcher starts the standalone Rust dashboard. It initializes persistent volume at
-`/mnt/data/nes-deck/state/menu-volume.state` to 42, adopts the current display
-backlight in `/mnt/data/nes-deck/state/menu-brightness.state`, and initializes
-terminal layout at `/mnt/data/nes-deck/state/terminal-keymap.state` to `us`.
-Brightness is persisted in 10-point steps from 10 through 100 so the dashboard
-cannot turn the panel fully black. A legacy exact `on`/`off` sound state
-migrates to 42/0. The generated manifest and persistent control state stay
-under `/mnt/data/nes-deck/state`. A bounded
-persistent launcher log is kept at `/mnt/data/nes-deck/log/deck-menu.log`.
+`/mnt/data/nes-deck/state/menu-volume.state` to 42 and terminal layout at
+`/mnt/data/nes-deck/state/terminal-keymap.state` to `us`. A legacy exact `on`/`off`
+sound state migrates to 42/0. The generated manifest and persistent control state
+live under `/mnt/data/nes-deck/state`. A bounded persistent launcher log is kept
+at `/mnt/data/nes-deck/log/deck-menu.log`.
 The native menu appends child start, exit-status, and signal details there;
 launcher milestones are also sent to logd.
 The launcher disables the Linux console's ten-minute blank timer at each boot,
@@ -125,15 +122,13 @@ gamepad input on the shared host controller.
 The bottom-right cogwheel or controller Select opens settings. The settings
 screen shows the associated Wi-Fi name, `wlan0` address, WireGuard address,
 and automatic Wi-Fi state without changing the network. D-pad directions move
-among volume down/up, brightness down/up, terminal, keymap, and Wi-Fi; A
+among volume down/up, terminal, keymap, and Wi-Fi; A
 activates the selected control and B or the cross closes the screen. Volume is
 atomically persisted in 5-point steps from 0 through 100. Plus while muted
 restores the last audible level, or the configured default if the launcher
 started muted. Every nonzero adjustment plays a short confirmation chime. The
-selected volume is passed to every emulator. Brightness updates
-`/sys/class/backlight/display-bl/brightness` and persists in safe 10-point steps
-without changing any network state. Every console emulator draws an outlined
-pixel cross in the top-left corner. Holding that cross for two seconds
+selected volume is passed to every emulator. Every console emulator draws an
+outlined pixel cross in the top-left corner. Holding that cross for two seconds
 terminates the emulator child and redraws the menu. The full-screen hold target
 remains active, so a partially obscured icon cannot trap a player. Touch does
 not supply controller input; a keyboard or mapped controller is still needed

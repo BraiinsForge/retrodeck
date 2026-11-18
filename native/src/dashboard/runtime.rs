@@ -14,9 +14,6 @@ pub const WIFI_STATUS: &str = "/var/run/deck-wifi/status";
 #[derive(Clone, Debug)]
 pub struct Paths {
     pub volume: PathBuf,
-    pub brightness: PathBuf,
-    pub brightness_max: PathBuf,
-    pub brightness_state: PathBuf,
     pub keymap: PathBuf,
     pub wifi_helper: PathBuf,
     pub wifi_status: PathBuf,
@@ -25,9 +22,6 @@ impl Default for Paths {
     fn default() -> Self {
         Self {
             volume: settings::VOLUME_STATE.into(),
-            brightness: settings::BRIGHTNESS_DEVICE.into(),
-            brightness_max: settings::BRIGHTNESS_MAXIMUM.into(),
-            brightness_state: settings::BRIGHTNESS_STATE.into(),
             keymap: settings::KEYMAP_STATE.into(),
             wifi_helper: WIFI_HELPER.into(),
             wifi_status: WIFI_STATUS.into(),
@@ -39,15 +33,6 @@ impl Paths {
         let mut p = Self::default();
         if let Some(v) = &o.volume_state {
             p.volume = v.clone();
-        }
-        if let Some(v) = &o.brightness {
-            p.brightness = v.into();
-        }
-        if let Some(v) = &o.brightness_max {
-            p.brightness_max = v.into();
-        }
-        if let Some(v) = &o.brightness_state {
-            p.brightness_state = v.clone();
         }
         if let Some(v) = &o.keymap_state {
             p.keymap = v.clone();
@@ -79,7 +64,6 @@ pub struct Runtime {
     audio_owned: bool,
     sound_active: bool,
     input_until: u64,
-    brightness_maximum: Option<u32>,
     default_volume: u8,
     layout: Option<menu::MenuLayout>,
     renderer: menu::MenuRenderer,
@@ -173,7 +157,6 @@ impl Runtime {
             audio_owned: false,
             sound_active: false,
             input_until: 0,
-            brightness_maximum: None,
             default_volume,
             layout: None,
             renderer,
@@ -228,13 +211,6 @@ impl Runtime {
         } else {
             5
         };
-        let (brightness, maximum) = settings::load_backlight(
-            &self.paths.brightness,
-            &self.paths.brightness_max,
-            &self.paths.brightness_state,
-        )?;
-        app.settings.brightness = brightness;
-        self.brightness_maximum = maximum;
         app.settings.keymap = settings::load_keymap(&self.paths.keymap)?;
         self.open_presentation()?;
         if !self.widget() {
@@ -358,12 +334,6 @@ impl Runtime {
     fn settings_action(&mut self, plan: &settings::Effect) -> bool {
         let result = match &plan.action {
             settings::Action::Volume(value) => settings::save_volume(&self.paths.volume, *value),
-            settings::Action::Brightness(value) => settings::set_backlight(
-                &self.paths.brightness,
-                &self.paths.brightness_state,
-                self.brightness_maximum,
-                *value,
-            ),
             settings::Action::Keymap(value) => settings::save_keymap(&self.paths.keymap, value),
             _ => Err("Unexpected native settings action".into()),
         };

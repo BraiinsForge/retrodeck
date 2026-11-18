@@ -66,8 +66,6 @@ impl Default for Timings {
 }
 pub const VOLUME_DEFAULT: u8 = 42;
 pub const VOLUME_STEP: u8 = 5;
-pub const BRIGHTNESS_MINIMUM: u8 = 10;
-pub const BRIGHTNESS_STEP: u8 = 10;
 pub const CONTROLLER_BURST_LIMIT: usize = 12;
 pub use crate::catalog::metadata::DEFAULT_PALETTE_VALUES;
 fn builtin(id: &str, title: &str, rom: &str, color: u32, mode: Option<&str>) -> Game {
