@@ -91,7 +91,6 @@ pub fn builtins() -> Vec<Game> {
             0x5f87af,
             Some("shell"),
         ),
-        builtin("reboot", "REBOOT", "/sbin/reboot", 0xd75f5f, None),
     ]
 }
 fn bounded(path: &Path, max: usize, what: &str) -> Result<String, String> {
@@ -164,6 +163,9 @@ pub fn load_games(path: &Path) -> Result<Vec<Game>, String> {
         }
         let system =
             System::parse(f[2]).ok_or_else(|| format!("Invalid system on manifest line {n}"))?;
+        if f[0] == "reboot" {
+            continue;
+        }
         if !ids.insert(f[0]) {
             return Err(format!("Duplicate id on manifest line {n}"));
         }
@@ -270,7 +272,6 @@ pub struct LaunchPlan {
 pub enum LaunchKind {
     Game,
     Terminal,
-    Reboot,
 }
 
 /// Runtime executable overrides supplied by the launcher CLI. None selects the
@@ -285,7 +286,6 @@ pub struct LaunchConfig {
     pub tamagotchi_deck: Option<String>,
     pub chiptune_player: Option<String>,
     pub terminal: Option<String>,
-    pub reboot: Option<String>,
     pub doom_state_directory: Option<String>,
 }
 
@@ -300,7 +300,6 @@ impl LaunchConfig {
             "tamagotchi" => self.tamagotchi_deck.as_deref(),
             "chiptunes" => self.chiptune_player.as_deref(),
             "terminal" => self.terminal.as_deref(),
-            "reboot" => self.reboot.as_deref(),
             _ => None,
         }
         .unwrap_or(default)
@@ -338,21 +337,6 @@ pub fn launch_plan(
             kind: LaunchKind::Terminal,
             touch_supervision: true,
             mirror_console: true,
-            volume,
-            keymap: keymap.into(),
-            wayland,
-            volume_state: volume_state.map(Path::to_path_buf),
-        };
-    }
-    if g.system == System::Deck && g.id == "reboot" {
-        return LaunchPlan {
-            executable: config.executable("reboot", &g.rom).into(),
-            arguments: vec![],
-            environment: vec![],
-            label: "reboot".into(),
-            kind: LaunchKind::Reboot,
-            touch_supervision: true,
-            mirror_console: false,
             volume,
             keymap: keymap.into(),
             wayland,
@@ -478,8 +462,17 @@ mod tests {
     }
 
     #[test]
-    fn builtins_end_in_reboot() {
-        assert_eq!(builtins().last().unwrap().id, "reboot");
+    fn ignores_the_retired_reboot_entry_in_a_cached_manifest() {
+        let dir = crate::test_support::fixture_directory("reboot-manifest");
+        let manifest = dir.join("games.tsv");
+        std::fs::write(
+            &manifest,
+            "id\ttitle\tsystem\trom\tcolor\nreboot\tREBOOT\tdeck\t/sbin/reboot\t#d75f5f\nexample\tExample\tnes\t/mnt/data/roms/nes/example.nes\t#5f87af\n",
+        ).unwrap();
+        let games = load_games(&manifest).unwrap();
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].id, "example");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -557,11 +550,6 @@ mod tests {
             repl.environment,
             vec![("RETRO_DECK_KEYMAP".into(), "de".into())]
         );
-        let reboot = p(game("reboot", System::Deck, "/sbin/reboot"));
-        assert_eq!(reboot.kind, LaunchKind::Reboot);
-        assert!(reboot.arguments.is_empty() && reboot.environment.is_empty());
-        assert_eq!(reboot.volume, 37);
-        assert!(reboot.wayland && reboot.volume_state == Some(PathBuf::from("/state/volume")));
     }
 
     #[test]

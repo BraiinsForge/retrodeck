@@ -2,7 +2,6 @@
 use super::{credits, menu, policy, settings, wifi};
 use crate::{controls, input::TouchReport, network::NetworkStatus, process::ChildResult};
 
-pub const REBOOT_CONFIRMATION: &str = "PRESS A OR TAP AGAIN TO REBOOT";
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum View {
     Dashboard,
@@ -244,7 +243,6 @@ pub struct App {
     pub touch_connected: bool,
     pub last_touch_reconnect: u64,
     pub network_refreshed_at: u64,
-    pub reboot_deadline: u64,
     pub pending: Option<Pending>,
 }
 fn screen(cue: Option<Cue>) -> Vec<Effect> {
@@ -287,7 +285,6 @@ impl App {
             touch_connected: true,
             last_touch_reconnect: 0,
             network_refreshed_at: 0,
-            reboot_deadline: 0,
             pending: None,
         }
     }
@@ -306,12 +303,6 @@ impl App {
         self.view = view;
         self.settings.open = matches!(view, View::Settings | View::Wifi);
         self.wifi.open = view == View::Wifi;
-    }
-    fn cancel_reboot(&mut self) {
-        self.reboot_deadline = 0;
-        if self.status == REBOOT_CONFIRMATION {
-            self.set_status("");
-        }
     }
     pub fn selected_game(&self) -> Option<usize> {
         let indices = self.indices();
@@ -344,21 +335,10 @@ impl App {
         }
         Ok(game)
     }
-    fn request_game(&mut self, index: usize, now: u64, touch_batch: bool) -> Vec<Effect> {
-        let Some(game) = self.games.get(index) else {
+    fn request_game(&mut self, index: usize, touch_batch: bool) -> Vec<Effect> {
+        if index >= self.games.len() {
             return Vec::new();
         };
-        if game.id == "reboot" {
-            if self.reboot_deadline > 0 && now < self.reboot_deadline {
-                self.reboot_deadline = 0;
-            } else {
-                self.reboot_deadline = now.saturating_add(4000);
-                self.set_status(REBOOT_CONFIRMATION);
-                return screen(Some(Cue::Confirm));
-            }
-        } else {
-            self.cancel_reboot();
-        }
         self.pending = Some(Pending::Launch(LaunchRequest {
             game: GameIndex::Catalog(index),
             mode: None,
@@ -405,7 +385,6 @@ impl App {
     fn command(&mut self, command: Command, now: u64) -> Vec<Effect> {
         match command {
             Command::Back => {
-                self.cancel_reboot();
                 match self.view {
                     View::Credits | View::Settings => {
                         self.set_view(View::Dashboard);
@@ -420,7 +399,6 @@ impl App {
                 screen(Some(Cue::Back))
             }
             Command::Settings => {
-                self.cancel_reboot();
                 let opening = self.view != View::Settings;
                 if opening {
                     self.settings.selected = self.settings.initial_target();
@@ -434,7 +412,6 @@ impl App {
                 screen(Some(if opening { Cue::Confirm } else { Cue::Back }))
             }
             Command::SystemPrevious | Command::SystemNext => {
-                self.cancel_reboot();
                 let systems = populated_systems(&self.games);
                 if !systems.is_empty() {
                     let p = systems.iter().position(|s| *s == self.system).unwrap_or(0);
@@ -453,7 +430,6 @@ impl App {
                 }))
             }
             Command::Previous | Command::Next => {
-                self.cancel_reboot();
                 if self.view == View::Settings {
                     let c = settings::move_selection(
                         &mut self.settings,
@@ -489,7 +465,7 @@ impl App {
                         false,
                     )
                 } else if let Some(index) = self.selected_game() {
-                    let mut effects = self.request_game(index, now, false);
+                    let mut effects = self.request_game(index, false);
                     effects.push(Effect::Cue(Cue::Confirm));
                     effects
                 } else {
@@ -512,10 +488,6 @@ impl App {
             return Vec::new();
         }
         let pressed = self.pressed.take();
-        let reboot = matches!(target,Some(menu::Target::Game(i)) if self.games.get(i).is_some_and(|g|g.id=="reboot"));
-        if self.reboot_deadline > 0 && !reboot {
-            self.cancel_reboot();
-        }
         if target != pressed {
             return Vec::new();
         }
@@ -534,7 +506,7 @@ impl App {
                 screen(Some(Cue::Confirm))
             }
             Some(menu::Target::Game(index)) => {
-                let mut e = self.request_game(index, now, true);
+                let mut e = self.request_game(index, true);
                 e.push(Effect::Cue(Cue::Confirm));
                 e
             }
@@ -613,13 +585,6 @@ impl App {
             }
             Event::Tick(now) => {
                 let mut e = Vec::new();
-                if self.reboot_deadline > 0 && now >= self.reboot_deadline {
-                    self.reboot_deadline = 0;
-                    if self.status == REBOOT_CONFIRMATION {
-                        self.set_status("");
-                        e.extend(screen(None));
-                    }
-                }
                 if matches!(self.view, View::Settings | View::Wifi)
                     && now.saturating_sub(self.network_refreshed_at) >= 2000
                 {
@@ -778,7 +743,6 @@ impl App {
                     unreachable!()
                 };
                 self.set_status(match plan.kind {
-                    policy::LaunchKind::Reboot => "REBOOTING".into(),
                     policy::LaunchKind::Terminal => format!("STARTING {}", terminal_title(&plan)),
                     policy::LaunchKind::Game => format!("STARTING {}", game.title),
                 });
@@ -925,56 +889,25 @@ pub fn terminal_title(plan: &policy::LaunchPlan) -> String {
     .into()
 }
 pub fn child_status(active: &ActiveLaunch) -> String {
-    let result = active.result.as_ref().expect("completed child result");
-    let reboot = active.plan.kind == policy::LaunchKind::Reboot;
     let terminal = active.plan.kind == policy::LaunchKind::Terminal;
     let title = if terminal {
         terminal_title(&active.plan)
     } else {
         active.game.title.clone()
     };
-    if result.error.as_ref().is_some_and(|s| !s.is_empty()) {
-        if terminal {
-            format!("{title} ERROR - CHECK LOG")
-        } else if reboot {
-            "REBOOT ERROR - CHECK LOG".into()
-        } else {
-            "GAME ERROR - CHECK LOG".into()
-        }
+    let result = active.result.as_ref().expect("completed child result");
+    if let Some(error) = result.error.as_ref().filter(|s| !s.is_empty()) {
+        format!("{title} ERROR - {error}")
     } else if !result.started {
-        if terminal {
-            format!("{title} DID NOT START")
-        } else if reboot {
-            "REBOOT DID NOT START".into()
-        } else {
-            "GAME DID NOT START".into()
-        }
+        format!("{title} DID NOT START")
     } else if result.exited_for_touch {
-        if reboot {
-            "REBOOT CANCELLED".into()
-        } else {
-            format!("RETURNED FROM {title}")
-        }
+        format!("RETURNED FROM {title}")
     } else if result.exit_code == Some(0) {
-        if reboot {
-            "REBOOT COMMAND EXITED".into()
-        } else {
-            format!("{title} EXITED")
-        }
+        format!("{title} EXITED")
     } else if let Some(code) = result.exit_code {
-        if reboot {
-            format!("REBOOT FAILED (STATUS {code})")
-        } else {
-            format!("{title} EXITED (STATUS {code})")
-        }
+        format!("{title} EXITED (STATUS {code})")
     } else if let Some(signal) = result.signal {
-        if reboot {
-            format!("REBOOT STOPPED (SIGNAL {signal})")
-        } else {
-            format!("{title} STOPPED (SIGNAL {signal})")
-        }
-    } else if reboot {
-        "REBOOT STOPPED".into()
+        format!("{title} STOPPED (SIGNAL {signal})")
     } else {
         format!("{title} STOPPED")
     }
@@ -1068,20 +1001,6 @@ mod tests {
             .unwrap();
         assert_eq!(a.position, (old + a.games.len() - 1) % a.games.len());
         assert!(matches!(effects.first(), Some(Effect::DiscardTouch)));
-    }
-    #[test]
-    fn reboot_requires_second_confirmation_and_expires_at_deadline() {
-        let mut a = app();
-        let i = a.games.iter().position(|g| g.id == "reboot").unwrap();
-        a.request_game(i, 100, false);
-        assert_eq!(a.reboot_deadline, 4100);
-        assert!(a.pending.is_none());
-        a.reduce(Event::Tick(4100), None).unwrap();
-        assert_eq!(a.status, "");
-        a.request_game(i, 4200, false);
-        a.request_game(i, 4300, false);
-        assert!(matches!(a.pending, Some(Pending::Launch(_))));
-        assert_eq!(a.reboot_deadline, 0);
     }
     #[test]
     fn completion_order_is_enforced() {

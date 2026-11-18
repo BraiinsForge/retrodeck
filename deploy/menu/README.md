@@ -168,7 +168,6 @@ subsongs, and Start changes playback mode. Files are read with a 16 MiB limit,
 directory recursion is
 bounded, and symbolic links are not followed.
 
-The Deck carousel adds a built-in red power-on entry for `/sbin/reboot`; two
 selections within four seconds are required, and any other action cancels the
 armed request. The WIFI button opens the on-screen keyboard and passes
 credentials to `deck-wifi-profile-add` over stdin, never argv. The helper only writes a

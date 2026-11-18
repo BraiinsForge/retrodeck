@@ -151,7 +151,6 @@ impl Options {
             tamagotchi_deck: self.tamagotchi_deck.clone(),
             chiptune_player: self.chiptune_player.clone(),
             terminal: self.terminal.clone(),
-            reboot: None,
             doom_state_directory: None,
         }
     }
