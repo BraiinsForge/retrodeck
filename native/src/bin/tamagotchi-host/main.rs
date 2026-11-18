@@ -1,6 +1,7 @@
 //! Tamagotchi P1 Deck host using the normal BMC widget surface.
 
-use retrodeck_native::{canvas, game_audio, process, state_file, tamagotchi, wayland};
+use retrodeck_native::{canvas, game_audio, game_video, process, state_file, tamagotchi, wayland};
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::ffi::OsString;
 use std::path::Path;
@@ -19,11 +20,16 @@ const TONE_AMPLITUDE: i16 = 6_553;
 const NANOS_PER_SECOND: u128 = 1_000_000_000;
 const TICKS_PER_SECOND: u64 = 32_768;
 
-struct HostClock(Instant);
+struct HostClock(Instant, Rc<Cell<Duration>>);
 
 impl Clock for HostClock {
     fn now(&self) -> u64 {
-        self.0.elapsed().as_micros().try_into().unwrap_or(u64::MAX)
+        self.0
+            .elapsed()
+            .saturating_sub(self.1.get())
+            .as_micros()
+            .try_into()
+            .unwrap_or(u64::MAX)
     }
 }
 
@@ -193,8 +199,10 @@ fn benchmark(arguments: &[OsString]) -> Result<(), String> {
     let mut tama = Tamagotchi::builder()
         .rom(firmware)
         .screen(screen)
-        .buzzer(Box::new(HostBuzzer { state: buzzer_state }))
-        .system_clock(Box::new(HostClock(Instant::now())))
+        .buzzer(Box::new(HostBuzzer {
+            state: buzzer_state,
+        }))
+        .system_clock(Box::new(HostClock(Instant::now(), Rc::default())))
         .logger(Box::new(HostLogger))
         .build();
     let started = Instant::now();
@@ -260,7 +268,7 @@ fn open_audio() {
 
 fn present(screen: &tamagotchi::ScreenState) -> Result<(), String> {
     tamagotchi::render(screen);
-    canvas::with_pixels(wayland::present_rgba)
+    canvas::with_pixels(wayland::present_game_rgba)
 }
 
 fn run_emulation_window(tama: &mut Tamagotchi) -> u32 {
@@ -288,13 +296,14 @@ fn run(arguments: &[OsString]) -> Result<(), String> {
         frequency: 1_000,
         playing: false,
     }));
+    let paused = Rc::new(Cell::new(Duration::ZERO));
     let mut tama = Tamagotchi::builder()
         .rom(firmware)
         .screen(screen)
         .buzzer(Box::new(HostBuzzer {
             state: buzzer_state.clone(),
         }))
-        .system_clock(Box::new(HostClock(Instant::now())))
+        .system_clock(Box::new(HostClock(Instant::now(), paused.clone())))
         .logger(Box::new(HostLogger))
         .build();
     let state_path = Path::new(STATE_PATH);
@@ -313,15 +322,29 @@ fn run(arguments: &[OsString]) -> Result<(), String> {
     };
     let mut redraw = true;
     let mut next_state_save = Instant::now() + STATE_SAVE_INTERVAL;
+    let mut focus = game_video::WidgetFocus::default();
     let mut result = (|| -> Result<(), String> {
         loop {
-            let wait_ms = run_emulation_window(&mut tama);
-            mixer.write_until(Instant::now());
-            wayland::dispatch(wait_ms)?;
+            match focus.wait()? {
+                game_video::Focus::Shutdown => break Ok(()),
+                game_video::Focus::Resumed(waited) => {
+                    paused.set(paused.get() + waited);
+                    input.release(&mut tama);
+                    mixer.previous = Instant::now();
+                    mixer.fraction = 0;
+                    redraw = true;
+                }
+                game_video::Focus::Continuous => {}
+            }
             while let Some(touch) = wayland::next_touch() {
                 input.update(touch.down, touch.x, touch.y, &mut tama);
                 redraw = true;
             }
+            if input.return_requested() {
+                break Ok(());
+            }
+            let wait_ms = run_emulation_window(&mut tama);
+            mixer.write_until(Instant::now());
             redraw |= state.borrow_mut().take_dirty();
             if redraw {
                 present(&state.borrow())?;
@@ -334,12 +357,7 @@ fn run(arguments: &[OsString]) -> Result<(), String> {
                 }
                 next_state_save = now + STATE_SAVE_INTERVAL;
             }
-            if input.return_requested()
-                || process::shutdown_requested()
-                || wayland::shutdown_requested()
-            {
-                break Ok(());
-            }
+            wayland::dispatch(wait_ms)?;
         }
     })();
     input.release(&mut tama);

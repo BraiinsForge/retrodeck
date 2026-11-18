@@ -130,6 +130,8 @@ struct State {
     height: u32,
     visible: bool,
     active: bool,
+    focused: bool,
+    focus_loss_count: u64,
     frame_pending: bool,
     refresh_requested: bool,
     shutdown: bool,
@@ -171,6 +173,11 @@ impl State {
                 );
                 self.active =
                     self.visible && !matches!(state, WEnum::Value(LifecycleState::Prepared));
+                let focused = matches!(state, WEnum::Value(LifecycleState::Visible));
+                if self.focused && !focused {
+                    self.focus_loss_count += 1;
+                }
+                self.focused = focused;
                 self.frame_pending = self.visible;
                 if !self.active {
                     self.touch_down = false;
@@ -546,13 +553,21 @@ impl Widget {
     }
 
     fn present_rgba(&mut self, rgba: &[u8]) -> Result<(), String> {
+        self.present_rgba_if(rgba, |state| state.renderable())
+    }
+
+    fn present_rgba_if(
+        &mut self,
+        rgba: &[u8],
+        can_present: impl FnOnce(&State) -> bool,
+    ) -> Result<(), String> {
         if self.state.width != canvas::WIDTH
             || self.state.height != canvas::HEIGHT
             || rgba.len() != canvas::WIDTH as usize * canvas::HEIGHT as usize * 4
         {
             return Err("Wayland surface does not match the native canvas".to_owned());
         }
-        self.present_frame(|pixels| copy_rgba_to_xrgb(rgba, pixels))
+        self.present_if(can_present, |pixels| copy_rgba_to_xrgb(rgba, pixels))
     }
 
     fn present_rgb565(&mut self, rgb565: &[u16]) -> Result<(), String> {
@@ -566,11 +581,19 @@ impl Widget {
     }
 
     fn present_frame(&mut self, draw: impl FnOnce(&mut [u32])) -> Result<(), String> {
+        self.present_if(|state| state.renderable(), draw)
+    }
+
+    fn present_if(
+        &mut self,
+        can_present: impl FnOnce(&State) -> bool,
+        draw: impl FnOnce(&mut [u32]),
+    ) -> Result<(), String> {
         if !self.state.configured {
             return Err("Wayland surface is not configured".to_owned());
         }
         let _ = self.dispatch(0)?;
-        if !self.state.renderable() || self.state.shutdown {
+        if !can_present(&self.state) || self.state.shutdown {
             return Ok(());
         }
         self.ensure_slots()?;
@@ -618,10 +641,16 @@ pub fn present_game_xrgb(
     with_widget(|widget| {
         let width = widget.state.width as usize;
         let height = widget.state.height as usize;
-        widget.present_frame(|pixels| {
-            fill_gameplay_background(pixels, std::env::var_os("RETRO_DECK_EXIT_HINT").is_some());
-            scale_game_frame(frame, source_width, source_height, pixels, width, height);
-        })
+        widget.present_if(
+            |state| state.focused,
+            |pixels| {
+                fill_gameplay_background(
+                    pixels,
+                    std::env::var_os("RETRO_DECK_EXIT_HINT").is_some(),
+                );
+                scale_game_frame(frame, source_width, source_height, pixels, width, height);
+            },
+        )
     })
 }
 
@@ -694,6 +723,10 @@ pub fn present_rgba(rgba: &[u8]) -> Result<(), String> {
     with_widget(|widget| widget.present_rgba(rgba))
 }
 
+pub fn present_game_rgba(rgba: &[u8]) -> Result<(), String> {
+    with_widget(|widget| widget.present_rgba_if(rgba, |state| state.focused))
+}
+
 pub fn present_rgb565(rgb565: &[u16]) -> Result<(), String> {
     with_widget(|widget| widget.present_rgb565(rgb565))
 }
@@ -716,14 +749,23 @@ pub fn size() -> Option<(u32, u32)> {
     })
 }
 
-/// Whether the widget may run continuously, rather than prepare a static frame.
-pub fn active() -> bool {
+/// Only Visible can advance emulation. Count losses even if the widget
+/// returned to Visible in the same dispatch batch.
+pub(crate) fn game_focus() -> (bool, u64) {
     WIDGET.with(|current| {
-        current
-            .borrow()
-            .as_ref()
-            .is_some_and(|widget| widget.state.active)
+        current.borrow().as_ref().map_or((false, 0), |widget| {
+            (widget.state.focused, widget.state.focus_loss_count)
+        })
     })
+}
+
+pub(crate) fn discard_game_touches() {
+    WIDGET.with(|current| {
+        if let Some(widget) = current.borrow_mut().as_mut() {
+            widget.state.touch_down = false;
+            widget.state.touches.clear();
+        }
+    });
 }
 
 pub fn shutdown_requested() -> bool {

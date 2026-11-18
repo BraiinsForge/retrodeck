@@ -851,15 +851,26 @@ pub fn run_host(configuration: &'static CoreConfig, arguments: &[String]) -> u8 
     let mut diagnostics_started = std::time::Instant::now();
     let mut previous_audio_frames = 0_u64;
     let mut previous_audio_callbacks = 0_u64;
+    let mut focus_failed = false;
     while !retrodeck_native::process::shutdown_requested() && !VIDEO_FAILED.load(Ordering::Relaxed)
     {
+        match retrodeck_native::game_video::before_frame(|_| {
+            clock.reset();
+            PRESENT_SKIP.store(false, Ordering::Relaxed);
+            diagnostics_started = std::time::Instant::now();
+        }) {
+            Ok(true) => {}
+            Ok(false) => break,
+            Err(error) => {
+                eprintln!("{name}: game widget unavailable: {error}");
+                focus_failed = true;
+                break;
+            }
+        }
         if test_frames.is_none() && clock.lateness() > clock.frame_nanoseconds() / 2 {
             PRESENT_SKIP.store(true, Ordering::Relaxed);
         }
         unsafe { retro_run() };
-        if retrodeck_native::game_video::exit_requested() {
-            break;
-        }
         frames += 1;
         if let Some(limit) = test_frames
             && frames >= limit
@@ -908,7 +919,7 @@ pub fn run_host(configuration: &'static CoreConfig, arguments: &[String]) -> u8 
         retro_unload_game();
         retro_deinit();
     }
-    u8::from(VIDEO_FAILED.load(Ordering::Relaxed))
+    u8::from(focus_failed || VIDEO_FAILED.load(Ordering::Relaxed))
 }
 
 #[cfg(test)]

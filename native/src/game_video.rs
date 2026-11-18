@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 const LOGICAL_WIDTH: usize = 1280;
 const LOGICAL_HEIGHT: usize = 480;
 enum Target {
-    WidgetLazy,
     Widget { converted: Vec<u32> },
     Headless { frame: Vec<u16>, hash: u64 },
 }
@@ -16,6 +15,7 @@ struct Video {
     target: Target,
     exit_hint: bool,
     exit_hold_started: Option<Instant>,
+    focus: WidgetFocus,
 }
 
 static VIDEO: Mutex<Option<Video>> = Mutex::new(None);
@@ -66,12 +66,16 @@ pub fn open(headless: bool) -> Result<(), String> {
             hash: 0xcbf2_9ce4_8422_2325,
         }
     } else {
-        Target::WidgetLazy
+        crate::wayland::open_game_widget()?;
+        Target::Widget {
+            converted: Vec::new(),
+        }
     };
     *VIDEO.lock().expect("video lock") = Some(Video {
         target,
         exit_hint,
         exit_hold_started: None,
+        focus: WidgetFocus::default(),
     });
     Ok(())
 }
@@ -139,17 +143,6 @@ pub unsafe fn present(
             }
             Ok(())
         }
-        Target::WidgetLazy => {
-            crate::wayland::open_game_widget()?;
-            video.target = Target::Widget {
-                converted: Vec::new(),
-            };
-            let Target::Widget { converted } = &mut video.target else {
-                unreachable!();
-            };
-            convert_to_xrgb(data, width, height, pitch, rgb565, converted);
-            crate::wayland::present_game_xrgb(converted, width, height)
-        }
         Target::Widget { converted } => {
             convert_to_xrgb(data, width, height, pitch, rgb565, converted);
             crate::wayland::present_game_xrgb(converted, width, height)
@@ -173,28 +166,31 @@ fn update_exit_hold(
     now.duration_since(*began) >= Duration::from_secs(2)
 }
 
-/// Pause dormant games and check for shutdown, disconnection or the return hold.
-///
-/// The game owns the normal widget surface, so its parent dashboard cannot
-/// receive this touch stream after BMC switches the render surface.
-pub fn exit_requested() -> bool {
+/// Wait before advancing the game. Returns false on shutdown or the return hold,
+/// and propagates a lost connection as an error. The game owns the touch stream.
+/// `on_resume` receives the time spent waiting for Visible.
+pub fn before_frame(on_resume: impl FnOnce(Duration)) -> Result<bool, String> {
+    if crate::process::shutdown_requested() {
+        return Ok(false);
+    }
     let mut guard = VIDEO.lock().expect("video lock");
     let Some(video) = guard.as_mut() else {
-        return false;
+        return Ok(true);
     };
     if !matches!(&video.target, Target::Widget { .. }) {
-        return false;
+        return Ok(true);
     }
-    if let Err(error) = wait_for_widget_activity(&mut video.exit_hold_started) {
-        eprintln!("retrodeck: game widget unavailable: {error}");
-        return true;
-    }
-    if crate::wayland::shutdown_requested() || crate::process::shutdown_requested() {
-        return true;
+    match video.focus.wait()? {
+        Focus::Shutdown => return Ok(false),
+        Focus::Resumed(paused) => {
+            video.exit_hold_started = None;
+            on_resume(paused);
+        }
+        Focus::Continuous => {}
     }
     if !video.exit_hint {
         while crate::wayland::next_touch().is_some() {}
-        return false;
+        return Ok(true);
     }
     let now = Instant::now();
     let mut complete = false;
@@ -207,25 +203,56 @@ pub fn exit_requested() -> bool {
             now,
         );
     }
-    complete
+    Ok(!(complete
         || video
             .exit_hold_started
-            .is_some_and(|started| now.duration_since(started) >= Duration::from_secs(2))
+            .is_some_and(|started| now.duration_since(started) >= Duration::from_secs(2))))
 }
 
-pub(crate) fn wait_for_widget_activity(exit_hold: &mut Option<Instant>) -> Result<(), String> {
-    crate::wayland::dispatch(0)?;
-    if !crate::wayland::active() {
-        *exit_hold = None;
-        crate::game_audio::discard_pending();
+pub enum Focus {
+    Continuous,
+    Resumed(Duration),
+    Shutdown,
+}
+
+/// One focus gate per game surface. While paused, only Wayland is serviced.
+#[derive(Default)]
+pub struct WidgetFocus {
+    focus_loss_count: u64,
+    started: bool,
+}
+
+impl WidgetFocus {
+    pub fn wait(&mut self) -> Result<Focus, String> {
+        let started = Instant::now();
+        crate::wayland::dispatch(0)?;
+        let (initially_focused, losses) = crate::wayland::game_focus();
+        let paused = !initially_focused || self.focus_loss_count != losses;
+        let resumed = !self.started || paused;
+        if paused {
+            crate::game_audio::discard_pending();
+            crate::wayland::discard_game_touches();
+        }
+        loop {
+            if crate::wayland::shutdown_requested() || crate::process::shutdown_requested() {
+                return Ok(Focus::Shutdown);
+            }
+            let (focused, losses) = crate::wayland::game_focus();
+            if focused {
+                self.focus_loss_count = losses;
+                self.started = true;
+                return Ok(if resumed {
+                    if !initially_focused {
+                        crate::wayland::discard_game_touches();
+                    }
+                    Focus::Resumed(started.elapsed())
+                } else {
+                    Focus::Continuous
+                });
+            }
+            crate::wayland::dispatch(100)?;
+        }
     }
-    while !crate::wayland::active()
-        && !crate::wayland::shutdown_requested()
-        && !crate::process::shutdown_requested()
-    {
-        crate::wayland::dispatch(100)?;
-    }
-    Ok(())
 }
 
 pub fn frame_hash() -> u64 {
@@ -276,6 +303,10 @@ impl FrameClock {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.start_nanoseconds = monotonic_now();
+        self.frame_number = 0;
+    }
     /// Nanoseconds the loop is running behind the next frame deadline;
     /// zero or negative when on schedule.
     pub fn lateness(&self) -> i64 {

@@ -82,6 +82,7 @@ static AUDIO_RATE: AtomicU32 = AtomicU32::new(0);
 static DIAGNOSTICS: AtomicBool = AtomicBool::new(false);
 
 static STARTED: Mutex<Option<Instant>> = Mutex::new(None);
+static PAUSED: Mutex<std::time::Duration> = Mutex::new(std::time::Duration::ZERO);
 
 fn test_mode() -> bool {
     TEST_FRAMES.load(Ordering::Relaxed) > 0
@@ -120,8 +121,7 @@ pub extern "C" fn retrodeck_doom_present(pixels: *const u32, width: c_int, heigh
         // The DOOM bridge supplies width * height XRGB pixels for this call.
         if let Err(error) = unsafe {
             retrodeck_native::game_video::present(pixels.cast(), width, height, pitch, false)
-        }
-        {
+        } {
             eprintln!("{NAME}: {error}");
             QUIT.store(true, Ordering::Relaxed);
             return 1;
@@ -190,10 +190,7 @@ pub extern "C" fn retrodeck_doom_present(pixels: *const u32, width: c_int, heigh
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn retrodeck_doom_poll_events(
-    events: *mut Event,
-    max_events: c_int,
-) -> c_int {
+pub extern "C" fn retrodeck_doom_poll_events(events: *mut Event, max_events: c_int) -> c_int {
     if events.is_null() || max_events <= 0 {
         return 0;
     }
@@ -221,11 +218,30 @@ pub extern "C" fn retrodeck_doom_poll_events(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn retrodeck_doom_quit_requested() -> c_int {
-    c_int::from(
-        QUIT.load(Ordering::Relaxed)
-            || retrodeck_native::process::shutdown_requested()
-            || retrodeck_native::game_video::exit_requested(),
-    )
+    c_int::from(!wait_for_focus())
+}
+
+fn wait_for_focus() -> bool {
+    if QUIT.load(Ordering::Relaxed) || retrodeck_native::process::shutdown_requested() {
+        return false;
+    }
+    match retrodeck_native::game_video::before_frame(|paused| {
+        *PAUSED.lock().expect("pause clock lock") += paused;
+        if let Some(state) = STATE.lock().expect("state lock").as_mut() {
+            state.clock.reset();
+            state.diagnostics_started = Instant::now();
+        }
+        PRESENT_SKIP.store(false, Ordering::Relaxed);
+    }) {
+        Ok(true) => true,
+        result => {
+            if let Err(error) = result {
+                eprintln!("{NAME}: game widget unavailable: {error}");
+            }
+            QUIT.store(true, Ordering::Relaxed);
+            false
+        }
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -237,7 +253,10 @@ pub extern "C" fn retrodeck_doom_ticks() -> c_int {
             .lock()
             .ok()
             .and_then(|guard| *guard)
-            .map_or(0, |started| started.elapsed().as_millis() as i64)
+            .map_or(0, |started| {
+                let paused = *PAUSED.lock().expect("pause clock lock");
+                started.elapsed().saturating_sub(paused).as_millis() as i64
+            })
     };
     milliseconds.clamp(0, i64::from(c_int::MAX)) as c_int
 }
@@ -252,6 +271,9 @@ pub extern "C" fn retrodeck_doom_sleep(milliseconds: c_int) {
         // "wait for new tics" loop from spinning forever without a panel.
         SLEEPS.fetch_add(1, Ordering::Relaxed);
         SYNTHETIC_MS.fetch_add(i64::from(milliseconds), Ordering::Relaxed);
+        return;
+    }
+    if !wait_for_focus() {
         return;
     }
     std::thread::sleep(std::time::Duration::from_millis(
@@ -450,6 +472,10 @@ pub fn run_host(arguments: &[String]) -> u8 {
         std::ptr::null(),
     ];
 
+    if !wait_for_focus() {
+        shutdown();
+        return 0;
+    }
     // The engine runs its own loop and normally leaves through I_Quit,
     // which exits the process. Reaching the next line means it returned.
     let status = unsafe { doom_main(3, argv.as_ptr()) };

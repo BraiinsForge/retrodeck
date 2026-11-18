@@ -566,6 +566,8 @@ fn keyed_wire_game_wait_resumes_or_stops_on_shutdown_and_disconnect() {
         (widget_surface::LifecycleState::Dormant, true),
         (widget_surface::LifecycleState::Prepared, false),
         (widget_surface::LifecycleState::Prepared, true),
+        (widget_surface::LifecycleState::Entering, false),
+        (widget_surface::LifecycleState::Leaving, false),
     ] {
         let fixture = Fixture::new();
         let commands = fixture.commands.clone();
@@ -573,15 +575,33 @@ fn keyed_wire_game_wait_resumes_or_stops_on_shutdown_and_disconnect() {
         let (done, finished) = mpsc::channel();
         let client = thread::spawn(move || {
             let mut widget = fixture.open();
+            use crate::game_video::{Focus, WidgetFocus};
             fixture.assert_payloads_closed();
-            fixture.send(&mut widget, Command::Lifecycle(lifecycle));
+            fixture.send(
+                &mut widget,
+                Command::Lifecycle(widget_surface::LifecycleState::Visible),
+            );
             WIDGET.with(|slot| *slot.borrow_mut() = Some(widget));
-            let mut hold = Some(Instant::now());
+            let mut focus = WidgetFocus::default();
+            assert!(matches!(focus.wait().unwrap(), Focus::Resumed(_)));
+            with_widget(|widget| {
+                fixture.send(widget, Command::Lifecycle(lifecycle));
+                widget.present_if(|state| state.focused, |_| panic!("unfocused draw"))
+            })
+            .unwrap();
+            assert!(fixture.frames.try_recv().is_err());
             ready.send(()).unwrap();
-            let result = crate::game_video::wait_for_widget_activity(&mut hold);
-            assert!(hold.is_none());
-            assert!(result.is_ok());
-            assert_eq!(shutdown_requested(), stop);
+            let result = focus.wait().unwrap();
+            if stop {
+                assert!(matches!(result, Focus::Shutdown));
+            } else {
+                assert!(
+                    matches!(result, Focus::Resumed(waited) if waited >= Duration::from_millis(15))
+                );
+                assert!(matches!(focus.wait().unwrap(), Focus::Continuous));
+                present_game_xrgb(&[0xff12_3456], 1, 1).unwrap();
+                fixture.frames.recv_timeout(WAIT).unwrap();
+            }
             close();
             done.send(()).unwrap();
         });
@@ -605,7 +625,7 @@ fn keyed_wire_game_wait_resumes_or_stops_on_shutdown_and_disconnect() {
     fixture.assert_payloads_closed();
     WIDGET.with(|slot| *slot.borrow_mut() = Some(widget));
     drop(fixture);
-    assert!(crate::game_video::wait_for_widget_activity(&mut None).is_err());
+    assert!(crate::game_video::WidgetFocus::default().wait().is_err());
     close();
 }
 
