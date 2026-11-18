@@ -254,7 +254,7 @@ fn screen(cue: Option<Cue>) -> Vec<Effect> {
 }
 impl App {
     pub fn new(games: Vec<policy::Game>, credits: credits::Credits, reduced_motion: bool) -> Self {
-        let system = populated_systems(&games)
+        let system = policy::populated_tabs(&games)
             .first()
             .copied()
             .unwrap_or(policy::System::Deck);
@@ -309,11 +309,7 @@ impl App {
         indices.get(self.position % indices.len().max(1)).copied()
     }
     fn indices(&self) -> Vec<usize> {
-        self.games
-            .iter()
-            .enumerate()
-            .filter_map(|(i, g)| (g.system == self.system).then_some(i))
-            .collect()
+        policy::tab_game_indices(&self.games, self.system).collect()
     }
     pub fn pending_application(&self) -> Result<policy::Game, String> {
         let Some(Pending::Launch(request)) = &self.pending else {
@@ -412,7 +408,7 @@ impl App {
                 screen(Some(if opening { Cue::Confirm } else { Cue::Back }))
             }
             Command::SystemPrevious | Command::SystemNext => {
-                let systems = populated_systems(&self.games);
+                let systems = policy::populated_tabs(&self.games);
                 if !systems.is_empty() {
                     let p = systems.iter().position(|s| *s == self.system).unwrap_or(0);
                     self.system = systems[if command == Command::SystemPrevious {
@@ -865,20 +861,6 @@ impl App {
 // Match the Deck panel's roughly 63 Hz refresh rate.
 const CREDITS_FRAME_MS: u64 = 16;
 
-pub fn populated_systems(games: &[policy::Game]) -> Vec<policy::System> {
-    [
-        policy::System::Nes,
-        policy::System::Gb,
-        policy::System::Gbc,
-        policy::System::Gba,
-        policy::System::Snes,
-        policy::System::Zx,
-        policy::System::Deck,
-    ]
-    .into_iter()
-    .filter(|s| games.iter().any(|g| g.system == *s))
-    .collect()
-}
 pub fn terminal_title(plan: &policy::LaunchPlan) -> String {
     match plan.arguments.first().map(String::as_str) {
         Some("lua") => "LUA REPL",

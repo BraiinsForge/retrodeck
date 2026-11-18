@@ -11,8 +11,7 @@ impl System {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Nes => "NES",
-            Self::Gb => "GAME BOY",
-            Self::Gbc => "GBC",
+            Self::Gb | Self::Gbc => "GAME BOY",
             Self::Gba => "GBA",
             Self::Snes => "SNES",
             Self::Zx => "ZX SPECTRUM",
@@ -29,6 +28,26 @@ pub struct Game {
     pub cover: Option<PathBuf>,
     pub color: u32,
     pub terminal_mode: Option<String>,
+}
+
+fn dashboard_tab(system: System) -> System {
+    match system {
+        System::Gbc => System::Gb,
+        other => other,
+    }
+}
+
+pub(super) fn populated_tabs(games: &[Game]) -> Vec<System> {
+    [System::Nes, System::Gb, System::Gba, System::Snes, System::Zx, System::Deck]
+        .into_iter()
+        .filter(|&tab| games.iter().any(|game| dashboard_tab(game.system) == tab))
+        .collect()
+}
+
+pub(super) fn tab_game_indices(games: &[Game], tab: System) -> impl Iterator<Item = usize> + '_ {
+    games.iter().enumerate().filter_map(move |(index, game)| {
+        (dashboard_tab(game.system) == tab).then_some(index)
+    })
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Palette {

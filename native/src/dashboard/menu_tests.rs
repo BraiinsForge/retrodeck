@@ -68,6 +68,33 @@ fn fixture_games() -> Vec<Game> {
 }
 
 #[test]
+fn game_boy_and_color_share_one_tab_and_snes_has_a_touch_target() {
+    let mut games = fixture_games();
+    for (index, system) in [System::Gbc, System::Snes, System::Gba, System::Zx, System::Deck]
+        .into_iter()
+        .enumerate()
+    {
+        let mut game = games[0].clone();
+        game.id = format!("extra-{index}");
+        game.system = system;
+        games.push(game);
+    }
+    let renderer = MenuRenderer::default();
+    let layout = renderer.render(&games, System::Gb, 1, "");
+    assert_eq!(layout.systems, [System::Nes, System::Gb, System::Gba, System::Snes, System::Zx, System::Deck]);
+    assert_eq!(layout.game_indices, [4, 5]);
+    assert_eq!(layout.shown_game_index, Some(5));
+    let snes = layout.system_buttons[3];
+    assert_eq!(layout.target_at(snes.x + 1, snes.y + 1), Some(Target::System(System::Snes)));
+    let layout = renderer.render(&games, System::Snes, 0, "");
+    let card = layout.game_buttons[0];
+    assert_eq!(layout.target_at(card.x + 1, card.y + 1), Some(Target::Game(6)));
+    let gbc_only = renderer.render(&games[5..6], System::Gb, 0, "");
+    assert_eq!(gbc_only.systems, [System::Gb]);
+    assert_eq!(gbc_only.shown_game_index, Some(0));
+}
+
+#[test]
 fn console_carousels_tabs_and_status_match_legacy_frames() {
     let fixtures = [
         (0, System::Nes, 0),

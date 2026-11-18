@@ -124,7 +124,7 @@ impl MenuRenderer {
             ui::color("footer"),
         );
         self.draw_settings(settings);
-        let systems = populated_systems(games);
+        let systems = super::policy::populated_tabs(games);
         let mut system_buttons = Vec::new();
         let count = systems.len();
         if count > 0 {
@@ -158,11 +158,7 @@ impl MenuRenderer {
                 );
             }
         }
-        let game_indices: Vec<_> = games
-            .iter()
-            .enumerate()
-            .filter_map(|(index, game)| (game.system == active_system).then_some(index))
-            .collect();
+        let game_indices: Vec<_> = super::policy::tab_game_indices(games, active_system).collect();
         let mut visible_game_indices = Vec::new();
         let mut game_buttons = Vec::new();
         let mut indicators = Vec::new();
@@ -341,19 +337,6 @@ impl MenuRenderer {
             ui::color("text"),
         );
     }
-}
-fn populated_systems(games: &[Game]) -> Vec<System> {
-    [
-        System::Nes,
-        System::Gb,
-        System::Gbc,
-        System::Gba,
-        System::Zx,
-        System::Deck,
-    ]
-    .into_iter()
-    .filter(|s| games.iter().any(|g| g.system == *s))
-    .collect()
 }
 fn draw_arrow(b: Bounds, left: bool, color: u32) {
     let cx = b.x + b.width as i32 / 2;
