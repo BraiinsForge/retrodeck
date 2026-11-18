@@ -382,7 +382,7 @@ impl App {
             }
         }
     }
-    fn command(&mut self, command: Command, now: u64) -> Vec<Effect> {
+    fn command(&mut self, command: Command) -> Vec<Effect> {
         match command {
             Command::Back => {
                 match self.view {
@@ -517,8 +517,8 @@ impl App {
                 self.set_status("");
                 screen(moved.then_some(Cue::Next))
             }
-            Some(menu::Target::Previous) => self.command(Command::Previous, now),
-            Some(menu::Target::Next) => self.command(Command::Next, now),
+            Some(menu::Target::Previous) => self.command(Command::Previous),
+            Some(menu::Target::Next) => self.command(Command::Next),
             None => Vec::new(),
         }
     }
@@ -628,7 +628,7 @@ impl App {
                 if let Some(command) = command(&gamepad, self.view) {
                     self.clear_pressed();
                     prefix.push(Effect::DiscardTouch);
-                    prefix.extend(self.command(command, now));
+                    prefix.extend(self.command(command));
                 }
                 prefix
             }
@@ -922,11 +922,11 @@ mod tests {
     #[test]
     fn hidden_settings_cannot_be_focused_or_activated() {
         let mut a = app();
-        a.command(Command::Settings, 100);
+        a.command(Command::Settings);
         assert_eq!(a.settings.selected, settings::Target::Terminal);
-        a.command(Command::Next, 100);
+        a.command(Command::Next);
         assert_eq!(a.settings.selected, settings::Target::Keymap);
-        a.command(Command::Next, 100);
+        a.command(Command::Next);
         assert_eq!(a.settings.selected, settings::Target::Terminal);
         let layout = settings::Layout::for_settings(&a.settings);
         for (target, rect) in [
@@ -939,7 +939,7 @@ mod tests {
                 None
             );
             a.settings.selected = target;
-            assert!(a.command(Command::Confirm, 100).is_empty());
+            assert!(a.command(Command::Confirm).is_empty());
             assert!(a.pending.is_none());
             assert_eq!(a.view, View::Settings);
         }
