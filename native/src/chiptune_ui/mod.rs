@@ -471,6 +471,13 @@ impl Session {
         true
     }
 
+    fn advance_if_ended(&mut self, state: &mut PlayerState) {
+        if std::mem::take(&mut state.pending_end) {
+            state.advance();
+            // Playback-only redraws do not update the title or track selector.
+            self.dirty = true;
+        }
+    }
     fn generate(&mut self, state: &mut PlayerState, now: u64) -> bool {
         if state.metadata.is_none() || state.paused {
             return false;
@@ -479,10 +486,7 @@ impl Session {
             if !self.flush(state, pcm) {
                 return false;
             }
-            if state.pending_end {
-                state.pending_end = false;
-                state.advance();
-            }
+            self.advance_if_ended(state);
             return true;
         }
         if !(self.audio_owned && self.volume > 0) && now < self.next_block {
@@ -506,9 +510,8 @@ impl Session {
             .flat_map(|sample| sample.to_le_bytes())
             .collect();
         state.pending_end = block.ended;
-        if self.flush(state, pcm) && state.pending_end {
-            state.pending_end = false;
-            state.advance();
+        if self.flush(state, pcm) {
+            self.advance_if_ended(state);
         }
         self.next_block = self.next_block.saturating_add(BLOCK_NS).max(now);
         true
@@ -794,12 +797,29 @@ mod tests {
         assert!(session.generate(&mut state, 2 * BLOCK_NS));
         assert!(state.pending.is_some() && state.pending_end);
         assert_eq!(state.file_index, 0);
+        assert!(!session.dirty);
         assert!(!session.generate(&mut state, 3 * BLOCK_NS));
         assert_eq!(state.file_index, 0);
         session.audio_owned = false;
         assert!(session.generate(&mut state, 3 * BLOCK_NS));
         assert!(state.pending.is_none() && !state.pending_end);
         assert_eq!(state.file_index, 1);
+        assert!(
+            session.dirty,
+            "the retried final block must redraw the new song"
+        );
+
+        assert!(state.open_index(0));
+        session.dirty = false;
+        session.next_block = 0;
+        for block in 0..3 {
+            assert!(session.generate(&mut state, block * BLOCK_NS));
+        }
+        assert_eq!(state.file_index, 1);
+        assert!(
+            session.dirty,
+            "the immediately accepted final block must redraw the new song"
+        );
         drop(state);
         std::fs::remove_dir_all(fixtures).unwrap();
     }
