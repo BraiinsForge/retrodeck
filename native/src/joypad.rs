@@ -26,7 +26,7 @@ pub const PAD_R: u32 = 1 << 9;
 pub const PAD_X: u32 = 1 << 10;
 pub const PAD_Y: u32 = 1 << 11;
 
-/// (pad bit, libretro joypad id). L and R are consumed only by the ZX build.
+/// (pad bit, libretro joypad id) pairs used by the libretro hosts.
 pub const RETRO_BUTTON_MAP: [(u32, u32); 8] = [
     (PAD_B, 0),
     (PAD_SELECT, 2),
@@ -37,7 +37,6 @@ pub const RETRO_BUTTON_MAP: [(u32, u32); 8] = [
     (PAD_RIGHT, 7),
     (PAD_A, 8),
 ];
-pub const RETRO_ZX_BUTTON_MAP: [(u32, u32); 2] = [(PAD_L, 10), (PAD_R, 11)];
 
 const PLAYER_COUNT: usize = 2;
 const BTN_TRIGGER: u16 = KeyCode::BTN_TRIGGER.0;

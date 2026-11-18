@@ -255,10 +255,6 @@ impl Credits {
     pub fn animated(&self) -> bool {
         !self.crawl.lines.is_empty() && self.crawl.content_height > 0
     }
-    pub fn next_deadline(&self) -> Option<i64> {
-        self.animated()
-            .then_some(self.elapsed_ms.saturating_add(33))
-    }
     pub fn target_at(x: i32, y: i32) -> Option<Target> {
         (1212..1268)
             .contains(&x)

@@ -33,40 +33,8 @@ pub struct Game {
 pub struct Palette {
     pub colors: Vec<(String, u32)>,
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Timings {
-    pub child_touch_exit_ms: u64,
-    pub child_term_grace_ms: u64,
-    pub reboot_confirm_ms: u64,
-    pub controller_burst_window_ms: u64,
-    pub controller_quiet_reset_ms: u64,
-    pub controller_scan_ms: u64,
-    pub touch_reconnect_ms: u64,
-    pub main_poll_ms: u64,
-    pub animated_poll_ms: u64,
-    pub network_refresh_ms: u64,
-    pub console_mirror_ms: u64,
-}
-impl Default for Timings {
-    fn default() -> Self {
-        Self {
-            child_touch_exit_ms: 2000,
-            child_term_grace_ms: 4000,
-            reboot_confirm_ms: 4000,
-            controller_burst_window_ms: 1000,
-            controller_quiet_reset_ms: 1000,
-            controller_scan_ms: 1000,
-            touch_reconnect_ms: 1000,
-            main_poll_ms: 250,
-            animated_poll_ms: 66,
-            network_refresh_ms: 2000,
-            console_mirror_ms: 100,
-        }
-    }
-}
 pub const VOLUME_DEFAULT: u8 = 42;
 pub const VOLUME_STEP: u8 = 5;
-pub const CONTROLLER_BURST_LIMIT: usize = 12;
 pub use crate::catalog::metadata::DEFAULT_PALETTE_VALUES;
 fn builtin(id: &str, title: &str, rom: &str, color: u32, mode: Option<&str>) -> Game {
     Game {
