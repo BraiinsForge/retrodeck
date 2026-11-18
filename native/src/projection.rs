@@ -4,10 +4,13 @@ const GLYPH_WIDTH: u32 = 5;
 const GLYPH_HEIGHT: u32 = 7;
 const GLYPH_ADVANCE: u32 = 6;
 
+#[derive(Clone, Debug)]
 pub(crate) struct TextMask {
     width: u32,
     height: u32,
-    pixels: Vec<u8>,
+    scale: u32,
+    // Cumulative ink per column, at the eight glyph-row boundaries.
+    columns: Vec<[u8; GLYPH_HEIGHT as usize + 1]>,
 }
 
 pub(crate) struct Projection {
@@ -40,34 +43,21 @@ impl TextMask {
         if width > canvas_size.0 || height > canvas_size.1 {
             return Err("projected text exceeds the native canvas".to_owned());
         }
-        let length = usize::try_from(width)
-            .ok()
-            .and_then(|width| {
-                usize::try_from(height)
-                    .ok()
-                    .and_then(|height| width.checked_mul(height))
-            })
-            .ok_or_else(|| "projected text dimensions overflow".to_owned())?;
-        let mut pixels = vec![0; length];
-        for (character_index, character) in text.iter().enumerate() {
-            for (row, mask) in font::rows(*character).iter().enumerate() {
-                for column in 0..GLYPH_WIDTH {
-                    if mask & (1 << (GLYPH_WIDTH - 1 - column)) == 0 {
-                        continue;
-                    }
-                    let left = (character_index as u32 * GLYPH_ADVANCE + column) * scale;
-                    let top = row as u32 * scale;
-                    for y in top..top + scale {
-                        let start = y as usize * width as usize + left as usize;
-                        pixels[start..start + scale as usize].fill(1);
-                    }
+        let mut columns = vec![[0; GLYPH_HEIGHT as usize + 1]; (width / scale) as usize];
+        for (index, character) in text.iter().enumerate() {
+            let rows = font::rows(*character);
+            for column in 0..GLYPH_WIDTH {
+                let prefix = &mut columns[index * GLYPH_ADVANCE as usize + column as usize];
+                for (row, mask) in rows.iter().enumerate() {
+                    prefix[row + 1] = prefix[row] + ((mask >> (GLYPH_WIDTH - 1 - column)) & 1);
                 }
             }
         }
         Ok(Self {
             width,
             height,
-            pixels,
+            scale,
+            columns,
         })
     }
 
@@ -93,43 +83,52 @@ impl TextMask {
         let first_y = projection.clip_top.max(top_y.floor() as i32);
         let last_y = (projection.bottom_y - 1).min(bottom_y.ceil() as i32 - 1);
         let projection_height = f64::from(projection.bottom_y - projection.horizon_y);
-        for y in first_y..=last_y {
-            let scale = (f64::from(y) + 0.5 - f64::from(projection.horizon_y)) / projection_height;
-            if scale <= 0.0 {
-                continue;
-            }
+        let glyph_units = 256.0 / f64::from(self.scale);
+        let glyph_position = |y: i32| {
+            let scale = f64::from(y - projection.horizon_y) / projection_height;
             let depth = projection.camera_distance * (1.0 / scale - 1.0);
-            let source_row = (projection.scroll - depth - f64::from(source_y)).floor() as i32;
-            if source_row < 0 || source_row >= self.height as i32 {
+            ((projection.scroll - depth - f64::from(source_y)) * glyph_units).round() as i32
+        };
+        let limit = GLYPH_HEIGHT as i32 * 256;
+        let clipped_top = ((source_top - f64::from(source_y)) * glyph_units).round() as i32;
+        let clipped_bottom = ((source_bottom - f64::from(source_y)) * glyph_units).round() as i32;
+        let mut end = glyph_position(first_y);
+        for y in first_y..=last_y {
+            let start = end;
+            end = glyph_position(y + 1);
+            let alpha = projection.alpha(y);
+            if alpha == 0 || start == end {
                 continue;
             }
+            // Average the mask across a screen pixel's vertical footprint.
+            // The ink can then move between rows without snapping an entire
+            // stroke to the next row at once or vanishing near the horizon.
+            let top = GlyphEdge::new(start.max(clipped_top).clamp(0, limit));
+            let bottom = GlyphEdge::new(end.min(clipped_bottom).clamp(0, limit));
+            let span = end - start;
+            let alpha_per_ink = ((alpha << 16) + span / 2) / span;
+
+            let scale = (f64::from(y - projection.horizon_y) + 0.5) / projection_height;
             let center = f64::from(canvas_width) * 0.5;
             let left = center - f64::from(self.width) * 0.5 * scale;
             let right = center + f64::from(self.width) * 0.5 * scale;
             let first_x = 0.max((left - 0.5).ceil() as i32);
             let last_x = (canvas_width as i32 - 1).min((right - 0.5).floor() as i32);
-            let alpha = projection.alpha(y);
-            if alpha <= 0 {
-                continue;
-            }
-            // The source column is linear in x; one division per row and a
-            // 16.16 fixed-point walk replace a per-pixel f64 division that
-            // dominated the crawl's frame time on the Cortex-A7.
-            let inverse_scale = 1.0 / scale;
+            // Walk source columns in 16.16 fixed point, with one division per row.
+            let inverse_scale = 1.0 / (scale * f64::from(self.scale));
             let step = (inverse_scale * 65536.0) as i64;
             let mut source_fx = (((f64::from(first_x) + 0.5 - center) * inverse_scale
-                + f64::from(self.width) * 0.5)
+                + self.columns.len() as f64 * 0.5)
                 * 65536.0) as i64;
-            for _x in first_x..=last_x {
-                let source_column = (source_fx >> 16) as i32;
-                let x = _x;
+            for x in first_x..=last_x {
+                let source_column = (source_fx >> 16) as usize;
                 source_fx += step;
-                if source_column < 0
-                    || source_column >= self.width as i32
-                    || self.pixels
-                        [source_row as usize * self.width as usize + source_column as usize]
-                        == 0
-                {
+                let Some(column) = self.columns.get(source_column) else {
+                    continue;
+                };
+                let ink = bottom.integral(column) - top.integral(column);
+                let alpha = ((ink * alpha_per_ink + 32768) >> 16).min(alpha);
+                if alpha <= 0 {
                     continue;
                 }
                 let offset = (y as usize * canvas_width as usize + x as usize) * 4;
@@ -149,6 +148,26 @@ impl TextMask {
     }
 }
 
+struct GlyphEdge {
+    row: usize,
+    fraction: i32,
+}
+
+impl GlyphEdge {
+    fn new(fixed: i32) -> Self {
+        // The final boundary is the far edge of the last glyph row.
+        let row = ((fixed >> 8) as usize).min(GLYPH_HEIGHT as usize - 1);
+        Self {
+            row,
+            fraction: fixed - (row as i32 * 256),
+        }
+    }
+
+    fn integral(&self, prefix: &[u8; GLYPH_HEIGHT as usize + 1]) -> i32 {
+        let start = prefix[self.row];
+        i32::from(start) * 256 + i32::from(prefix[self.row + 1] - start) * self.fraction
+    }
+}
 impl Projection {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
@@ -293,15 +312,16 @@ mod tests {
     }
 
     #[test]
-    fn matches_the_cpp_projected_line_fixture() {
+    // The fixture covers entry, the main crawl, and the fade near the horizon.
+    fn projected_line_fixture() {
         let size = (1280, 480);
         let mask = TextMask::new(b"HHHHHHHHHH", 4, size).unwrap();
         assert_eq!((mask.width, mask.height), (236, 28));
         for (elapsed_ms, expected) in [
-            (1000, 0xd10a_d74c_8e29_e39b),
-            (3000, 0x0281_da94_51fb_064d),
-            (50000, 0x1b6e_2c79_2c1c_8f1b),
-            (55000, 0xe693_4df8_e360_bd4b),
+            (1000, 0xe49c_0649_dc4e_5833),
+            (3000, 0xfd57_2778_0caf_d751),
+            (50000, 0x3167_4bdc_7f3d_fc63),
+            (55000, 0x2342_72c5_86ba_5c5b),
         ] {
             let mut canvas = [0, 0, 0, 255].repeat(size.0 as usize * size.1 as usize);
             draw_starfield(&mut canvas, size, color_rgb565(0x949494));
@@ -312,6 +332,35 @@ mod tests {
             mask.draw(&mut canvas, size, 0, &projection).unwrap();
             draw_close(&mut canvas, size, color_rgb565(0x949494));
             assert_eq!(hash_rgb565(&canvas), expected);
+        }
+    }
+    #[test]
+    fn projected_ink_moves_at_subpixel_intervals() {
+        let size = (1280, 480);
+        let mask = TextMask::new(b"I", 4, size).unwrap();
+        let center_of_ink = |elapsed_ms| {
+            let mut canvas = [0, 0, 0, 255].repeat(size.0 as usize * size.1 as usize);
+            let projection = Projection::new(
+                elapsed_ms, 1, 20, 4044, 420, 4000, 56, 72, 104, 210, 480, 0xffffff, size.1,
+            )
+            .unwrap();
+            mask.draw(&mut canvas, size, 0, &projection).unwrap();
+            let mut weighted = 0;
+            let mut sum = 0;
+            for (y, row) in canvas.chunks_exact(size.0 as usize * 4).enumerate() {
+                let ink = u32::from(row[size.0 as usize * 2]);
+                weighted += y as u32 * ink;
+                sum += ink;
+            }
+            assert!(sum > 0);
+            f64::from(weighted) / f64::from(sum)
+        };
+        let centers: Vec<_> = (0..8)
+            .map(|frame| center_of_ink(15_000 + frame * 16))
+            .collect();
+        for samples in centers.windows(2) {
+            let distance = samples[0] - samples[1];
+            assert!(distance > 0.0 && distance < 0.5, "{samples:?}");
         }
     }
 }

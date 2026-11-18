@@ -238,7 +238,7 @@ pub struct App {
     pub network: NetworkStatus,
     pub reduced_motion: bool,
     pub credits_started_at: u64,
-    pub credits_rendered_at: u64,
+    credits_next_frame: u64,
     pub guard: policy::ControllerGuard,
     pub last_scan: Option<u64>,
     pub touch_connected: bool,
@@ -281,7 +281,7 @@ impl App {
             network: NetworkStatus::default(),
             reduced_motion,
             credits_started_at: 0,
-            credits_rendered_at: 0,
+            credits_next_frame: 0,
             guard: policy::ControllerGuard::new(),
             last_scan: None,
             touch_connected: true,
@@ -514,6 +514,7 @@ impl App {
         match target {
             Some(menu::Target::Credits) => {
                 self.credits_started_at = now;
+                self.credits_next_frame = now.saturating_add(CREDITS_FRAME_MS);
                 self.set_view(View::Credits);
                 self.set_status("");
                 screen(Some(Cue::Confirm))
@@ -618,11 +619,11 @@ impl App {
                     self.pending = Some(Pending::Network);
                     e.push(Effect::NetworkAction);
                 }
-                if self.view == View::Credits
-                    && !self.reduced_motion
-                    && now.saturating_sub(self.credits_rendered_at) >= 66
-                {
-                    self.credits_rendered_at = now;
+                if self.credits_animating() && now >= self.credits_next_frame {
+                    // Skip missed frames without shifting all future deadlines.
+                    let lateness = now - self.credits_next_frame;
+                    self.credits_next_frame =
+                        now.saturating_add(CREDITS_FRAME_MS - lateness % CREDITS_FRAME_MS);
                     e.extend(screen(None));
                 }
                 e
@@ -875,18 +876,22 @@ impl App {
             }
         }
     }
+    fn credits_animating(&self) -> bool {
+        self.view == View::Credits && !self.reduced_motion && self.credits.animated()
+    }
     pub fn poll_timeout(&self, now: u64) -> u32 {
-        if self.view == View::Credits && !self.reduced_motion {
-            (self
-                .credits_rendered_at
-                .saturating_add(66)
-                .saturating_sub(now))
-            .min(66) as u32
+        if self.credits_animating() {
+            self.credits_next_frame
+                .saturating_sub(now)
+                .min(CREDITS_FRAME_MS) as u32
         } else {
             250
         }
     }
 }
+// Match the Deck panel's roughly 63 Hz refresh rate.
+const CREDITS_FRAME_MS: u64 = 16;
+
 pub fn populated_systems(games: &[policy::Game]) -> Vec<policy::System> {
     [
         policy::System::Nes,
@@ -971,6 +976,34 @@ mod tests {
     use super::*;
     fn app() -> App {
         App::new(policy::builtins(), credits::Credits::empty(), false)
+    }
+    #[test]
+    fn credits_render_on_deadlines_without_catching_up_missed_frames() {
+        let mut a = app();
+        a.credits = credits::Credits::new(credits::parse("Example\tRole\tMIT").unwrap());
+        a.set_view(View::Credits);
+        a.credits_started_at = 100;
+        a.credits_next_frame = 116;
+        assert_eq!(a.poll_timeout(100), 16);
+        assert!(a.reduce(Event::Tick(115), None).unwrap().is_empty());
+        assert!(matches!(
+            a.reduce(Event::Tick(116), None).unwrap().as_slice(),
+            [Effect::Render, Effect::Present]
+        ));
+        assert_eq!(a.poll_timeout(116), 16);
+        assert!(matches!(
+            a.reduce(Event::Tick(151), None).unwrap().as_slice(),
+            [Effect::Render, Effect::Present]
+        ));
+        assert!(a.reduce(Event::Tick(151), None).unwrap().is_empty());
+        assert_eq!(a.poll_timeout(151), 13);
+        a.reduced_motion = true;
+        assert_eq!(a.poll_timeout(151), 250);
+        assert!(a.reduce(Event::Tick(400), None).unwrap().is_empty());
+        a.reduced_motion = false;
+        a.credits = credits::Credits::empty();
+        assert_eq!(a.poll_timeout(400), 250);
+        assert!(a.reduce(Event::Tick(400), None).unwrap().is_empty());
     }
     #[test]
     fn priorities_and_quarantine_keep_keyboard_available() {

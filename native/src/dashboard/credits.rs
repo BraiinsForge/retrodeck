@@ -3,7 +3,10 @@
 //! This module deliberately owns no dashboard policy.  `Credits` is a small
 //! deterministic page state which the menu can embed and drive from its clock.
 
-use crate::canvas;
+use crate::{
+    canvas,
+    projection::{Projection, TextMask},
+};
 
 pub const WIDTH: u32 = 1280;
 pub const HEIGHT: u32 = 480;
@@ -63,6 +66,7 @@ pub enum Effect {
 #[derive(Clone, Debug)]
 pub struct Credits {
     pub crawl: Crawl,
+    masks: Vec<(TextMask, i32)>,
     elapsed_ms: i64,
     pressed_target: Option<Target>,
 }
@@ -240,8 +244,19 @@ pub fn make_crawl(credits: &[Credit]) -> Crawl {
 
 impl Credits {
     pub fn new(credits: Vec<Credit>) -> Self {
+        let crawl = make_crawl(&credits);
+        let masks = crawl
+            .lines
+            .iter()
+            .map(|line| {
+                let mask = TextMask::new(line.text.as_bytes(), SCALE, (WIDTH, HEIGHT))
+                    .expect("crawl lines are nonempty and wrapped to fit the canvas");
+                (mask, line.source_y)
+            })
+            .collect();
         Self {
-            crawl: make_crawl(&credits),
+            crawl,
+            masks,
             elapsed_ms: 0,
             pressed_target: None,
         }
@@ -303,9 +318,8 @@ impl Credits {
         } else if reduced_motion {
             self.render_static(accent, text, muted);
         } else {
-            canvas::clear_text_masks();
             let cycle = self.crawl.content_height.saturating_add(4000) as u32;
-            canvas::configure_projection(
+            let projection = Projection::new(
                 self.elapsed_ms,
                 1,
                 20,
@@ -318,10 +332,10 @@ impl Credits {
                 210,
                 480,
                 accent,
+                HEIGHT,
             )?;
-            for line in &self.crawl.lines {
-                let handle = canvas::load_text_mask(line.text.as_bytes(), SCALE)?;
-                canvas::draw_projected_text(handle, line.source_y)?;
+            for (mask, source_y) in &self.masks {
+                canvas::draw_projected_text(mask, *source_y, &projection)?;
             }
         }
         self.draw_close(muted);

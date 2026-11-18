@@ -2,7 +2,7 @@
 //!
 //! Legacy constants are copied from `tests/native_ecl_smoke.lisp.in`; settings
 //! snapshots reflect the current controls. Keep these tests serial: the
-//! canvas is thread-local, but its raster/text-mask stores are shared by the
+//! canvas is thread-local, but its raster stores are shared by the
 //! render sequence within a test.
 
 #[cfg(test)]
@@ -10,11 +10,12 @@ mod tests {
     use super::super::{credits, menu, policy, settings, ui, wifi};
     use crate::canvas;
 
+    // Animated frames use subpixel coverage. The static hashes are the ECL oracle.
     const CREDITS_HASHES: &[(bool, i64, u64)] = &[
         (false, 0, 0x94ebf079be6e596b),
-        (false, 2_000, 0x20ac6fd3226b1ee3),
-        (false, 20_000, 0xfff52d83af4bdf6b),
-        (false, 600_000_000, 0x24b8e13d4720783b),
+        (false, 2_000, 0x9565b54afcc5a92d),
+        (false, 20_000, 0x870d475b1e2256a5),
+        (false, 600_000_000, 0xd5e26939d81659ff),
         (true, 0, 0xdc88adde04077b1b),
         (true, 60_000, 0xdc88adde04077b1b),
     ];
@@ -51,7 +52,7 @@ mod tests {
     }
 
     #[test]
-    fn credits_frame_hashes_match_ecl_oracle() {
+    fn credits_frame_hashes() {
         let mut page = credits::Credits::new(fixture_credits());
         for &(reduced, elapsed, expected) in CREDITS_HASHES {
             page.tick(elapsed);
@@ -63,7 +64,6 @@ mod tests {
                 "credits frame at {elapsed} ms"
             );
         }
-        canvas::clear_text_masks();
     }
 
     #[test]
