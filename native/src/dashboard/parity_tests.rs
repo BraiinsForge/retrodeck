@@ -165,24 +165,24 @@ mod tests {
         fixture_palette();
         let network = fixture_network();
         let fixtures = [
-            (42, "us", VolumeDown, "", 0xe5a3f2c64227ffb7),
-            (0, "us", VolumeUp, "", 0x484150e321463e37),
-            (42, "cz", Keymap, "", 0x57d53a0d2587f697),
-            (42, "us", Wifi, "", 0x33b75d869533d0c7),
-            (42, "us", Terminal, "", 0xb1bbcc4548882cff),
+            (42, "us", VolumeDown, "", 0x3cbe278b5a0957b7),
+            (0, "us", VolumeUp, "", 0xfc35836e10af4537),
+            (42, "cz", Keymap, "", 0xe66395d275349597),
+            (42, "us", Wifi, "", 0xef904ba047d3fac7),
+            (42, "us", Terminal, "", 0xa02266e45ba33aff),
             (
                 42,
                 "us",
                 VolumeDown,
                 "VOLUME SAVED; CONFIRMATION TONE FAILED",
-                0xadbf7d641872ebf7,
+                0x04d9b229305443f7,
             ),
             (
                 42,
                 "us",
                 VolumeDown,
                 "THIS SETTINGS STATUS FIXTURE IS INTENTIONALLY LONG ENOUGH TO USE THE SMALL FOOTER SCALE ACROSS THE COMPLETE DISPLAY",
-                0x1cdc7e23c14752f7,
+                0x73f6b2e8d928aaf7,
             ),
         ];
         let observed = fixtures.map(|(volume, keymap, selected, status, _)| {

@@ -70,10 +70,10 @@ impl Default for Layout {
         Self {
             close: Rect::new(1212, 12, 56, 56),
             wifi: Rect::new(926, 20, 262, 108),
-            volume_down: Rect::new(108, 208, 104, 104),
-            volume_up: Rect::new(228, 208, 104, 104),
-            terminal: Rect::new(792, 208, 112, 104),
-            keymap: Rect::new(1036, 208, 112, 104),
+            volume_down: Rect::new(148, 208, 104, 104),
+            volume_up: Rect::new(268, 208, 104, 104),
+            terminal: Rect::new(584, 208, 112, 104),
+            keymap: Rect::new(964, 208, 112, 104),
         }
     }
 }
@@ -419,7 +419,8 @@ pub fn render_with_network(s: &State, network: &crate::network::NetworkStatus) -
         scale: 1,
         color: super::ui::color("footer"),
     });
-    let wifi = Rect::new(926, 20, 262, 108);
+    let layout = Layout::default();
+    let wifi = layout.wifi;
     pixel_panel(
         &mut o,
         wifi,
@@ -435,10 +436,10 @@ pub fn render_with_network(s: &State, network: &crate::network::NetworkStatus) -
         },
     );
     let controls = [
-        (Rect::new(108, 208, 104, 104), Target::VolumeDown),
-        (Rect::new(228, 208, 104, 104), Target::VolumeUp),
-        (Rect::new(792, 208, 112, 104), Target::Terminal),
-        (Rect::new(1036, 208, 112, 104), Target::Keymap),
+        (layout.volume_down, Target::VolumeDown),
+        (layout.volume_up, Target::VolumeUp),
+        (layout.terminal, Target::Terminal),
+        (layout.keymap, Target::Keymap),
     ];
     for (r, t) in controls {
         pixel_panel(
@@ -479,10 +480,7 @@ pub fn render_with_network(s: &State, network: &crate::network::NetworkStatus) -
         scale: 2,
         color: muted,
     });
-    for (r, loud) in [
-        (Rect::new(108, 208, 104, 104), false),
-        (Rect::new(228, 208, 104, 104), true),
-    ] {
+    for (r, loud) in [(layout.volume_down, false), (layout.volume_up, true)] {
         let x = r.x + 24;
         let y = r.y + (r.h as i32 / 2);
         for (dx, dy, w, h) in [
@@ -499,12 +497,24 @@ pub fn render_with_network(s: &State, network: &crate::network::NetworkStatus) -
             o.push(DrawOp::Fill(Rect::new(x + 60, y - 16, 4, 32), text));
         }
     }
-    o.push(DrawOp::Outline(Rect::new(825, 238, 46, 34), text, 3));
-    o.push(DrawOp::Fill(Rect::new(845, 272, 6, 7), text));
-    o.push(DrawOp::Fill(Rect::new(816, 279, 64, 3), text));
+    let terminal_x = layout.terminal.x + layout.terminal.w as i32 / 2;
+    let terminal_y = layout.terminal.y;
+    o.push(DrawOp::Outline(
+        Rect::new(terminal_x - 23, terminal_y + 30, 46, 34),
+        text,
+        3,
+    ));
+    o.push(DrawOp::Fill(
+        Rect::new(terminal_x - 3, terminal_y + 64, 6, 7),
+        text,
+    ));
+    o.push(DrawOp::Fill(
+        Rect::new(terminal_x - 32, terminal_y + 71, 64, 3),
+        text,
+    ));
     o.push(DrawOp::Text {
-        i32_: 832,
-        y: 247,
+        i32_: terminal_x - 16,
+        y: terminal_y + 39,
         text: ">_".into(),
         scale: 2,
         color: text,
@@ -527,9 +537,12 @@ pub fn render_with_network(s: &State, network: &crate::network::NetworkStatus) -
             color: colour,
         })
     };
+    let volume_x = (layout.volume_down.x + layout.volume_up.x + layout.volume_up.w as i32) / 2;
+    let keys_x = layout.keymap.x + layout.keymap.w as i32 / 2;
+    let caption = |x, w: u32, y, h| Rect::new(x - w as i32 / 2, y, w, h);
     centered(
         &mut o,
-        Rect::new(82, 328, 276, 34),
+        caption(volume_x, 276, 328, 34),
         if s.volume == 0 {
             "OFF".into()
         } else {
@@ -540,36 +553,42 @@ pub fn render_with_network(s: &State, network: &crate::network::NetworkStatus) -
     );
     centered(
         &mut o,
-        Rect::new(82, 366, 276, 28),
+        caption(volume_x, 276, 366, 28),
         "VOLUME".into(),
         2,
         muted,
     );
     centered(
         &mut o,
-        Rect::new(750, 328, 196, 34),
+        caption(terminal_x, 196, 328, 34),
         "TERMINAL".into(),
         3,
         text,
     );
     centered(
         &mut o,
-        Rect::new(750, 366, 196, 28),
+        caption(terminal_x, 196, 366, 28),
         "/BIN/ASH".into(),
         2,
         muted,
     );
-    centered(&mut o, Rect::new(994, 328, 196, 34), "KEYS".into(), 3, text);
     centered(
         &mut o,
-        Rect::new(1036, 208, 112, 104),
+        caption(keys_x, 196, 328, 34),
+        "KEYS".into(),
+        3,
+        text,
+    );
+    centered(
+        &mut o,
+        layout.keymap,
         if s.keymap == "cz" { "CZ" } else { "EN" }.into(),
         4,
         text,
     );
     centered(
         &mut o,
-        Rect::new(994, 366, 196, 28),
+        caption(keys_x, 196, 366, 28),
         if s.keymap == "cz" { "CZECH" } else { "US ANSI" }.into(),
         2,
         muted,
@@ -688,8 +707,8 @@ mod tests {
                 Some(expected)
             );
         }
-        assert_eq!(touch(&mut state, &layout, 160, 260, true, false), None);
-        assert_eq!(touch(&mut state, &layout, 280, 260, false, true), None);
+        assert_eq!(touch(&mut state, &layout, 200, 260, true, false), None);
+        assert_eq!(touch(&mut state, &layout, 320, 260, false, true), None);
         assert_eq!(state.pressed, None);
     }
 }
