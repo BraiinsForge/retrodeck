@@ -11,8 +11,9 @@ fn main() -> ExitCode {
         Some("gb") => &host::GB_CONFIG,
         Some("zx") => &host::ZX_CONFIG,
         Some("gba") => &host::GBA_CONFIG,
+        Some("snes") => &host::SNES_CONFIG,
         _ => {
-            eprintln!("retro-host: RETRO_DECK_CORE must be nes, gb, zx, or gba at build time");
+            eprintln!("retro-host: RETRO_DECK_CORE must be nes, gb, zx, gba, or snes at build time");
             return ExitCode::from(2);
         }
     };

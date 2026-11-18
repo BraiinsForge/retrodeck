@@ -73,7 +73,7 @@ esac
 
 # Validate the complete payload before stopping a running service.
 for executable in \
-  nes-deck gb-deck zx-deck gba-deck doom-deck tamagotchi-deck \
+  nes-deck gb-deck zx-deck gba-deck snes-deck doom-deck tamagotchi-deck \
   chiptune-deck; do
   [ -x "$stage/nes-deck/$executable" ] || {
     echo "Staged executable is missing: $executable" >&2
@@ -214,6 +214,7 @@ cp -p "$stage/nes-deck/nes-deck" "$base/nes-deck"
 cp -p "$stage/nes-deck/gb-deck" "$base/gb-deck"
 cp -p "$stage/nes-deck/zx-deck" "$base/zx-deck"
 cp -p "$stage/nes-deck/gba-deck" "$base/gba-deck"
+cp -p "$stage/nes-deck/snes-deck" "$base/snes-deck"
 cp -p "$stage/nes-deck/doom-deck" "$base/doom-deck"
 cp -p "$stage/nes-deck/tamagotchi-deck" "$base/tamagotchi-deck"
 rm -f "$base/ten-seconds-deck" "$base/menu/node-mode"
@@ -265,7 +266,7 @@ mv "$base/langs/chibi.new" "$base/langs/chibi"
 cp -p "$stage/nes-deck/langs/lua" "$base/langs/lua"
 cp -p "$stage/nes-deck/langs/python" "$base/langs/python"
 
-for system in nes gb gbc zx gba; do
+for system in nes gb gbc zx gba snes; do
   mkdir -p "/mnt/data/roms/$system"
   cp -Rp "$stage/roms/$system/." "/mnt/data/roms/$system/"
 done

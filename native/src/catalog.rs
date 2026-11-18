@@ -328,9 +328,9 @@ fn game(form: &Form) -> Result<Game> {
     let Form::Keyword(system) = values["system"] else {
         return Err(invalid("game :system must be a keyword"));
     };
-    let suffix = metadata::System::parse(system)
+    let suffixes = metadata::System::parse(system)
         .ok_or_else(|| invalid("unsupported game :system"))?
-        .rom_suffix();
+        .rom_suffixes();
     let rom = text(values["rom"], 512, "game :rom")?;
     let prefix = if system == "deck" {
         "/mnt/data/nes-deck/games/".to_owned()
@@ -338,7 +338,7 @@ fn game(form: &Form) -> Result<Game> {
         format!("/mnt/data/roms/{system}/")
     };
     if !rom.starts_with(&prefix)
-        || !rom.ends_with(suffix)
+        || !suffixes.iter().any(|&suffix| rom.ends_with(suffix))
         || !rom
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b))
@@ -348,7 +348,8 @@ fn game(form: &Form) -> Result<Game> {
             .any(|part| part.is_empty() || part == "." || part == "..")
     {
         return Err(invalid(format!(
-            "game :rom must be a normalized {suffix} path below {prefix}"
+            "game :rom must be a normalized {} path below {prefix}",
+            suffixes.join(" or ")
         )));
     }
     Ok(Game {
@@ -866,5 +867,20 @@ mod tests {
             "old games"
         );
         assert_eq!(fs::read_dir(&fixture.0).unwrap().count(), 2);
+    }
+    #[test]
+    fn accepts_snes_catalog_paths() {
+        let source = |rom| {
+            catalog_with_games(&format!(
+                r##"(:id "snes-game" :title "SNES Game" :system :snes :rom "{rom}" :color "#ffaf87")"##,
+            ))
+        };
+        for rom in ["/mnt/data/roms/snes/game.sfc", "/mnt/data/roms/snes/game.smc"] {
+            let catalog = parse_catalog(&source(rom)).unwrap();
+            assert_eq!(catalog.games[0].system, "snes");
+            assert_eq!(catalog.games[0].rom, rom);
+        }
+        assert!(parse_catalog(&source("/mnt/data/roms/snes/game.gba")).is_err());
+        assert!(parse_catalog(&source("/mnt/data/roms/gba/game.smc")).is_err());
     }
 }

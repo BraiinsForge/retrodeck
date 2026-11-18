@@ -162,7 +162,8 @@
         "gambatte-src": "gambatte-src",
         "gpsp-src": "gpsp-src",
         "lua-src": "lua-src",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "supafaust-src": "supafaust-src"
       }
     },
     "rust-analyzer-src": {
@@ -179,6 +180,23 @@
         "owner": "rust-lang",
         "ref": "nightly",
         "repo": "rust-analyzer",
+        "type": "github"
+      }
+    },
+    "supafaust-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1787486463,
+        "narHash": "sha256-malpQAapdRY/V4y2Csm36+Bo1WCRcAWnx4C4okC5S4k=",
+        "owner": "libretro",
+        "repo": "supafaust",
+        "rev": "642d1d1b6684aa7e306a02a89885f3f5456a5157",
+        "type": "github"
+      },
+      "original": {
+        "owner": "libretro",
+        "repo": "supafaust",
+        "rev": "642d1d1b6684aa7e306a02a89885f3f5456a5157",
         "type": "github"
       }
     }

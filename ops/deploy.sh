@@ -88,6 +88,7 @@ nes=$(build_flake .#nes-deck)
 gb=$(build_flake .#gb-deck)
 zx=$(build_flake .#zx-deck)
 gba=$(build_flake .#gba-deck)
+snes=$(build_flake .#snes-deck)
 doom=$(build_flake .#doom-deck)
 tamagotchi=$(build_flake .#tamagotchi-deck)
 menu=$(build_flake .#deck-menu)
@@ -131,6 +132,7 @@ cp "$nes/bin/nes-deck" "$payload/nes-deck/nes-deck"
 cp "$gb/bin/gb-deck" "$payload/nes-deck/gb-deck"
 cp "$zx/bin/zx-deck" "$payload/nes-deck/zx-deck"
 cp "$gba/bin/gba-deck" "$payload/nes-deck/gba-deck"
+cp "$snes/bin/snes-deck" "$payload/nes-deck/snes-deck"
 cp "$doom/bin/doom-deck" "$payload/nes-deck/doom-deck"
 cp "$tamagotchi/bin/tamagotchi-deck" "$payload/nes-deck/tamagotchi-deck"
 cp "$chiptune/bin/chiptune-deck" "$payload/nes-deck/chiptune-deck"
@@ -184,7 +186,7 @@ cp deploy/uploader/nes-deck-uploader.init \
 cp ops/lib/install-bmc-scene.py "$payload/install-bmc-scene.py"
 cp ops/lib/install-stock-widget.sh "$payload/install-stock-widget.sh"
 
-for result in "$nes" "$gb" "$zx" "$gba" "$doom" "$fbterm" "$rlwrap" "$lua" \
+for result in "$nes" "$gb" "$zx" "$gba" "$snes" "$doom" "$fbterm" "$rlwrap" "$lua" \
               "$python" "$chibi" "$runtime_licenses" "$ecl"; do
   if [[ -d $result/share/licenses ]]; then
     cp -a "$result/share/licenses/." "$payload/nes-deck/licenses/"
@@ -198,7 +200,7 @@ if [[ -d chiptunes ]]; then
     -name '*.vgm' -o -name '*.vgz' \) -exec cp {} "$payload/chiptunes/" \;
 fi
 
-for system in nes gb gbc zx gba; do
+for system in nes gb gbc zx gba snes; do
   mkdir -p "$payload/roms/$system"
   if [[ -d roms/$system ]]; then
     cp -a "roms/$system/." "$payload/roms/$system/"
@@ -245,7 +247,7 @@ fi
 
 find "$payload/nes-deck" -type f \( \
   -name 'nes-deck' -o -name 'gb-deck' -o -name 'zx-deck' -o -name 'gba-deck' -o \
-  -name 'doom-deck' -o -name 'tamagotchi-deck' -o \
+  -name 'snes-deck' -o -name 'doom-deck' -o -name 'tamagotchi-deck' -o \
   -name 'chiptune-deck' -o -name 'rom-uploader' -o \
   -name 'deck-menu' -o -name 'compile-catalog' -o \
   -name 'deck-menu-launcher' -o -name 'fetch-covers' -o \

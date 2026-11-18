@@ -23,6 +23,7 @@ mod projection;
 pub mod protocol;
 mod raster;
 pub mod regular_file;
+pub mod snes_rom;
 pub mod state_file;
 pub mod tamagotchi;
 pub mod uploader;

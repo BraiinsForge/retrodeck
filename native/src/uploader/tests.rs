@@ -109,6 +109,13 @@ fn rom_validation_covers_supported_headers_checksums_and_limits() {
     ] {
         assert!(validate_rom("zx", tap).is_err());
     }
+    let snes = vec![0; crate::snes_rom::MAXIMUM_BYTES + 1];
+    for size in [0, 512, 32_767, 8_388_609, snes.len()] {
+        assert!(validate_rom("snes", &snes[..size]).is_err());
+    }
+    for size in [32_768, 32_768 + 512, 8_388_608, snes.len() - 1] {
+        assert!(validate_rom("snes", &snes[..size]).is_ok());
+    }
     assert!(validate_rom("gba", &[1]).is_ok());
     assert!(validate_rom("gba", &[]).is_err());
     assert!(validate_rom("bogus", &[1]).is_err());
@@ -147,6 +154,18 @@ fn zip_decoding_rejects_paths_links_duplicates_damage_and_expansion() {
     corrupted[payload] ^= 64;
     assert!(decode_upload("zx", "crc.zip", &corrupted).is_err());
     assert!(decode_upload("gba", "big.gba", &vec![0; UPLOAD_LIMIT + 1]).is_err());
+}
+#[test]
+fn snes_extensions_are_accepted_and_stored_canonically() {
+    let rom = vec![0x42; crate::snes_rom::MINIMUM_BYTES + 512];
+    assert_eq!(decode_upload("snes", "game.sfc", &rom).unwrap(), rom);
+    assert_eq!(decode_upload("snes", "game.SMC", &rom).unwrap(), rom);
+    assert!(decode_upload("snes", "game.nes", &rom).is_err());
+    assert_eq!(
+        decode_upload("snes", "game.zip", &archive(&[("game.smc", &rom)])).unwrap(),
+        rom
+    );
+    assert!(decode_upload("snes", "game.zip", &archive(&[("game.nes", &rom)])).is_err());
 }
 #[test]
 fn gba_raw_and_zip_accept_full_size_and_reject_oversize_images() {

@@ -23,6 +23,10 @@
       url = "github:libretro/gpsp/5b6e751f4abf368509146cd143c949c1946ac1ae";
       flake = false;
     };
+    supafaust-src = {
+      url = "github:libretro/supafaust/642d1d1b6684aa7e306a02a89885f3f5456a5157";
+      flake = false;
+    };
     # The Deck fbDOOM fork. Its framebuffer and tty backends are replaced by
     # the Retro Deck platform layer in native/doom, so only the engine and
     # the fork's multiplayer branch are used from here.
@@ -50,7 +54,7 @@
 
   outputs =
     { self, nixpkgs, fenix, fceumm-src, gambatte-src, fuse-src, gpsp-src, lua-src
-    , fbdoom-src, chocolate-doom-src }:
+    , supafaust-src, fbdoom-src, chocolate-doom-src }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
@@ -284,6 +288,26 @@
           runHook postInstall
         '';
       };
+      supafaustCore = stdenv: stdenv.mkDerivation {
+        pname = "supafaust-core";
+        version = "0-642d1d1";
+        src = supafaust-src;
+        nativeBuildInputs = [ pkgs.gnumake ];
+        NIX_CFLAGS_COMPILE = pkgs.lib.optionalString stdenv.hostPlatform.isAarch32
+          "-mcpu=cortex-a7 -mfpu=neon-vfpv4";
+        makeFlags = [
+          "platform=unix" "STATIC_LINKING=1" "TARGET=libsupafaust.a"
+          "GIT_VERSION=-642d1d1"
+          "CXX=${stdenv.cc.targetPrefix}c++" "AR=${stdenv.cc.targetPrefix}ar"
+        ];
+        enableParallelBuilding = true;
+        installPhase = ''
+          runHook preInstall
+          install -Dm644 libsupafaust.a $out/lib/libsupafaust.a
+          install -Dm644 COPYING $out/share/licenses/snes-deck/Supafaust-COPYING
+          runHook postInstall
+        '';
+      };
       # Freedoom stands in for the owner's private IWAD in the sandboxed
       # frame-hash test. It is redistributable, so the test can be pinned and
       # reproduced by anyone; it is never installed on a Deck.
@@ -486,7 +510,7 @@ PATCH
 
       # One Rust libretro host binary per console, with the core linked in.
       retroHost = { name, core, coreDerivation, coreLibrary, description, license
-        , linkTimeOptimization ? false }:
+        , linkTimeOptimization ? false, cxxCore ? false }:
         pkgs.stdenvNoCC.mkDerivation {
           pname = name;
           version = "1.0.0";
@@ -522,6 +546,7 @@ PATCH
               -l static=${coreLibrary} \
               -l z \
               -l m \
+              ${pkgs.lib.optionalString cxxCore "-C link-arg=-lstdc++"} \
               ${pkgs.lib.optionalString linkTimeOptimization "-C link-arg=-flto"}"
             cargo build --release --locked --offline --bin retro-host
             runHook postBuild
@@ -733,6 +758,16 @@ PATCH
           coreLibrary = "gpsp";
           description = "gpSP GBA core with the Rust Deck frontend";
           license = pkgs.lib.licenses.gpl2Only;
+        };
+
+        snes-deck = retroHost {
+          name = "snes-deck";
+          core = "snes";
+          coreDerivation = supafaustCore pkgsCross.stdenv;
+          coreLibrary = "supafaust";
+          cxxCore = true;
+          description = "Supafaust SNES core with the Rust Deck frontend";
+          license = pkgs.lib.licenses.gpl2Plus;
         };
 
         lua-deck = pkgsCross.stdenv.mkDerivation {
@@ -1061,6 +1096,25 @@ PATCH
               url = "https://github.com/pinobatch/240p-test-mini/releases/download/v0.23/240pee_mb.gba";
               hash = "sha256-R4RPcUBzigb487wJeA2jqwlVOaJQuHD2FP7tVh2dbzQ=";
             }} 408bb5792cfa3e00
+          touch $out
+        '';
+
+        # Assemble an original cartridge, then boot both raw and copier images.
+        snes-host-smoke = pkgs.runCommand "snes-host-smoke" {
+          nativeBuildInputs = [ pkgs.cc65 ];
+        } ''
+          ca65 ${./tests/fixtures/snes-smoke.s} -o smoke.o
+          ld65 -C ${./tests/fixtures/snes-smoke.cfg} smoke.o -o smoke.sfc
+          test "$(wc -c < smoke.sfc)" -eq 32768
+          dd if=/dev/zero of=smoke.smc bs=512 count=1 status=none
+          cat smoke.sfc >> smoke.smc
+          for rom in smoke.sfc smoke.smc; do
+            RETRO_DECK_TEST_FRAMES=120 RETRO_DECK_VOLUME_PERCENT=0 \
+              ${pkgs.qemu-user}/bin/qemu-arm -cpu cortex-a7 \
+              ${self.packages.${system}.snes-deck}/bin/snes-deck "$rom" > run.log 2>&1
+            cat run.log
+            grep -Fx 'snes-deck: test frames=120 video=120 audio=63909 hash=9eb2a10e6b6a53a5' run.log
+          done
           touch $out
         '';
 

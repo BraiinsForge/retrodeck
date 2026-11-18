@@ -6,9 +6,11 @@ pub enum System {
     Gb,
     Gbc,
     Gba,
+    Snes,
     Zx,
     Deck,
 }
+
 impl System {
     pub fn parse(s: &str) -> Option<Self> {
         Some(match s {
@@ -16,19 +18,22 @@ impl System {
             "gb" => Self::Gb,
             "gbc" => Self::Gbc,
             "gba" => Self::Gba,
+            "snes" => Self::Snes,
             "zx" => Self::Zx,
             "deck" => Self::Deck,
             _ => return None,
         })
     }
-    pub const fn rom_suffix(self) -> &'static str {
+
+    pub const fn rom_suffixes(self) -> &'static [&'static str] {
         match self {
-            Self::Nes => ".nes",
-            Self::Gb => ".gb",
-            Self::Gbc => ".gbc",
-            Self::Gba => ".gba",
-            Self::Zx => ".tap",
-            Self::Deck => "",
+            Self::Nes => &[".nes"],
+            Self::Gb => &[".gb"],
+            Self::Gbc => &[".gbc"],
+            Self::Gba => &[".gba"],
+            Self::Snes => &[".sfc", ".smc"],
+            Self::Zx => &[".tap"],
+            Self::Deck => &[""],
         }
     }
 }

@@ -41,10 +41,10 @@ minutes. Later builds reuse the Nix store.
 
 The dashboard (`deck-menu`), uploader (`rom-uploader`), chiptune player, and
 catalog compiler are standalone Rust executables. The console emulators are Rust libretro hosts
-(`native/src/bin/retro-host/`) with the
-pinned FCEUmm, Gambatte, Fuse, and gpSP cores statically linked, one binary per
-console. The `libretro-host-smoke` flake check runs a representative ARM host
-headless under QEMU against a reproducibly fetched free test input and pins its video hash.
+  (`native/src/bin/retro-host/`) with the
+  pinned FCEUmm, Gambatte, Fuse, gpSP, and Supafaust cores statically linked, one binary per
+  console. The `libretro-host-smoke` flake check runs a representative ARM host
+  headless under QEMU against a reproducibly fetched free test input and pins its video hash.
 
 DOOM follows the same shape without being a libretro core. `doom-deck` links
 the pinned fbDOOM fork as a static archive (`doomLib`) into the Rust host in
@@ -78,6 +78,7 @@ nix build --no-link --print-out-paths .#nes-deck
 nix build --no-link --print-out-paths .#gb-deck
 nix build --no-link --print-out-paths .#zx-deck
 nix build --no-link --print-out-paths .#gba-deck
+nix build --no-link --print-out-paths .#snes-deck
 nix build --no-link --print-out-paths .#doom-deck
 nix build --no-link --print-out-paths .#tamagotchi-deck
 nix build --no-link --print-out-paths .#fbterm-deck
@@ -99,6 +100,7 @@ nix build --no-link --print-out-paths -f nix/ecl-arm-static.nix
 | `gb-deck` | `bin/gb-deck` |
 | `zx-deck` | `bin/zx-deck` |
 | `gba-deck` | `bin/gba-deck` |
+| `snes-deck` | `bin/snes-deck` |
 | `tamagotchi-deck` | `bin/tamagotchi-deck`, Tamagotchi P1 host |
 | `fbterm-deck` | `bin/{fbterm,loadkeys}` plus font and keymaps |
 | `rlwrap-deck` | `bin/rlwrap` |

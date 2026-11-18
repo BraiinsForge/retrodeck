@@ -6,7 +6,7 @@
   their checksums, or root-level intake files.
 - When local deployment needs a console image, place it under
   `roms/<system>/` using a lowercase kebab-case filename. Supported system
-  directories are `nes`, `gb`, `gbc`, `gba`, and `zx`.
+  directories are `nes`, `gb`, `gbc`, `gba`, `snes`, and `zx`.
 - Console catalog paths use `/mnt/data/roms/<system>/<filename>`. Deck
   applications are not ROMs and remain below `/mnt/data/nes-deck/games/`.
 - Preserve `.sav`, `.rtc`, `.state`, and emulator configuration sidecars when

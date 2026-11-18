@@ -39,6 +39,18 @@ grep -Fq "[[ -f \$activate_script && ! -L \$activate_script ]]" "$deployer" ||
   fail 'deployer does not validate the activation script'
 grep -Fq 'cp "$chiptune/bin/chiptune-deck" "$payload/nes-deck/chiptune-deck"' \
   "$deployer" || fail 'deployer does not stage the chiptune executable'
+grep -Fq 'snes=$(build_flake .#snes-deck)' "$deployer" ||
+  fail 'deployer does not build the SNES host'
+grep -Fq 'cp "$snes/bin/snes-deck" "$payload/nes-deck/snes-deck"' "$deployer" ||
+  fail 'deployer does not stage the SNES host'
+grep -Fq -e "-name 'snes-deck' -o" "$deployer" ||
+  fail 'deployer does not make the SNES host executable'
+grep -Fq '"$snes" "$doom"' "$deployer" ||
+  fail 'deployer does not collect the SNES license notices'
+grep -Fq 'nes gb gbc zx gba snes' "$deployer" ||
+  fail 'deployer does not stage the SNES ROM directory'
+grep -Fq 'cp -p "$stage/nes-deck/snes-deck" "$base/snes-deck"' "$activation" ||
+  fail 'activation does not install the SNES host'
 grep -Fq '"$stage/nes-deck/chiptune-deck" extra extra' "$activation" ||
   fail 'activation does not preflight the staged chiptune executable'
 grep -Fq '[ "$chiptune_output" = "usage: chiptune-deck CHIPTUNE_DIRECTORY" ]' \
@@ -54,8 +66,8 @@ grep -Fq -e "-name 'doom-deck' -o" "$deployer" ||
   fail 'deployer does not make the DOOM host executable'
 grep -Fq -e "find deploy/doom -maxdepth 1 -type f -name '*.wad'" "$deployer" ||
   fail 'deployer does not stage DOOM WADs'
-grep -Fq '"$gba" "$doom"' "$deployer" ||
-  fail 'deployer does not collect the GBA and DOOM license notices'
+grep -Fq '"$gba" "$snes" "$doom"' "$deployer" ||
+  fail 'deployer does not collect the GBA, SNES and DOOM license notices'
 grep -Fq 'ops/lib/extract-doom-cover.py' "$deployer" ||
   fail 'deployer does not render DOOM covers'
 [[ -f $repo_root/ops/lib/extract-doom-cover.py ]] ||
@@ -69,7 +81,7 @@ grep -Fq 'cp -Rp "$stage/nes-deck/covers/." "$base/covers/"' "$activation" ||
 if grep -Fq 'rm -rf "$base/covers"' "$activation"; then
   fail 'activation deletes the persistent cover cache'
 fi
-grep -Fq 'nes-deck gb-deck zx-deck gba-deck doom-deck tamagotchi-deck' \
+grep -Fq 'nes-deck gb-deck zx-deck gba-deck snes-deck doom-deck tamagotchi-deck' \
   "$activation" || fail 'activation does not validate the staged Deck hosts'
 grep -Fq 'cp -p "$stage/nes-deck/doom-deck" "$base/doom-deck"' "$activation" ||
   fail 'activation does not install the DOOM host'

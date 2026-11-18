@@ -568,24 +568,31 @@ fn install_with_sync(
 }
 #[derive(Clone)]
 struct System {
+    /// Canonical on-disk extension. The alternate is accepted on intake.
     extension: &'static str,
+    alternate_extension: Option<&'static str>,
     color: &'static str,
     maximum: usize,
 }
 fn system(name: &str) -> Result<System> {
-    let (extension, color, maximum) = match name {
-        "nes" => ("nes", "#FF5F00", 8_388_608),
-        "gb" => ("gb", "#87AF87", 8_388_608),
-        "gbc" => ("gbc", "#5F87D7", 8_388_608),
-        "zx" => ("tap", "#AF87D7", 8_388_608),
-        "gba" => ("gba", "#875FD7", 33_554_432),
+    let (extension, alternate_extension, color, maximum) = match name {
+        "nes" => ("nes", None, "#FF5F00", 8_388_608),
+        "gb" => ("gb", None, "#87AF87", 8_388_608),
+        "gbc" => ("gbc", None, "#5F87D7", 8_388_608),
+        "zx" => ("tap", None, "#AF87D7", 8_388_608),
+        "gba" => ("gba", None, "#875FD7", 33_554_432),
+        "snes" => ("sfc", Some("smc"), "#D787AF", crate::snes_rom::MAXIMUM_BYTES),
         _ => return Err("choose a supported system".into()),
     };
     Ok(System {
         extension,
+        alternate_extension,
         color,
         maximum,
     })
+}
+fn accepted_extension(spec: &System, extension: &str) -> bool {
+    extension == spec.extension || spec.alternate_extension == Some(extension)
 }
 fn validate_rom(name: &str, bytes: &[u8]) -> Result<()> {
     let spec = system(name)?;
@@ -596,6 +603,9 @@ fn validate_rom(name: &str, bytes: &[u8]) -> Result<()> {
         ));
     }
     match name {
+        "snes" if !crate::snes_rom::valid_size(bytes.len()) => {
+            return Err("the SNES cartridge data must contain 32 KiB through 8 MiB".into());
+        }
         "nes" => {
             if bytes.len() < 16 || &bytes[..4] != b"NES\x1a" {
                 return Err("the file has no iNES header".into());
@@ -675,7 +685,7 @@ fn decode_upload(name: &str, filename: &str, bytes: &[u8]) -> Result<Vec<u8>> {
     if bytes.len() > UPLOAD_LIMIT {
         return Err("the upload exceeds 34 MiB".into());
     }
-    if extension(filename) == spec.extension {
+    if accepted_extension(&spec, &extension(filename)) {
         validate_rom(name, bytes)?;
         return Ok(bytes.to_vec());
     }
@@ -712,7 +722,7 @@ fn decode_upload(name: &str, filename: &str, bytes: &[u8]) -> Result<Vec<u8>> {
     {
         return Err("the ZIP contains an unsafe or encrypted member".into());
     }
-    if extension(member_name.as_ref()) != spec.extension
+    if !accepted_extension(&spec, &extension(member_name.as_ref()))
         || file.size() == 0
         || file.size() > spec.maximum as u64
     {

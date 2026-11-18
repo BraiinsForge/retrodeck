@@ -1,5 +1,6 @@
 //! Libretro host: embeds one statically linked core per console binary.
 
+use retrodeck_native::{joypad, snes_rom};
 use std::ffi::{CStr, c_char, c_uint, c_void};
 use std::os::raw::c_double;
 use std::path::{Path, PathBuf};
@@ -96,9 +97,7 @@ unsafe extern "C" {
     fn retro_set_audio_sample(callback: *const c_void);
     fn retro_set_audio_sample_batch(callback: unsafe extern "C" fn(*const i16, usize) -> usize);
     fn retro_set_input_poll(callback: unsafe extern "C" fn());
-    fn retro_set_input_state(
-        callback: unsafe extern "C" fn(c_uint, c_uint, c_uint, c_uint) -> i16,
-    );
+    fn retro_set_input_state(callback: unsafe extern "C" fn(c_uint, c_uint, c_uint, c_uint) -> i16);
     fn retro_set_controller_port_device(port: c_uint, device: c_uint);
     fn retro_init();
     fn retro_deinit();
@@ -125,6 +124,7 @@ pub struct CoreConfig {
     pub zx: bool,
     pub nes: bool,
     pub gba: bool,
+    pub snes: bool,
 }
 
 pub const NES_CONFIG: CoreConfig = CoreConfig {
@@ -140,6 +140,7 @@ pub const NES_CONFIG: CoreConfig = CoreConfig {
     zx: false,
     nes: true,
     gba: false,
+    snes: false,
 };
 
 pub const GB_CONFIG: CoreConfig = CoreConfig {
@@ -155,6 +156,7 @@ pub const GB_CONFIG: CoreConfig = CoreConfig {
     zx: false,
     nes: false,
     gba: false,
+    snes: false,
 };
 
 pub const ZX_CONFIG: CoreConfig = CoreConfig {
@@ -170,6 +172,7 @@ pub const ZX_CONFIG: CoreConfig = CoreConfig {
     zx: true,
     nes: false,
     gba: false,
+    snes: false,
 };
 
 pub const GBA_CONFIG: CoreConfig = CoreConfig {
@@ -185,9 +188,24 @@ pub const GBA_CONFIG: CoreConfig = CoreConfig {
     zx: false,
     nes: false,
     gba: true,
+    snes: false,
 };
 
-
+pub const SNES_CONFIG: CoreConfig = CoreConfig {
+    frontend_name: "snes-deck",
+    default_core_name: "Supafaust",
+    rom_description: "SNES",
+    rom_usage: "ROM.sfc|ROM.smc",
+    save_extension: ".srm",
+    minimum_rom_bytes: snes_rom::MINIMUM_BYTES,
+    maximum_rom_bytes: snes_rom::MAXIMUM_BYTES,
+    player_count: 2,
+    has_rtc: false,
+    zx: false,
+    nes: false,
+    gba: false,
+    snes: true,
+};
 static CONFIG: std::sync::OnceLock<&'static CoreConfig> = std::sync::OnceLock::new();
 static SYSTEM_DIRECTORY: std::sync::OnceLock<std::ffi::CString> = std::sync::OnceLock::new();
 static PIXEL_FORMAT: AtomicU32 = AtomicU32::new(PIXEL_FORMAT_XRGB8888);
@@ -246,10 +264,16 @@ fn zx_variable(key: &CStr) -> Option<&'static CStr> {
 unsafe extern "C" fn environment_callback(command: c_uint, data: *mut c_void) -> bool {
     match command {
         ENV_GET_CORE_OPTIONS_VERSION => unsafe {
-            data.cast::<c_uint>().as_mut().map(|value| *value = 2).is_some()
+            data.cast::<c_uint>()
+                .as_mut()
+                .map(|value| *value = 2)
+                .is_some()
         },
         ENV_GET_LANGUAGE => unsafe {
-            data.cast::<c_uint>().as_mut().map(|value| *value = 0).is_some()
+            data.cast::<c_uint>()
+                .as_mut()
+                .map(|value| *value = 0)
+                .is_some()
         },
         ENV_GET_SYSTEM_DIRECTORY | ENV_GET_SAVE_DIRECTORY | ENV_GET_CONTENT_DIRECTORY => unsafe {
             data.cast::<*const c_char>()
@@ -266,10 +290,16 @@ unsafe extern "C" fn environment_callback(command: c_uint, data: *mut c_void) ->
         ENV_GET_LOG_INTERFACE => false,
         ENV_GET_INPUT_BITMASKS => true,
         ENV_GET_CAN_DUPE => unsafe {
-            data.cast::<bool>().as_mut().map(|value| *value = true).is_some()
+            data.cast::<bool>()
+                .as_mut()
+                .map(|value| *value = true)
+                .is_some()
         },
         ENV_GET_VARIABLE_UPDATE => unsafe {
-            data.cast::<bool>().as_mut().map(|value| *value = false).is_some()
+            data.cast::<bool>()
+                .as_mut()
+                .map(|value| *value = false)
+                .is_some()
         },
         ENV_GET_VARIABLE => {
             let Some(variable) = (unsafe { data.cast::<Variable>().as_mut() }) else {
@@ -310,12 +340,103 @@ unsafe extern "C" fn environment_callback(command: c_uint, data: *mut c_void) ->
             PIXEL_FORMAT.store(*format, Ordering::Relaxed);
             true
         }
-        ENV_SET_CORE_OPTIONS | ENV_SET_CORE_OPTIONS_INTL | ENV_SET_CORE_OPTIONS_V2
-        | ENV_SET_CORE_OPTIONS_V2_INTL | ENV_SET_VARIABLES | ENV_SET_CORE_OPTIONS_DISPLAY
-        | ENV_SET_CONTROLLER_INFO | ENV_SET_INPUT_DESCRIPTORS | ENV_SET_MEMORY_MAPS
-        | ENV_SET_SUBSYSTEM_INFO | ENV_SET_SUPPORT_ACHIEVEMENTS | ENV_SET_GEOMETRY
+        ENV_SET_CORE_OPTIONS
+        | ENV_SET_CORE_OPTIONS_INTL
+        | ENV_SET_CORE_OPTIONS_V2
+        | ENV_SET_CORE_OPTIONS_V2_INTL
+        | ENV_SET_VARIABLES
+        | ENV_SET_CORE_OPTIONS_DISPLAY
+        | ENV_SET_CONTROLLER_INFO
+        | ENV_SET_INPUT_DESCRIPTORS
+        | ENV_SET_MEMORY_MAPS
+        | ENV_SET_SUBSYSTEM_INFO
+        | ENV_SET_SUPPORT_ACHIEVEMENTS
+        | ENV_SET_GEOMETRY
         | ENV_SET_PERFORMANCE_LEVEL => true,
         _ => false,
+    }
+}
+
+thread_local! {
+    static SNES_FRAME: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn snes_video_steps(width: u32, height: u32) -> (usize, usize) {
+    // Supafaust doubles the native width and/or line count in hi-res and
+    // interlaced modes. Return to the base grid for both Deck renderers.
+    (
+        if width == 512 { 2 } else { 1 },
+        if height >= 448 { 2 } else { 1 },
+    )
+}
+
+unsafe fn present_snes(
+    data: *const c_void,
+    width: u32,
+    height: u32,
+    pitch: usize,
+    rgb565: bool,
+) -> Result<(), String> {
+    if width == 0 || width > 512 || height == 0 || height > 480 {
+        return Err("invalid SNES frame dimensions".to_owned());
+    }
+    let (step_x, step_y) = snes_video_steps(width, height);
+    let output_height = height / step_y as u32;
+    let output_pitch = pitch
+        .checked_mul(step_y)
+        .ok_or("SNES frame pitch overflow")?;
+    if step_x == 1 {
+        return unsafe {
+            retrodeck_native::game_video::present(data, width, output_height, output_pitch, rgb565)
+        };
+    }
+
+    let bytes_per_pixel = if rgb565 { 2 } else { 4 };
+    let row_bytes = width as usize * bytes_per_pixel;
+    if pitch < row_bytes {
+        return Err("invalid SNES frame geometry".to_owned());
+    }
+    let input_bytes = (height as usize - 1)
+        .checked_mul(pitch)
+        .and_then(|offset| offset.checked_add(row_bytes))
+        .filter(|&bytes| bytes <= isize::MAX as usize)
+        .ok_or("SNES frame dimensions overflow")?;
+    // libretro provides the complete frame through the callback's return.
+    let input = unsafe { std::slice::from_raw_parts(data.cast::<u8>(), input_bytes) };
+    let stride = row_bytes / 2;
+    SNES_FRAME.with_borrow_mut(|frame| {
+        frame.resize(stride * output_height as usize, 0);
+        for (y, row) in frame.chunks_exact_mut(stride).enumerate() {
+            let start = y * output_pitch;
+            blend_snes_row(&input[start..start + row_bytes], row, rgb565);
+        }
+        unsafe {
+            retrodeck_native::game_video::present(
+                frame.as_ptr().cast(),
+                width / 2,
+                output_height,
+                stride,
+                rgb565,
+            )
+        }
+    })
+}
+
+fn blend_snes_row(input: &[u8], output: &mut [u8], rgb565: bool) {
+    if rgb565 {
+        for (pair, pixel) in input.chunks_exact(4).zip(output.chunks_exact_mut(2)) {
+            let a = u16::from_ne_bytes([pair[0], pair[1]]);
+            let b = u16::from_ne_bytes([pair[2], pair[3]]);
+            // Average RGB565 components without carrying between them.
+            let average = (a & b) + (((a ^ b) & 0xf7de) >> 1);
+            pixel.copy_from_slice(&average.to_ne_bytes());
+        }
+    } else {
+        for (pair, pixel) in input.chunks_exact(8).zip(output.chunks_exact_mut(4)) {
+            for channel in 0..4 {
+                pixel[channel] = pair[channel].midpoint(pair[channel + 4]);
+            }
+        }
     }
 }
 
@@ -341,8 +462,11 @@ unsafe extern "C" fn video_callback(
     }
     let rgb565 = PIXEL_FORMAT.load(Ordering::Relaxed) == PIXEL_FORMAT_RGB565;
     // libretro keeps the callback's frame buffer readable until we return.
-    let result =
-        unsafe { retrodeck_native::game_video::present(data, width, height, pitch, rgb565) };
+    let result = if config().snes {
+        unsafe { present_snes(data, width, height, pitch, rgb565) }
+    } else {
+        unsafe { retrodeck_native::game_video::present(data, width, height, pitch, rgb565) }
+    };
     if let Err(error) = result {
         eprintln!("{}: video error: {error}", config().frontend_name);
         VIDEO_FAILED.store(true, Ordering::Relaxed);
@@ -357,6 +481,29 @@ unsafe extern "C" fn audio_callback(data: *const i16, frames: usize) -> usize {
         retrodeck_native::game_audio::write_stereo(samples);
     }
     frames
+}
+
+fn input_mask(state: u32, mapping: &[(u32, u32)]) -> u16 {
+    mapping.iter().fold(0, |mask, &(pad_bit, id)| {
+        if state & pad_bit == 0 {
+            mask
+        } else {
+            mask | (1 << id)
+        }
+    })
+}
+
+fn snes_input_mask(gamepad: u32, keyboard: u32) -> u16 {
+    input_mask(gamepad | keyboard, &joypad::RETRO_BUTTON_MAP)
+        | input_mask(
+            gamepad,
+            &[
+                (joypad::PAD_Y, 1),
+                (joypad::PAD_X, 9),
+                (joypad::PAD_L, 10),
+                (joypad::PAD_R, 11),
+            ],
+        )
 }
 
 unsafe extern "C" fn input_poll_callback() {}
@@ -375,15 +522,14 @@ unsafe extern "C" fn input_state_callback(
     if port >= configuration.player_count || device != DEVICE_JOYPAD || index != 0 {
         return 0;
     }
-    let state = retrodeck_native::joypad::joypad_state(port);
-    let mut result: u16 = 0;
-    // PAD_* bit order matches RETRO_DEVICE_ID_JOYPAD_{B,Y,SELECT,START,UP,
-    // DOWN,LEFT,RIGHT,A,X,L,R} after the frontend's own A/B mapping below.
-    for (pad_bit, retro_id) in retrodeck_native::joypad::RETRO_BUTTON_MAP {
-        if state & pad_bit != 0 {
-            result |= 1 << retro_id;
-        }
-    }
+    let result = if configuration.snes {
+        snes_input_mask(
+            joypad::joypad_distinct_state(port),
+            joypad::keyboard_pad_state(port),
+        )
+    } else {
+        input_mask(joypad::joypad_state(port), &joypad::RETRO_BUTTON_MAP)
+    };
     if id == DEVICE_ID_JOYPAD_MASK {
         return result as i16;
     }
@@ -400,6 +546,7 @@ fn read_rom(path: &Path, configuration: &CoreConfig) -> Result<Vec<u8>, String> 
     if !metadata.is_file()
         || size < configuration.minimum_rom_bytes
         || size > configuration.maximum_rom_bytes
+        || (configuration.snes && !snes_rom::valid_size(size))
     {
         return Err(format!(
             "{} ROM has an invalid size",
@@ -413,6 +560,9 @@ fn read_rom(path: &Path, configuration: &CoreConfig) -> Result<Vec<u8>, String> 
             path.display()
         )
     })?;
+    if configuration.snes && !snes_rom::valid_size(rom.len()) {
+        return Err("SNES ROM has an invalid size".to_owned());
+    }
     if configuration.nes && (rom.len() < 4 || &rom[0..4] != b"NES\x1a") {
         return Err("NES ROM is missing its iNES header".to_owned());
     }
@@ -701,7 +851,8 @@ pub fn run_host(configuration: &'static CoreConfig, arguments: &[String]) -> u8 
     let mut diagnostics_started = std::time::Instant::now();
     let mut previous_audio_frames = 0_u64;
     let mut previous_audio_callbacks = 0_u64;
-    while !retrodeck_native::process::shutdown_requested() && !VIDEO_FAILED.load(Ordering::Relaxed) {
+    while !retrodeck_native::process::shutdown_requested() && !VIDEO_FAILED.load(Ordering::Relaxed)
+    {
         if test_frames.is_none() && clock.lateness() > clock.frame_nanoseconds() / 2 {
             PRESENT_SKIP.store(true, Ordering::Relaxed);
         }
@@ -840,5 +991,46 @@ mod tests {
             assert!(!unsafe { environment_callback(ENV_SET_PIXEL_FORMAT, std::ptr::null_mut()) });
             assert_eq!(PIXEL_FORMAT.load(Ordering::Relaxed), accepted);
         }
+    }
+
+    #[test]
+    fn snes_retropad_keeps_face_buttons_distinct_and_preserves_keyboard() {
+        for (button, id) in [
+            (joypad::PAD_B, 0),
+            (joypad::PAD_Y, 1),
+            (joypad::PAD_SELECT, 2),
+            (joypad::PAD_START, 3),
+            (joypad::PAD_UP, 4),
+            (joypad::PAD_DOWN, 5),
+            (joypad::PAD_LEFT, 6),
+            (joypad::PAD_RIGHT, 7),
+            (joypad::PAD_A, 8),
+            (joypad::PAD_X, 9),
+            (joypad::PAD_L, 10),
+            (joypad::PAD_R, 11),
+        ] {
+            assert_eq!(snes_input_mask(button, 0), 1 << id);
+        }
+        assert_eq!(
+            snes_input_mask(joypad::PAD_Y, joypad::PAD_A | joypad::PAD_UP),
+            0x112
+        );
+        assert_eq!(snes_input_mask(joypad::PAD_X, joypad::PAD_B), 0x201);
+    }
+
+    #[test]
+    fn snes_video_normalizes_doubled_modes() {
+        assert_eq!(snes_video_steps(256, 224), (1, 1));
+        assert_eq!(snes_video_steps(256, 239), (1, 1));
+        assert_eq!(snes_video_steps(512, 224), (2, 1));
+        assert_eq!(snes_video_steps(256, 448), (1, 2));
+        assert_eq!(snes_video_steps(512, 478), (2, 2));
+        let mut rgb565 = [0; 2];
+        let pair = [0xf800u16.to_ne_bytes(), 0x07e0u16.to_ne_bytes()].concat();
+        blend_snes_row(&pair, &mut rgb565, true);
+        assert_eq!(u16::from_ne_bytes(rgb565), 0x7be0);
+        let mut xrgb = [0; 4];
+        blend_snes_row(&[0, 2, 4, 0, 8, 12, 16, 0], &mut xrgb, false);
+        assert_eq!(xrgb, [4, 7, 10, 0]);
     }
 }

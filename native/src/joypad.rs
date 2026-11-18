@@ -22,7 +22,7 @@ pub const PAD_RIGHT: u32 = 1 << 7;
 pub const PAD_L: u32 = 1 << 8;
 pub const PAD_R: u32 = 1 << 9;
 /// Only ever set in the distinct state. The console mapping deliberately
-/// folds X into A and Y into B; DOOM needs four separate face buttons.
+/// folds X into A and Y into B; DOOM and SNES use separate face buttons.
 pub const PAD_X: u32 = 1 << 10;
 pub const PAD_Y: u32 = 1 << 11;
 
@@ -103,6 +103,7 @@ struct Shared {
     /// Gamepads only, with X and Y kept apart from A and B. The keyboard
     /// fallback is deliberately absent: DOOM reads real keys instead.
     pad_distinct: [AtomicU32; PLAYER_COUNT],
+    keyboard_pad: AtomicU32,
     stopping: AtomicBool,
 }
 
@@ -129,6 +130,7 @@ fn shared() -> &'static Shared {
         }),
         pad_state: std::array::from_fn(|_| AtomicU32::new(0)),
         pad_distinct: std::array::from_fn(|_| AtomicU32::new(0)),
+        keyboard_pad: AtomicU32::new(0),
         stopping: AtomicBool::new(false),
     })
 }
@@ -222,6 +224,7 @@ fn gamepad_state_mapped(gamepad: &Gamepad, key_to_pad: fn(u16) -> u32) -> u32 {
 }
 
 fn publish_states(inner: &Inner) {
+    shared().keyboard_pad.store(inner.keyboard_mask, Ordering::Release);
     let next = [
         inner.keyboard_mask | inner.gamepads[0].state,
         inner.gamepads[1].state,
@@ -730,13 +733,21 @@ pub fn joypad_state(port: u32) -> u32 {
 }
 
 /// Held gamepad buttons with X and Y reported separately from A and B, and
-/// without the keyboard fallback folded in. Only the DOOM host uses this.
+/// without the keyboard fallback folded in.
 pub fn joypad_distinct_state(port: u32) -> u32 {
     shared()
         .pad_distinct
         .get(port as usize)
         .map(|state| state.load(Ordering::Acquire))
         .unwrap_or(0)
+}
+
+pub fn keyboard_pad_state(port: u32) -> u32 {
+    if port == 0 {
+        shared().keyboard_pad.load(Ordering::Acquire)
+    } else {
+        0
+    }
 }
 
 pub fn keyboard_key_held(keycode: u16) -> bool {

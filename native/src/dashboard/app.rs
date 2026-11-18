@@ -871,6 +871,7 @@ pub fn populated_systems(games: &[policy::Game]) -> Vec<policy::System> {
         policy::System::Gb,
         policy::System::Gbc,
         policy::System::Gba,
+        policy::System::Snes,
         policy::System::Zx,
         policy::System::Deck,
     ]

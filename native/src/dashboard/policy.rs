@@ -14,6 +14,7 @@ impl System {
             Self::Gb => "GAME BOY",
             Self::Gbc => "GBC",
             Self::Gba => "GBA",
+            Self::Snes => "SNES",
             Self::Zx => "ZX SPECTRUM",
             Self::Deck => "DECK",
         }
@@ -281,6 +282,7 @@ pub struct LaunchConfig {
     pub nes_emulator: Option<String>,
     pub gb_emulator: Option<String>,
     pub gba_emulator: Option<String>,
+    pub snes_emulator: Option<String>,
     pub zx_emulator: Option<String>,
     pub doom_deck: Option<String>,
     pub tamagotchi_deck: Option<String>,
@@ -295,6 +297,7 @@ impl LaunchConfig {
             "nes" => self.nes_emulator.as_deref(),
             "gb" => self.gb_emulator.as_deref(),
             "gba" => self.gba_emulator.as_deref(),
+            "snes" => self.snes_emulator.as_deref(),
             "zx" => self.zx_emulator.as_deref(),
             "doom" => self.doom_deck.as_deref(),
             "tamagotchi" => self.tamagotchi_deck.as_deref(),
@@ -347,6 +350,7 @@ pub fn launch_plan(
         System::Nes => "nes",
         System::Gb | System::Gbc => "gb",
         System::Gba => "gba",
+        System::Snes => "snes",
         System::Zx => "zx",
         System::Deck if g.id == "tamagotchi" => "tamagotchi",
         System::Deck if g.id == "chiptunes" => "chiptunes",
@@ -357,6 +361,7 @@ pub fn launch_plan(
         "nes" => "/mnt/data/nes-deck/nes-deck",
         "gb" => "/mnt/data/nes-deck/gb-deck",
         "gba" => "/mnt/data/nes-deck/gba-deck",
+        "snes" => "/mnt/data/nes-deck/snes-deck",
         "zx" => "/mnt/data/nes-deck/zx-deck",
         "tamagotchi" => "/mnt/data/nes-deck/tamagotchi-deck",
         "chiptunes" => "/mnt/data/nes-deck/chiptune-deck",
@@ -500,6 +505,7 @@ mod tests {
             nes_emulator: Some("nes-x".into()),
             gb_emulator: Some("gb-x".into()),
             gba_emulator: Some("gba-x".into()),
+            snes_emulator: Some("snes-x".into()),
             zx_emulator: Some("zx-x".into()),
             doom_deck: Some("doom-x".into()),
             tamagotchi_deck: Some("tama-x".into()),
@@ -516,6 +522,10 @@ mod tests {
         assert_eq!(gbc.executable, "gb-x");
         let gba = p(game("a", System::Gba, "/rom/a.gba"));
         assert_eq!(gba.executable, "gba-x");
+        assert_eq!(
+            p(game("s", System::Snes, "/rom/s.sfc")).executable,
+            "snes-x"
+        );
         assert_eq!(p(game("z", System::Zx, "/rom/z.tap")).executable, "zx-x");
         let deck = p(game(
             "custom-app",

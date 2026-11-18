@@ -10,6 +10,7 @@ pub struct Options {
     pub nes_emulator: Option<String>,
     pub gb_emulator: Option<String>,
     pub gba_emulator: Option<String>,
+    pub snes_emulator: Option<String>,
     pub zx_emulator: Option<String>,
     pub doom_deck: Option<String>,
     pub tamagotchi_deck: Option<String>,
@@ -37,6 +38,7 @@ impl Default for Options {
             nes_emulator: None,
             gb_emulator: None,
             gba_emulator: None,
+            snes_emulator: None,
             zx_emulator: None,
             doom_deck: None,
             tamagotchi_deck: None,
@@ -114,6 +116,7 @@ where
             "--nes-emulator" => o.nes_emulator = Some(value(&mut a)?),
             "--gb-emulator" => o.gb_emulator = Some(value(&mut a)?),
             "--gba-emulator" => o.gba_emulator = Some(value(&mut a)?),
+            "--snes-emulator" => o.snes_emulator = Some(value(&mut a)?),
             "--zx-emulator" => o.zx_emulator = Some(value(&mut a)?),
             "--doom-deck" => o.doom_deck = Some(value(&mut a)?),
             "--tamagotchi-deck" => o.tamagotchi_deck = Some(value(&mut a)?),
@@ -146,6 +149,7 @@ impl Options {
             nes_emulator: self.nes_emulator.clone(),
             gb_emulator: self.gb_emulator.clone(),
             gba_emulator: self.gba_emulator.clone(),
+            snes_emulator: self.snes_emulator.clone(),
             zx_emulator: self.zx_emulator.clone(),
             doom_deck: self.doom_deck.clone(),
             tamagotchi_deck: self.tamagotchi_deck.clone(),
@@ -197,11 +201,14 @@ mod tests {
             "/second",
             "--palette",
             "/palette",
+            "--snes-emulator",
+            "/test/snes-deck",
             "--future-flag",
             "value",
         ])
         .unwrap();
         assert_eq!(options.manifest, PathBuf::from("/first"));
+        assert_eq!(options.snes_emulator.as_deref(), Some("/test/snes-deck"));
         assert_eq!(options.extra, vec![("future-flag".into(), "value".into())]);
         assert!(parse(["--validate-manifest", "/path", "--help"]).is_err());
     }

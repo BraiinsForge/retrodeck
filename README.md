@@ -3,9 +3,9 @@
 A touch-first game and program launcher for the Braiins Forge Deck. Runs as a
 native fullscreen BMC widget, with a direct-framebuffer fallback.
 
-Includes NES, Game Boy, Game Boy Color and ZX Spectrum emulators; DOOM;
-a terminal; chiptunes; and ECL Common Lisp, Chibi Scheme, Lua and MicroPython
-REPLs. The dashboard and services are standalone Rust applications.
+Includes NES, Game Boy, Game Boy Color, Game Boy Advance, Super NES and ZX Spectrum
+emulators; DOOM; a terminal; chiptunes; and ECL Common Lisp, Chibi Scheme, Lua and
+MicroPython REPLs. The dashboard and services are standalone Rust applications.
 Two THEGamepad controllers provide Player 1 and Player 2 input.
 
 ## Install
@@ -45,6 +45,8 @@ For a Deck without BMC, provision with `--network-only`, then deploy with
 - Hold the touchscreen for two seconds to leave an emulator or terminal.
   Touch does not emulate game controls.
 - NES/GB/GBC: A/X and B/Y, Start and Back. Keyboard fallback: arrows/WASD,
+  Space/Z/J, Shift/X/K, Enter and Control.
+- SNES: A/X and B/Y, Start and Back. Keyboard fallback: arrows/WASD,
   Space/Z/J, Shift/X/K, Enter and Control.
 - DOOM: D-pad moves/turns, L/R strafes, A fires, B uses, X/Y changes weapons,
   Start opens the menu and Back opens the map. Use a keyboard for save names.
