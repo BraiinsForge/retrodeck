@@ -195,8 +195,8 @@ guessing.
 ## Stock BMC installation
 
 The source compatibility target is unpatched `BraiinsForge/bmc-main` master
-`5ce80092ed165bb1b75bbb54d2e672ad8cde00df`, fetched on 2026-11-02. Physical
-acceptance on that revision is pending. Deploy with:
+`b7ffd09055e3b28810b3b9e823c222914d4065a9`, fetched on 2026-11-18. Physical
+gameplay acceptance on that revision is pending. Deploy with:
 
 ```sh
 ops/deploy.sh --config deck.conf --presentation stock-bmc
@@ -219,6 +219,22 @@ hooks. BMC discovers it at `/run/current-profile/lib/bmc-widgets`. The wrapper
 resolves the immutable package root through profile symlinks; the launcher uses
 its bundled binaries/resources. Application runtimes and owner catalogs,
 settings, saves and history live separately under `/mnt/data/nes-deck`.
+
+When upgrading BMC itself, build the upstream
+`.#legacyPackages.x86_64-linux.deck-packages.core.pkg` package and import its
+registered Nix closure. Add `core` and `retro-deck-widget` to the persistent
+`/nix/var/nix/gcroots/profiles/bmc` profile with non-downgrading versions.
+Use the upstream `core.version` package value for the manifest; the build stamp
+in `core.metadata.bmc_version` belongs in `/etc/bmc_version`.
+With `add-packages --base current --no-activate`, capture the printed numeric
+`N-link` generation, inspect its manifest and activation scripts, then activate
+that exact number with `activate --generation N`. Keep the previous generation
+available for rollback.
+
+Verify deployment after a reboot: record a changed boot ID, the selected
+persistent generation, the running compositor executable and its keyed dashboard
+child, the actual display scanout, and working SSH/WireGuard access. Changing
+only the live compositor service is insufficient for a persistent BMC upgrade.
 
 After successful profile activation, deployment adds one fullscreen Retro Deck
 scene and restarts BMC so it reads the new configuration. Existing scenes,
