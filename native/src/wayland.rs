@@ -110,10 +110,18 @@ fn anonymous_file() -> Result<OwnedFd, String> {
     Err("cannot create a unique Wayland shared memory file".to_owned())
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct GameLayout {
+    target: (usize, usize),
+    source: (usize, usize),
+    exit_hint: bool,
+}
+
 struct BufferSlot {
     mapping: Mapping,
     buffer: wl_buffer::WlBuffer,
     busy: bool,
+    game_layout: Option<GameLayout>,
 }
 
 #[derive(Default)]
@@ -541,6 +549,7 @@ impl Widget {
                 mapping,
                 buffer,
                 busy: false,
+                game_layout: None,
             });
         }
         self.state.slots = slots;
@@ -589,6 +598,17 @@ impl Widget {
         can_present: impl FnOnce(&State) -> bool,
         draw: impl FnOnce(&mut [u32]),
     ) -> Result<(), String> {
+        self.present_slot_if(can_present, |slot| {
+            slot.game_layout = None;
+            draw(slot.mapping.pixels());
+        })
+    }
+
+    fn present_slot_if(
+        &mut self,
+        can_present: impl FnOnce(&State) -> bool,
+        draw: impl FnOnce(&mut BufferSlot),
+    ) -> Result<(), String> {
         if !self.state.configured {
             return Err("Wayland surface is not configured".to_owned());
         }
@@ -606,7 +626,7 @@ impl Widget {
             .as_ref()
             .expect("created while opening widget");
         let slot = &mut self.state.slots[index];
-        draw(slot.mapping.pixels());
+        draw(slot);
         slot.busy = true;
         surface.attach(Some(&slot.buffer), 0, 0);
         surface.damage(0, 0, self.state.width as i32, self.state.height as i32);
@@ -641,13 +661,21 @@ pub fn present_game_xrgb(
     with_widget(|widget| {
         let width = widget.state.width as usize;
         let height = widget.state.height as usize;
-        widget.present_if(
+        let exit_hint = std::env::var_os("RETRO_DECK_EXIT_HINT").is_some();
+        let layout = GameLayout {
+            target: (width, height),
+            source: (source_width, source_height),
+            exit_hint,
+        };
+        widget.present_slot_if(
             |state| state.focused,
-            |pixels| {
-                fill_gameplay_background(
-                    pixels,
-                    std::env::var_os("RETRO_DECK_EXIT_HINT").is_some(),
-                );
+            |slot| {
+                let pixels = slot.mapping.pixels();
+                // Repaint the letterbox only when this buffer's layout changes.
+                if slot.game_layout != Some(layout) {
+                    fill_gameplay_background(pixels, exit_hint);
+                    slot.game_layout = Some(layout);
+                }
                 scale_game_frame(frame, source_width, source_height, pixels, width, height);
             },
         )
@@ -681,17 +709,30 @@ fn scale_game_frame(
     }
     let offset_x = (target_width - width) / 2;
     let offset_y = (target_height - height) / 2;
-    for source_y in 0..source_height {
+    for (source_y, source) in frame
+        .chunks_exact(source_width)
+        .take(source_height)
+        .enumerate()
+    {
         let first_row = (offset_y + source_y * scale) * target_width + offset_x;
-        for source_x in 0..source_width {
-            let value = frame[source_y * source_width + source_x];
-            let start = first_row + source_x * scale;
-            pixels[start..start + scale].fill(value);
+        let destination = &mut pixels[first_row..first_row + width];
+        match scale {
+            1 => destination.copy_from_slice(source),
+            2 => {
+                for (pair, &color) in destination.chunks_exact_mut(2).zip(source) {
+                    pair[0] = color;
+                    pair[1] = color;
+                }
+            }
+            _ => {
+                for (block, &color) in destination.chunks_exact_mut(scale).zip(source) {
+                    block.fill(color);
+                }
+            }
         }
         for duplicate in 1..scale {
             let row = first_row + duplicate * target_width;
-            let (head, tail) = pixels.split_at_mut(row);
-            tail[..width].copy_from_slice(&head[first_row..first_row + width]);
+            pixels.copy_within(first_row..first_row + width, row);
         }
     }
 }

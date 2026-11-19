@@ -292,6 +292,7 @@
         pname = "supafaust-core";
         version = "0-642d1d1";
         src = supafaust-src;
+        patches = [ ./patches/supafaust-optional-video.patch ];
         nativeBuildInputs = [ pkgs.gnumake ];
         NIX_CFLAGS_COMPILE = pkgs.lib.optionalString stdenv.hostPlatform.isAarch32
           "-mcpu=cortex-a7 -mfpu=neon-vfpv4";

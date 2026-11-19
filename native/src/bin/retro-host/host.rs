@@ -28,6 +28,7 @@ const ENV_SET_CORE_OPTIONS_DISPLAY: c_uint = 55;
 const ENV_SET_CORE_OPTIONS_V2: c_uint = 67;
 const ENV_SET_CORE_OPTIONS_V2_INTL: c_uint = 68;
 const ENV_GET_CAN_DUPE: c_uint = 3;
+const ENV_GET_AUDIO_VIDEO_ENABLE: c_uint = 47 | 0x10000;
 const ENV_SET_PERFORMANCE_LEVEL: c_uint = 8;
 const ENV_SET_INPUT_DESCRIPTORS: c_uint = 11;
 const ENV_SET_SUBSYSTEM_INFO: c_uint = 34;
@@ -211,6 +212,7 @@ static SYSTEM_DIRECTORY: std::sync::OnceLock<std::ffi::CString> = std::sync::Onc
 static PIXEL_FORMAT: AtomicU32 = AtomicU32::new(PIXEL_FORMAT_XRGB8888);
 static VIDEO_FAILED: AtomicBool = AtomicBool::new(false);
 static PRESENT_SKIP: AtomicBool = AtomicBool::new(false);
+static SNES_VIDEO_ENABLED: AtomicBool = AtomicBool::new(true);
 static VIDEO_DIVISOR: AtomicU32 = AtomicU32::new(1);
 static VIDEO_CALLBACKS: AtomicU64 = AtomicU64::new(0);
 static AUDIO_FRAMES: AtomicU64 = AtomicU64::new(0);
@@ -289,6 +291,15 @@ unsafe extern "C" fn environment_callback(command: c_uint, data: *mut c_void) ->
         // to their own stderr logging.
         ENV_GET_LOG_INTERFACE => false,
         ENV_GET_INPUT_BITMASKS => true,
+        ENV_GET_AUDIO_VIDEO_ENABLE if config().snes => unsafe {
+            data.cast::<i32>()
+                .as_mut()
+                .map(|value| {
+                    let video = SNES_VIDEO_ENABLED.load(Ordering::Relaxed);
+                    *value = 0b10 | i32::from(video); // Audio runs on every frame.
+                })
+                .is_some()
+        },
         ENV_GET_CAN_DUPE => unsafe {
             data.cast::<bool>()
                 .as_mut()
@@ -451,7 +462,7 @@ unsafe extern "C" fn video_callback(
     }
     let calls = VIDEO_CALLBACKS.fetch_add(1, Ordering::Relaxed) + 1;
     let divisor = u64::from(VIDEO_DIVISOR.load(Ordering::Relaxed));
-    if divisor > 1 && calls % divisor != 0 {
+    if !config().snes && divisor > 1 && calls % divisor != 0 {
         return;
     }
     // The pacing loop marks frames that are already late; shedding their
@@ -852,10 +863,20 @@ pub fn run_host(configuration: &'static CoreConfig, arguments: &[String]) -> u8 
     let mut previous_audio_frames = 0_u64;
     let mut previous_audio_callbacks = 0_u64;
     let mut focus_failed = false;
+    let snes_video_interval = if test_frames.is_some() {
+        1
+    } else {
+        // At full NTSC cadence, uploading every SHM frame slows the core.
+        // Draw alternate frames at a steady cadence without dropping audio
+        // or emulation work. The diagnostic divisor can reduce this further.
+        u64::from(VIDEO_DIVISOR.load(Ordering::Relaxed)).max(2)
+    };
+    let mut snes_frame = 0_u64;
     while !retrodeck_native::process::shutdown_requested() && !VIDEO_FAILED.load(Ordering::Relaxed)
     {
         match retrodeck_native::game_video::before_frame(|_| {
             clock.reset();
+            snes_frame = 0;
             PRESENT_SKIP.store(false, Ordering::Relaxed);
             diagnostics_started = std::time::Instant::now();
         }) {
@@ -867,7 +888,10 @@ pub fn run_host(configuration: &'static CoreConfig, arguments: &[String]) -> u8 
                 break;
             }
         }
-        if test_frames.is_none() && clock.lateness() > clock.frame_nanoseconds() / 2 {
+        if configuration.snes {
+            SNES_VIDEO_ENABLED.store(snes_frame % snes_video_interval == 0, Ordering::Relaxed);
+            snes_frame += 1;
+        } else if test_frames.is_none() && clock.lateness() > clock.frame_nanoseconds() / 2 {
             PRESENT_SKIP.store(true, Ordering::Relaxed);
         }
         unsafe { retro_run() };

@@ -1,0 +1,30 @@
+--- a/libretro.cpp
++++ b/libretro.cpp
+@@ -405,21 +405,23 @@
+  UpdateInput();
+  //
+  EmulateSpecStruct espec;
+- //int lr_avenable = 0x3;
++ int lr_avenable = 0x3;
+
+- //if(!cb.environment(RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE, &lr_avenable))
+- // lr_avenable = 0x3;
++ if(!cb.environment(RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE, &lr_avenable))
++  lr_avenable = 0x3;
+
+  lw[0] = ~0;	// Must be ~0 and not another value.
+  espec.surface = s;
+  espec.LineWidths = lw.get();
+- espec.skip = false; //!(lr_avenable & 0x1);		// Skips drawing the frame if true; espec.surface and espec.LineWidths must still be valid when true, however.
++ espec.skip = !(lr_avenable & 0x1);
+
+  espec.SoundRate = SoundRate;
+  espec.SoundBuf = SoundBuf.get(); // Should have enough room for 100ms of sound to be on the safe side.
+  espec.SoundBufMaxSize = SoundBufMaxSize;
+
+  MDFNI_Emulate(&espec);
++ if(espec.skip)
++  return;
+  //
+  //
+  //
