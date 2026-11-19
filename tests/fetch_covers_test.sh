@@ -61,4 +61,22 @@ assert_match 'Final Fantasy Legend III' "$temporary/gb.tsv" 'ffl-usa.png'
 assert_match 'Elite' "$temporary/zx.tsv" 'elite-europe.png'
 assert_match 'Knight Lore' "$temporary/zx.tsv" 'knight-lore.png'
 
+# Supply a cached SNES index, so checking system routing and title matching
+# needs neither Internet access nor an actual ROM or PNG.
+covers=$temporary/covers
+mkdir -p "$covers/.libretro-index"
+cat > "$covers/.libretro-index/snes-Named_Boxarts.tsv" <<'EOF'
+all-stars.png	Super Mario All-Stars (USA).png
+all-stars-world.png	Super Mario All-Stars + Super Mario World (USA).png
+EOF
+printf 'snes-test\tSuper Mario All-Stars + Super Mario World\tsnes\t/not-used.sfc\t#ffaf87\n' > "$temporary/games.tsv"
+match_log=$(
+	wget() { return 1; }
+	set -- "$temporary/games.tsv" "$covers"
+	. "$fetcher"
+)
+case $match_log in
+	*'snes-test <- Named_Boxarts/Super Mario All-Stars + Super Mario World (USA).png'*) ;;
+	*) echo 'SNES box art was not resolved' >&2; exit 1 ;;
+esac
 echo "fetch-covers-test: OK"
