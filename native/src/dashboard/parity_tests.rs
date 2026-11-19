@@ -164,25 +164,26 @@ mod tests {
         use settings::Target::*;
         fixture_palette();
         let network = fixture_network();
+        // These full-frame hashes include the Rust-only version footer.
         let fixtures = [
-            (42, "us", VolumeDown, "", 0x3cbe278b5a0957b7),
-            (0, "us", VolumeUp, "", 0xfc35836e10af4537),
-            (42, "cz", Keymap, "", 0xe66395d275349597),
-            (42, "us", Wifi, "", 0xef904ba047d3fac7),
-            (42, "us", Terminal, "", 0xa02266e45ba33aff),
+            (42, "us", VolumeDown, "", 0xd9b7ee6128a0abf9),
+            (0, "us", VolumeUp, "", 0x936ea59ec2cd8b79),
+            (42, "cz", Keymap, "", 0xa55908ddebcefd19),
+            (42, "us", Wifi, "", 0x0e4e6c4a737a9609),
+            (42, "us", Terminal, "", 0xbf2fc6f42a977981),
             (
                 42,
                 "us",
                 VolumeDown,
                 "VOLUME SAVED; CONFIRMATION TONE FAILED",
-                0x04d9b229305443f7,
+                0xdbea10bbc8404559,
             ),
             (
                 42,
                 "us",
                 VolumeDown,
                 "THIS SETTINGS STATUS FIXTURE IS INTENTIONALLY LONG ENOUGH TO USE THE SMALL FOOTER SCALE ACROSS THE COMPLETE DISPLAY",
-                0x73f6b2e8d928aaf7,
+                0x0050bd3b026eca69,
             ),
         ];
         let observed = fixtures.map(|(volume, keymap, selected, status, _)| {

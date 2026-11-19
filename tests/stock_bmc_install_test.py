@@ -270,7 +270,7 @@ ln -s "$TEST_ROOT"''' + STORE + '''/lib/bmc-widgets/retro-deck "$active"''')
         source = (REPO / "deploy/menu/deck-menu-launcher").read_text()
         probe = source.split("\numask ", 1)[0] + '''
 printf '%s\\n' "$MENU" "$COMPILER" "$CREDITS" "$SETTINGS_ICON" "$FALLBACK_PALETTE" \\
-    "$CATALOG" "$FALLBACK_MANIFEST" "$VOLUME_STATE" "$ECL" "$LUA" "$SCHEME" "$PYTHON"
+    "$CATALOG" "$FALLBACK_MANIFEST" "$VOLUME_STATE" "$LUA" "$SCHEME" "$PYTHON"
 '''
         base = "/mnt/data/nes-deck"
         for root in ("", str(self.root / "package with spaces")):
@@ -283,8 +283,31 @@ printf '%s\\n' "$MENU" "$COMPILER" "$CREDITS" "$SETTINGS_ICON" "$FALLBACK_PALETT
                 code + "/deck-menu", code + "/compile-catalog", resources + "/credits.tsv",
                 resources + "/settings-icon.png", resources + "/palette.tsv",
                 base + "/menu/games.sexp", base + "/menu/games.tsv", base + "/state/menu-volume.state",
-                base + "/ecl/bin/ecl.bin", base + "/langs/lua", base + "/langs/chibi/chibi-scheme",
-                base + "/langs/python"])
+                base + "/langs/lua", base + "/langs/chibi/chibi-scheme", base + "/langs/python"])
+
+    def test_launcher_starts_dashboard_without_lisp_repl(self):
+        data = self.root / "mnt/data"
+        base = data / "nes-deck"
+        for executable in ("nes-deck", "gb-deck", "zx-deck", "chiptune-deck", "langs/lua",
+                           "langs/python", "langs/chibi/chibi-scheme", "terminal/retro-terminal"):
+            self.script("mnt/data/nes-deck/" + executable, "exit 0")
+        self.script("usr/sbin/deck-wifi-profile-add", "exit 0")
+        self.script(self.package.relative_to(self.root) / "bin/deck-menu",
+                    'printf "dashboard started\\n"')
+        (base / "menu").mkdir()
+        (base / "menu/games.tsv").write_text("fixture\n")
+        (base / "langs/chibi/lib").mkdir()
+        (base / "langs/chibi/lib/init-7.scm").touch()
+        source = (REPO / "deploy/menu/deck-menu-launcher").read_text()
+        for path in ("/mnt/data/", "/usr/sbin/"):
+            source = source.replace(path, str(self.root) + path)
+        result = subprocess.run(["sh", "-c", "logger() { :; }\n" + source],
+                                capture_output=True, text=True,
+                                env={**os.environ, "RETRO_DECK_WIDGET_ROOT": str(self.package)})
+        log = (base / "log/deck-menu.log").read_text()
+        self.assertEqual(result.returncode, 0, result.stderr + log)
+        self.assertIn("dashboard started", log)
+        self.assertFalse((data / "langs/lisp").exists())
 
     def health(self):
         source = (REPO / "ops/check-deck.sh").read_text()

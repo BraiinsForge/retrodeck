@@ -6,9 +6,6 @@ BASE=${RETRO_DECK_TERMINAL_BASE:-/mnt/data/nes-deck/terminal}
 TTY=${RETRO_DECK_TERMINAL_TTY:-/dev/tty1}
 LANG_BASE=${RETRO_DECK_LANG_BASE:-/mnt/data/langs}
 LUA=${RETRO_DECK_LUA:-/mnt/data/nes-deck/langs/lua}
-LISP=${RETRO_DECK_LISP:-/mnt/data/nes-deck/ecl/bin/ecl.bin}
-ECLDIR=${RETRO_DECK_ECL_DIR:-/mnt/data/nes-deck/ecl/lib/ecl/}
-RLWRAP=${RETRO_DECK_RLWRAP:-$BASE/rlwrap}
 PYTHON=${RETRO_DECK_PYTHON:-/mnt/data/nes-deck/langs/python}
 SCHEME=${RETRO_DECK_SCHEME:-/mnt/data/nes-deck/langs/chibi/chibi-scheme}
 CHIBI_MODULE_PATH=${RETRO_DECK_CHIBI_MODULE_PATH:-/mnt/data/nes-deck/langs/chibi/lib}
@@ -56,11 +53,15 @@ case $mode in
     set -- "$LUA"
     ;;
   lisp)
+    LISP=${RETRO_DECK_LISP:-/mnt/data/nes-deck/ecl/bin/ecl.bin}
+    ECLDIR=${RETRO_DECK_ECL_DIR:-/mnt/data/nes-deck/ecl/lib/ecl/}
+    RLWRAP=${RETRO_DECK_RLWRAP:-$BASE/rlwrap}
     [ -x "$LISP" ] || fail "Lisp interpreter is missing or not executable: $LISP"
     [ -d "$ECLDIR" ] || fail "ECL runtime directory is unavailable: $ECLDIR"
     [ -x "$RLWRAP" ] || fail "rlwrap is missing or not executable: $RLWRAP"
     workdir=$LANG_BASE/lisp
     mkdir -p "$workdir" || fail "cannot create Lisp working directory: $workdir"
+    chmod 0700 "$workdir" || fail "cannot secure Lisp working directory: $workdir"
     cd "$workdir" || fail "cannot enter Lisp working directory: $workdir"
     history=$workdir/.ecl_history
     [ ! -L "$history" ] || fail "Lisp history must not be a symbolic link"

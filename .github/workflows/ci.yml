@@ -50,7 +50,6 @@ jobs:
             ops/deck-wifi/deck-wifi-select \
             ops/deck-wifi/deck-wifi-watch \
             ops/deck-wifi/deck-wifi.init \
-            deploy/ecl \
             deploy/terminal/retro-terminal \
             deploy/widget/retro-deck \
             deploy/menu/fetch-covers \

@@ -647,7 +647,7 @@ pub fn render_with_network(s: &State, network: &crate::network::NetworkStatus) -
     centered(
         &mut o,
         Rect::new(12, 406, 1256, 28),
-        "RETRO DECK 1.0.0 RUST+ECL".into(),
+        concat!("RETRO DECK ", env!("CARGO_PKG_VERSION"), " RUST").into(),
         1,
         muted,
     );

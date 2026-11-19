@@ -82,12 +82,18 @@ fi
 
 if [ -x /mnt/data/nes-deck/menu/deck-menu ] &&
    [ -x /mnt/data/nes-deck/uploader/rom-uploader ] &&
-   [ -x /mnt/data/nes-deck/chiptune-deck ] &&
-   [ -x /mnt/data/nes-deck/ecl/bin/ecl.bin ]; then
-  report RUNTIMES 'dashboard, uploader, chiptunes, and Lisp interpreter installed'
+   [ -x /mnt/data/nes-deck/chiptune-deck ]; then
+  report RUNTIMES 'dashboard, uploader, and chiptunes installed'
 else
   report RUNTIMES 'APPLICATION RUNTIME MISSING'
   failures=$((failures + 1))
+fi
+if [ -x /mnt/data/nes-deck/ecl/bin/ecl.bin ] &&
+   [ -d /mnt/data/nes-deck/ecl/lib/ecl ] &&
+   [ -x /mnt/data/nes-deck/terminal/rlwrap ]; then
+  report LISP-REPL installed
+else
+  report LISP-REPL 'runtime incomplete or not installed'
 fi
 
 # Presentation state: managed BMC compositor.

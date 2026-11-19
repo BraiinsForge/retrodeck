@@ -94,4 +94,27 @@ grep -Fq '/mnt/data/doom' "$activation" ||
 grep -Fq '"$base/games.new/"' "$activation" ||
   fail 'activation no longer replaces the games directory; recheck DOOM saves'
 
+if grep -Fq 'usr/bin/ecl' "$deployer"; then
+  fail 'deployer stages a system-wide ECL command'
+fi
+
+# Exercise the legacy-wrapper cleanup without touching the host's /usr/bin.
+fixture=$(mktemp -d)
+trap 'rm -rf "$fixture"' EXIT
+cleanup=$(sed -n '/^legacy_ecl=/,/^fi$/p' "$activation" |
+  sed 's@^legacy_ecl=.*@legacy_ecl=$1@')
+wrapper=$fixture/ecl
+cat > "$wrapper" <<'EOF'
+#!/bin/sh
+
+# Relocatable ECL 26.5.5 launcher for the Deck's /mnt/data payload.
+ECL_ROOT=/mnt/data/nes-deck/ecl
+export ECLDIR="$ECL_ROOT/lib/ecl/"
+exec "$ECL_ROOT/bin/ecl.bin" "$@"
+EOF
+sh -ec "$cleanup" sh "$wrapper"
+[[ ! -e $wrapper ]] || fail 'activation did not retire the former ECL wrapper'
+printf 'owner-installed interpreter\n' > "$wrapper"
+sh -ec "$cleanup" sh "$wrapper"
+[[ -f $wrapper ]] || fail 'activation removed a different ECL interpreter'
 printf 'deploy-activation-test: OK\n'

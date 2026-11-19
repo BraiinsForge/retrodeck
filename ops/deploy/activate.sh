@@ -64,8 +64,8 @@ done
 for executable in \
   uploader/rom-uploader menu/deck-menu menu/deck-menu-launcher menu/fetch-covers \
   menu/compile-catalog \
-  terminal/fbterm terminal/loadkeys terminal/retro-terminal terminal/rlwrap \
-  langs/lua langs/python langs/chibi/chibi-scheme ecl/bin/ecl.bin; do
+  terminal/fbterm terminal/loadkeys terminal/retro-terminal \
+  langs/lua langs/python langs/chibi/chibi-scheme; do
   [ -x "$stage/nes-deck/$executable" ] || {
     echo "Staged runtime is missing: $executable" >&2
     exit 1
@@ -105,8 +105,7 @@ done
   echo "Staged dashboard palette is empty" >&2
   exit 1
 }
-[ -s "$stage/nes-deck/licenses/runtime/Wayland-COPYING" ] && \
-  [ -s "$stage/nes-deck/licenses/ecl-deck/ECL-LICENSE" ] || {
+[ -s "$stage/nes-deck/licenses/runtime/Wayland-COPYING" ] || {
   echo "Staged third-party license archive is incomplete" >&2
   exit 1
 }
@@ -132,6 +131,14 @@ scheme_result=$(
 )
 [ "$scheme_result" = 42 ] || {
   echo "Staged Scheme runtime failed its smoke test" >&2
+  exit 1
+}
+# The full payload includes the Common Lisp REPL as a separate application.
+[ -x "$stage/nes-deck/ecl/bin/ecl.bin" ] &&
+  [ -d "$stage/nes-deck/ecl/lib/ecl" ] &&
+  [ -x "$stage/nes-deck/terminal/rlwrap" ] &&
+  [ -s "$stage/nes-deck/licenses/ecl-deck/ECL-LICENSE" ] || {
+  echo 'Staged Common Lisp REPL is incomplete' >&2
   exit 1
 }
 ecl_result=$(ECLDIR="$stage/nes-deck/ecl/lib/ecl/" \
@@ -253,15 +260,19 @@ cp -Rp "$stage/chiptunes/." /mnt/data/chiptunes/
 # DOOM writes its configuration and savegames here rather than beside the
 # WAD, because the games directory above is replaced wholesale on every
 # activation and would take a player's saves with it.
-mkdir -p /mnt/data/langs/lua /mnt/data/langs/lisp \
-  /mnt/data/langs/python /mnt/data/langs/scheme /mnt/data/chiptunes \
-  /mnt/data/doom
-chmod 0700 /mnt/data/langs/lua /mnt/data/langs/lisp \
-  /mnt/data/langs/python /mnt/data/langs/scheme /mnt/data/chiptunes \
-  /mnt/data/doom
+mkdir -p /mnt/data/langs/lua /mnt/data/langs/python /mnt/data/langs/scheme \
+  /mnt/data/chiptunes /mnt/data/doom
+chmod 0700 /mnt/data/langs/lua /mnt/data/langs/python /mnt/data/langs/scheme \
+  /mnt/data/chiptunes /mnt/data/doom
 
 # Install system entry points and service definitions.
-cp -p "$stage/usr/bin/ecl" /usr/bin/ecl
+# Retire only the former RetroDeck ECL wrapper, not a user-installed interpreter.
+legacy_ecl=/usr/bin/ecl
+if [ -f "$legacy_ecl" ] && [ ! -L "$legacy_ecl" ] &&
+  [ "$(sha256sum "$legacy_ecl" | cut -d ' ' -f 1)" = \
+    d600201cdd18d8ab88d48c9afad805f0e7faebcb1d9945df7c11dee2d7c7d81e ]; then
+  rm -f "$legacy_ecl"
+fi
 cp -p "$stage/usr/sbin/deck-wifi-profile-add" \
   /usr/sbin/deck-wifi-profile-add
 cp -p "$stage/usr/sbin/deck-wifi-select" /usr/sbin/deck-wifi-select
@@ -274,7 +285,7 @@ cp -p "$stage/usr/sbin/deck-keyboard-quirks" /usr/sbin/deck-keyboard-quirks
 mkdir -p /etc/hotplug.d/usb
 cp -p "$stage/etc/hotplug.d/usb/90-nes-deck-keyboard" \
   /etc/hotplug.d/usb/90-nes-deck-keyboard
-chmod 0700 /usr/bin/ecl /usr/sbin/deck-wifi-profile-add \
+chmod 0700 /usr/sbin/deck-wifi-profile-add \
   /usr/sbin/deck-wifi-select /usr/sbin/deck-wifi-watch \
   /usr/sbin/deck-keyboard-quirks \
   /etc/hotplug.d/usb/90-nes-deck-keyboard \

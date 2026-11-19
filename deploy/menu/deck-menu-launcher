@@ -41,7 +41,6 @@ VOLUME_STATE=$STATE_DIR/menu-volume.state
 LEGACY_SOUND_STATE=$STATE_DIR/menu-sound.state
 KEYMAP_STATE=$STATE_DIR/terminal-keymap.state
 TERMINAL=$BASE/terminal/retro-terminal
-RLWRAP=$BASE/terminal/rlwrap
 LUA=$BASE/langs/lua
 PYTHON=$BASE/langs/python
 SCHEME=$BASE/langs/chibi/chibi-scheme
@@ -50,8 +49,6 @@ WIFI_HELPER=/usr/sbin/deck-wifi-profile-add
 WIFI_STATUS=/var/run/deck-wifi/status
 KEYBOARD_QUIRKS=/usr/sbin/deck-keyboard-quirks
 COMPILER=$MENU_DIR/compile-catalog
-ECL=$BASE/ecl/bin/ecl.bin
-ECL_RUNTIME=$BASE/ecl/lib/ecl/
 LOG_FILE=$LOG_DIR/deck-menu.log
 VOLUME_ON=42
 
@@ -74,14 +71,12 @@ export RETRO_DECK_SETTINGS_VOLUME_WIFI="${RETRO_DECK_SETTINGS_VOLUME_WIFI:-0}"
 umask 077
 
 if ! mkdir -p "$STATE_DIR" "$LOG_DIR" "$TMP_DIR" "$UPLOAD_DIR" \
-	"$LANG_ROOT/lua" "$LANG_ROOT/lisp" "$LANG_ROOT/python" \
-	"$LANG_ROOT/scheme" "$CHIPTUNE_DIRECTORY"; then
+	"$LANG_ROOT/lua" "$LANG_ROOT/python" "$LANG_ROOT/scheme" "$CHIPTUNE_DIRECTORY"; then
 	logger -t nes-deck-menu "cannot create persistent state and language directories"
 	exit 1
 fi
 chmod 0700 "$STATE_DIR" "$LOG_DIR" "$TMP_DIR" "$UPLOAD_DIR" \
-	"$LANG_ROOT/lua" "$LANG_ROOT/lisp" "$LANG_ROOT/python" \
-	"$LANG_ROOT/scheme" "$CHIPTUNE_DIRECTORY" 2>/dev/null || :
+	"$LANG_ROOT/lua" "$LANG_ROOT/python" "$LANG_ROOT/scheme" "$CHIPTUNE_DIRECTORY" 2>/dev/null || :
 
 rotate_log() {
 	log_size=0
@@ -162,10 +157,6 @@ if [ ! -x "$PYTHON" ]; then
 fi
 if [ ! -x "$SCHEME" ] || [ ! -r "$CHIBI_MODULE_PATH/init-7.scm" ]; then
 	log_message "Chibi Scheme runtime is unavailable under $BASE/langs/chibi"
-	exit 1
-fi
-if [ ! -x "$ECL" ] || [ ! -d "$ECL_RUNTIME" ] || [ ! -x "$RLWRAP" ]; then
-	log_message "Lisp runtime or rlwrap is unavailable under $BASE"
 	exit 1
 fi
 if [ ! -x "$WIFI_HELPER" ]; then

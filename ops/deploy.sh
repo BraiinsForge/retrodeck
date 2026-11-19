@@ -115,7 +115,6 @@ mkdir -p \
   "$payload/nes-deck/ecl" \
   "$payload/chiptunes" \
   "$payload/roms" \
-  "$payload/usr/bin" \
   "$payload/usr/sbin" \
   "$payload/etc/init.d"
 printf '%s\n' "$presentation" >"$payload/presentation"
@@ -164,7 +163,6 @@ cp deploy/menu/games.sexp deploy/menu/games.tsv deploy/menu/credits.tsv \
 cp "$catalog_compiler/bin/compile-catalog" "$payload/nes-deck/menu/compile-catalog"
 cp assets/settings-cog/gear-knekko-09.png \
   "$payload/nes-deck/menu/settings-icon.png"
-cp deploy/ecl "$payload/usr/bin/ecl"
 cp ops/deck-wifi/deck-wifi-profile-add \
   "$payload/usr/sbin/deck-wifi-profile-add"
 cp ops/deck-wifi/deck-wifi-select ops/deck-wifi/deck-wifi-watch \
@@ -253,8 +251,7 @@ find "$payload/nes-deck" -type f \( \
 chmod 0600 "$payload/nes-deck/uploader/password.conf" \
   "$payload/nes-deck/uploader/uploader-paper.css" \
   "$payload/nes-deck/uploader/uploader-palette.js"
-chmod 0700 "$payload/usr/bin/ecl" \
-  "$payload/usr/sbin/deck-keyboard-quirks" \
+chmod 0700 "$payload/usr/sbin/deck-keyboard-quirks" \
   "$payload/usr/sbin/deck-wifi-profile-add" \
   "$payload/usr/sbin/deck-wifi-select" \
   "$payload/usr/sbin/deck-wifi-watch" \
