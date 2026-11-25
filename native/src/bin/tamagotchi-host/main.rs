@@ -268,7 +268,7 @@ fn open_audio() {
 
 fn present(screen: &tamagotchi::ScreenState) -> Result<(), String> {
     tamagotchi::render(screen);
-    canvas::with_pixels(wayland::present_game_rgba)
+    canvas::with_pixels(wayland::present_rgba)
 }
 
 fn run_emulation_window(tama: &mut Tamagotchi) -> u32 {
@@ -325,7 +325,7 @@ fn run(arguments: &[OsString]) -> Result<(), String> {
     let mut focus = game_video::WidgetFocus::default();
     let mut result = (|| -> Result<(), String> {
         loop {
-            match focus.wait()? {
+            match focus.wait(|| present(&state.borrow()))? {
                 game_video::Focus::Shutdown => break Ok(()),
                 game_video::Focus::Resumed(waited) => {
                     paused.set(paused.get() + waited);

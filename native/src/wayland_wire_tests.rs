@@ -55,6 +55,8 @@ struct Server {
     frames: mpsc::Sender<Frame>,
     peers: mpsc::Sender<UnixStream>,
     lifecycle: Option<widget_surface::LifecycleState>,
+    hold_frames: bool,
+    held: Vec<wl_buffer::WlBuffer>,
 }
 
 impl Server {
@@ -290,7 +292,11 @@ impl Dispatch<wl_surface::WlSurface, Surface> for Server {
                             height: data.height,
                         })
                         .unwrap();
-                    buffer.release();
+                    if state.hold_frames {
+                        state.held.push(buffer);
+                    } else {
+                        buffer.release();
+                    }
                 }
             }
             wl_surface::Request::Frame { callback } => {
@@ -309,6 +315,8 @@ enum Command {
     Language(Option<String>),
     Payloads,
     Transition,
+    HoldFrames,
+    ReleaseOlderFrames,
     Shutdown,
     Barrier(mpsc::Sender<()>),
     Stop,
@@ -344,6 +352,8 @@ impl Fixture {
                 frames: frames_tx,
                 peers: peers_tx,
                 lifecycle,
+                hold_frames: false,
+                held: Vec::new(),
             };
             let deadline = Instant::now() + Duration::from_secs(10);
             let mut clients = Vec::new();
@@ -357,6 +367,11 @@ impl Fixture {
                         Command::Lifecycle(lifecycle) => {
                             state.lifecycle = Some(lifecycle);
                             state.active.as_ref().unwrap().1.lifecycle(lifecycle);
+                            if lifecycle == widget_surface::LifecycleState::Dormant {
+                                for buffer in state.held.drain(..) {
+                                    buffer.release();
+                                }
+                            }
                         }
                         Command::Language(language) => {
                             let surface = &state.active.as_ref().unwrap().1;
@@ -367,6 +382,13 @@ impl Fixture {
                         Command::Payloads => state.payloads(&state.active.as_ref().unwrap().1),
                         Command::Transition => {
                             state.active.as_ref().unwrap().1.transition_incoming()
+                        }
+                        Command::HoldFrames => state.hold_frames = true,
+                        Command::ReleaseOlderFrames => {
+                            let keep = state.held.len().saturating_sub(1);
+                            for buffer in state.held.drain(..keep) {
+                                buffer.release();
+                            }
                         }
                         Command::Shutdown => state.active.as_ref().unwrap().1.shutdown(),
                         Command::Barrier(done) => {
@@ -460,7 +482,7 @@ fn keyed_wire_repeated_game_replacement_and_dashboard_reconnection() {
     let fixture = Fixture::new();
     let mut dashboard = fixture.open();
     for cycle in 0..4 {
-        assert!(dashboard.state.configured && dashboard.state.visible);
+        assert!(dashboard.state.configured && dashboard.state.focused());
         fixture.assert_payloads_closed();
         fixture.assert_frame(&mut dashboard, 0x123400 + cycle);
         // Yielding means no dispatch on the dashboard while the game owns the
@@ -488,21 +510,21 @@ fn keyed_wire_runtime_payloads_lifecycle_and_shutdown() {
         &mut widget,
         Command::Lifecycle(widget_surface::LifecycleState::Dormant),
     );
-    assert!(!widget.state.visible && !widget.state.refresh_requested);
+    assert!(!widget.state.renderable() && !widget.state.refresh_requested);
     drop(widget);
     let mut widget = fixture.open();
-    assert!(widget.state.configured && !widget.state.visible);
+    assert!(widget.state.configured && !widget.state.renderable());
     fixture.assert_payloads_closed();
     widget.state.refresh_requested = false;
     fixture.send(&mut widget, Command::Payloads);
     fixture.assert_payloads_closed();
     fixture.send(&mut widget, Command::Transition);
-    assert!(widget.state.refresh_requested && !widget.state.visible);
+    assert!(!widget.state.refresh_requested && !widget.state.renderable());
     fixture.send(
         &mut widget,
         Command::Lifecycle(widget_surface::LifecycleState::Visible),
     );
-    assert!(widget.state.visible);
+    assert!(widget.state.focused());
     fixture.assert_frame(&mut widget, 0x112233);
     fixture.send(&mut widget, Command::Shutdown);
     assert!(widget.state.shutdown);
@@ -530,7 +552,7 @@ fn keyed_wire_negotiates_v1_and_v2_with_english_fallback() {
 fn keyed_wire_waits_for_delayed_lifecycle_before_allocating_or_drawing() {
     let fixture = Fixture::with_initial_lifecycle(2, None);
     let mut widget = fixture.open();
-    assert!(widget.state.configured && !widget.state.visible);
+    assert!(widget.state.configured && !widget.state.renderable());
     fixture.assert_payloads_closed();
     widget.present_solid(0x123456).unwrap();
     widget.queue.roundtrip(&mut widget.state).unwrap();
@@ -541,7 +563,7 @@ fn keyed_wire_waits_for_delayed_lifecycle_before_allocating_or_drawing() {
         Command::Lifecycle(widget_surface::LifecycleState::Prepared),
     );
     fixture.assert_frame(&mut widget, 0x123456);
-    assert!(!widget.state.active && !widget.state.renderable());
+    assert!(widget.state.slots.len() == 1 && !widget.state.renderable());
     widget.present_solid(0x654321).unwrap();
     widget.queue.roundtrip(&mut widget.state).unwrap();
     assert!(fixture.frames.try_recv().is_err());
@@ -557,6 +579,36 @@ fn keyed_wire_waits_for_delayed_lifecycle_before_allocating_or_drawing() {
         Command::Lifecycle(widget_surface::LifecycleState::Visible),
     );
     fixture.assert_frame(&mut widget, 0x654321);
+
+    use widget_surface::LifecycleState::*;
+    fixture.send(&mut widget, Command::HoldFrames);
+    for color in 1..=3 {
+        widget.present_solid(color).unwrap();
+        fixture.frames.recv_timeout(WAIT).unwrap();
+    }
+    assert_eq!(widget.state.slots.len(), 3);
+    widget
+        .present_frame(|_| panic!("must not overwrite an in-flight buffer"))
+        .unwrap();
+    assert!(widget.state.retry_frame);
+    fixture.send(&mut widget, Command::Lifecycle(Leaving));
+    fixture.send(&mut widget, Command::ReleaseOlderFrames);
+    assert_eq!(widget.state.slots.len(), 1);
+    for state in [Prepared, Entering, Prepared] {
+        fixture.send(&mut widget, Command::Lifecycle(state));
+        widget
+            .present_frame(|_| panic!("must keep the frozen swipe preview"))
+            .unwrap();
+        assert_eq!(widget.state.slots.len(), 1);
+        assert!(fixture.frames.try_recv().is_err());
+    }
+    fixture.send(&mut widget, Command::Lifecycle(Dormant));
+    assert!(widget.state.slots.is_empty());
+    fixture.send(&mut widget, Command::Lifecycle(Prepared));
+    widget.present_solid(0x345678).unwrap();
+    let frame = fixture.frames.recv_timeout(WAIT).unwrap();
+    assert_eq!(&frame.pixels[..4], &0xff34_5678_u32.to_ne_bytes());
+    assert_eq!(widget.state.slots.len(), 1);
 }
 
 #[test]
@@ -574,31 +626,43 @@ fn keyed_wire_game_wait_resumes_or_stops_on_shutdown_and_disconnect() {
         let (ready, started) = mpsc::channel();
         let (done, finished) = mpsc::channel();
         let client = thread::spawn(move || {
-            let mut widget = fixture.open();
+            let widget = fixture.open();
             use crate::game_video::{Focus, WidgetFocus};
             fixture.assert_payloads_closed();
-            fixture.send(
-                &mut widget,
-                Command::Lifecycle(widget_surface::LifecycleState::Visible),
-            );
             WIDGET.with(|slot| *slot.borrow_mut() = Some(widget));
             let mut focus = WidgetFocus::default();
-            assert!(matches!(focus.wait().unwrap(), Focus::Resumed(_)));
+            assert!(matches!(focus.wait(|| Ok(())).unwrap(), Focus::Resumed(_)));
             with_widget(|widget| {
                 fixture.send(widget, Command::Lifecycle(lifecycle));
-                widget.present_if(|state| state.focused, |_| panic!("unfocused draw"))
+                Ok(())
             })
             .unwrap();
-            assert!(fixture.frames.try_recv().is_err());
-            ready.send(()).unwrap();
-            let result = focus.wait().unwrap();
+            let prepared = lifecycle == widget_surface::LifecycleState::Prepared;
+            if !prepared {
+                ready.send(()).unwrap();
+            }
+            let mut previews = 0;
+            let result = focus
+                .wait(|| {
+                    previews += 1;
+                    present_game_xrgb(&[0xff12_3456], 1, 1)?;
+                    ready.send(()).unwrap();
+                    Ok(())
+                })
+                .unwrap();
+            if prepared {
+                assert_eq!(previews, 1);
+                fixture.frames.recv_timeout(WAIT).unwrap();
+            } else {
+                assert_eq!(previews, 0);
+            }
             if stop {
                 assert!(matches!(result, Focus::Shutdown));
             } else {
                 assert!(
                     matches!(result, Focus::Resumed(waited) if waited >= Duration::from_millis(15))
                 );
-                assert!(matches!(focus.wait().unwrap(), Focus::Continuous));
+                assert!(matches!(focus.wait(|| Ok(())).unwrap(), Focus::Continuous));
                 present_game_xrgb(&[0xff12_3456], 1, 1).unwrap();
                 fixture.frames.recv_timeout(WAIT).unwrap();
             }
@@ -625,7 +689,11 @@ fn keyed_wire_game_wait_resumes_or_stops_on_shutdown_and_disconnect() {
     fixture.assert_payloads_closed();
     WIDGET.with(|slot| *slot.borrow_mut() = Some(widget));
     drop(fixture);
-    assert!(crate::game_video::WidgetFocus::default().wait().is_err());
+    assert!(
+        crate::game_video::WidgetFocus::default()
+            .wait(|| Ok(()))
+            .is_err()
+    );
     close();
 }
 

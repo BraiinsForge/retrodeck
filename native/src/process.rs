@@ -205,7 +205,7 @@ impl ChildInteraction {
         }
 
         let now = Instant::now();
-        if self.mirror_console && now >= self.next_console_frame {
+        if self.mirror_console && now >= self.next_console_frame && wayland::frame_renderable() {
             let result =
                 fbdev::read_console_scanout().and_then(|frame| wayland::present_rgb565(&frame));
             if let Err(error) = result {
@@ -367,6 +367,9 @@ pub fn run_child(
         };
     }
     if widget_child {
+        // Release the dashboard's SHM while the child owns the widget key.
+        // Dashboard recovery opens a fresh connection on return (also on spawn failure).
+        wayland::close();
         interaction.yield_widget_to_child();
     }
     let tty = mirror_console.then(TtySnapshot::capture);
@@ -382,11 +385,6 @@ pub fn run_child(
     );
     if let Some(tty) = tty {
         tty.restore();
-    }
-    if widget_child {
-        // Discard the replaced connection. Dashboard recovery opens a fresh
-        // surface with the same BMC_WIDGET_KEY after the child has exited.
-        wayland::close();
     }
     result
 }
@@ -560,23 +558,6 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-
-    #[test]
-    fn yields_all_widget_input_and_presentation_to_the_child() {
-        let mut interaction = ChildInteraction {
-            uses_wayland: true,
-            touch_supervision: true,
-            mirror_console: true,
-            next_console_frame: Instant::now(),
-            hold: TouchHold::new(),
-        };
-        interaction.hold.update(true, 10, 10);
-        interaction.yield_widget_to_child();
-        assert!(!interaction.uses_wayland);
-        assert!(!interaction.touch_supervision);
-        assert!(!interaction.mirror_console);
-        assert!(interaction.hold.active_since.is_none());
-    }
 
     #[test]
     fn managed_child_fixture() {

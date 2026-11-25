@@ -10,23 +10,23 @@ use tiny_skia::{Color, Paint, Pixmap, Rect, Transform};
 pub const WIDTH: u32 = 1280;
 pub const HEIGHT: u32 = 480;
 
+#[derive(Default)]
 struct Canvas {
-    pixmap: Pixmap,
+    pixmap: Option<Pixmap>,
     rasters: Vec<Raster>,
 }
 
 impl Canvas {
-    fn new() -> Self {
-        let mut pixmap = Pixmap::new(WIDTH, HEIGHT).expect("fixed canvas dimensions are valid");
-        pixmap.fill(Color::BLACK);
-        Self {
-            pixmap,
-            rasters: Vec::new(),
-        }
+    fn pixmap(storage: &mut Option<Pixmap>) -> &mut Pixmap {
+        storage.get_or_insert_with(|| {
+            let mut pixmap = Pixmap::new(WIDTH, HEIGHT).expect("fixed canvas dimensions are valid");
+            pixmap.fill(Color::BLACK);
+            pixmap
+        })
     }
 
     fn clear(&mut self, color: u32) {
-        self.pixmap.fill(color_value(color));
+        Self::pixmap(&mut self.pixmap).fill(color_value(color));
     }
 
     fn fill_rect(&mut self, x: i32, y: i32, width: u32, height: u32, color: u32) {
@@ -44,8 +44,7 @@ impl Canvas {
             ..Default::default()
         };
         paint.set_color(color_value(color));
-        self.pixmap
-            .fill_rect(rect, &paint, Transform::identity(), None);
+        Self::pixmap(&mut self.pixmap).fill_rect(rect, &paint, Transform::identity(), None);
     }
 
     fn draw_glyph(&mut self, x: i32, y: i32, character: u8, scale: u32, color: u32) {
@@ -90,7 +89,14 @@ impl Canvas {
             .rasters
             .get(index as usize)
             .ok_or_else(|| format!("native raster handle {handle} is unavailable"))?;
-        raster.draw(self.pixmap.data_mut(), (WIDTH, HEIGHT), x, y, width, height)
+        raster.draw(
+            Self::pixmap(&mut self.pixmap).data_mut(),
+            (WIDTH, HEIGHT),
+            x,
+            y,
+            width,
+            height,
+        )
     }
 }
 
@@ -121,7 +127,7 @@ fn clipped_rect(x: i64, y: i64, width: u32, height: u32) -> Option<(i32, i32, u3
 }
 
 thread_local! {
-    static CANVAS: RefCell<Canvas> = RefCell::new(Canvas::new());
+    static CANVAS: RefCell<Canvas> = RefCell::default();
 }
 
 pub fn clear(color: u32) {
@@ -149,7 +155,7 @@ pub(crate) fn draw_projected_text(
 ) -> Result<(), String> {
     CANVAS.with(|canvas| {
         mask.draw(
-            canvas.borrow_mut().pixmap.data_mut(),
+            Canvas::pixmap(&mut canvas.borrow_mut().pixmap).data_mut(),
             (WIDTH, HEIGHT),
             source_y,
             projection,
@@ -180,7 +186,11 @@ pub fn draw_raster(handle: u32, x: i32, y: i32, width: u32, height: u32) -> Resu
 }
 
 pub fn with_pixels<T>(callback: impl FnOnce(&[u8]) -> T) -> T {
-    CANVAS.with(|canvas| callback(canvas.borrow().pixmap.data()))
+    CANVAS.with(|canvas| callback(Canvas::pixmap(&mut canvas.borrow_mut().pixmap).data()))
+}
+
+pub fn discard_pixels() {
+    CANVAS.with(|canvas| canvas.borrow_mut().pixmap = None);
 }
 
 #[cfg(test)]

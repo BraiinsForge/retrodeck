@@ -136,12 +136,11 @@ struct State {
     configured: bool,
     width: u32,
     height: u32,
-    visible: bool,
-    active: bool,
-    focused: bool,
+    lifecycle: Option<deck_widget_surface_v2::LifecycleState>,
     focus_loss_count: u64,
-    frame_pending: bool,
+    last_buffer: Option<wl_buffer::WlBuffer>,
     refresh_requested: bool,
+    retry_frame: bool,
     shutdown: bool,
     touch_x: i32,
     touch_y: i32,
@@ -151,8 +150,35 @@ struct State {
 }
 
 impl State {
+    fn focused(&self) -> bool {
+        self.lifecycle == Some(deck_widget_surface_v2::LifecycleState::Visible)
+    }
+
+    fn needs_preview(&self) -> bool {
+        !self.shutdown
+            && self.lifecycle == Some(deck_widget_surface_v2::LifecycleState::Prepared)
+            && self.last_buffer.is_none()
+            && self.slots.is_empty()
+    }
+
     fn renderable(&self) -> bool {
-        self.visible && (self.active || self.frame_pending)
+        !self.shutdown && (self.focused() || self.needs_preview())
+    }
+
+    fn trim_buffers(&mut self) {
+        if self.focused() {
+            return;
+        }
+        // BMC holds the latest submission until it is replaced or becomes dormant.
+        // Keep that frame for the swipe, and don't touch any buffer still in use.
+        self.slots.retain(|slot| {
+            if slot.busy || self.last_buffer.as_ref() == Some(&slot.buffer) {
+                true
+            } else {
+                slot.buffer.destroy();
+                false
+            }
+        });
     }
     fn widget_event(&mut self, event: deck_widget_surface_v2::Event) {
         use deck_widget_surface_v2::{Event, LifecycleState};
@@ -170,32 +196,30 @@ impl State {
                 drop(fd);
             }
             Event::Lifecycle { state } => {
-                self.visible = matches!(
-                    state,
-                    WEnum::Value(
-                        LifecycleState::Prepared
-                            | LifecycleState::Entering
-                            | LifecycleState::Visible
-                            | LifecycleState::Leaving
-                    )
-                );
-                self.active =
-                    self.visible && !matches!(state, WEnum::Value(LifecycleState::Prepared));
-                let focused = matches!(state, WEnum::Value(LifecycleState::Visible));
-                if self.focused && !focused {
-                    self.focus_loss_count += 1;
-                }
-                self.focused = focused;
-                self.frame_pending = self.visible;
-                if !self.active {
+                let was_focused = self.focused();
+                self.lifecycle = match state {
+                    WEnum::Value(state) => Some(state),
+                    _ => None,
+                };
+                if !self.focused() {
+                    self.focus_loss_count += u64::from(was_focused);
                     self.touch_down = false;
                     self.touches.clear();
                 }
-                if self.visible {
-                    self.refresh_requested = true;
+                if matches!(self.lifecycle, None | Some(LifecycleState::Dormant))
+                    && self.last_buffer.take().is_some()
+                    && let Some(surface) = &self.surface
+                {
+                    // A frame may have crossed the compositor's Dormant event in
+                    // flight. Detach it so we get a release even in that case.
+                    surface.attach(None, 0, 0);
+                    surface.commit();
                 }
+                self.trim_buffers();
+                self.retry_frame = false;
+                self.refresh_requested = self.renderable();
             }
-            Event::TransitionIncoming => self.refresh_requested = true,
+            Event::TransitionIncoming => self.refresh_requested |= self.renderable(),
             Event::Shutdown => self.shutdown = true,
             _ => {}
         }
@@ -320,11 +344,19 @@ impl Widget {
         }
     }
 
-    fn dispatch(&mut self, timeout_ms: u32) -> Result<usize, String> {
+    fn dispatch_pending(&mut self) -> Result<usize, String> {
         let dispatched = self
             .queue
             .dispatch_pending(&mut self.state)
             .map_err(|error| format!("cannot dispatch Wayland events: {error}"))?;
+        if dispatched > 0 {
+            self.flush("cannot flush Wayland display")?;
+        }
+        Ok(dispatched)
+    }
+
+    fn dispatch(&mut self, timeout_ms: u32) -> Result<usize, String> {
+        let dispatched = self.dispatch_pending()?;
         if dispatched > 0 {
             return Ok(dispatched);
         }
@@ -333,10 +365,7 @@ impl Widget {
         let deadline = Instant::now() + Duration::from_millis(u64::from(timeout_ms));
         loop {
             let Some(guard) = self.queue.prepare_read() else {
-                let dispatched = self
-                    .queue
-                    .dispatch_pending(&mut self.state)
-                    .map_err(|error| format!("cannot dispatch Wayland events: {error}"))?;
+                let dispatched = self.dispatch_pending()?;
                 if dispatched > 0 {
                     return Ok(dispatched);
                 }
@@ -374,10 +403,7 @@ impl Widget {
                 }
                 Err(error) => return Err(format!("cannot read Wayland events: {error}")),
             }
-            return self
-                .queue
-                .dispatch_pending(&mut self.state)
-                .map_err(|error| format!("cannot dispatch Wayland events: {error}"));
+            return self.dispatch_pending();
         }
     }
 
@@ -400,10 +426,7 @@ impl Widget {
         controls: &mut controls::Controls,
         timeout_ms: u32,
     ) -> Result<polling::InputDispatch, String> {
-        let dispatched = self
-            .queue
-            .dispatch_pending(&mut self.state)
-            .map_err(|error| format!("cannot dispatch Wayland events: {error}"))?;
+        let dispatched = self.dispatch_pending()?;
         if dispatched > 0 || self.state.shutdown || !self.state.touches.is_empty() {
             return self.dispatch_queued_inputs(controls);
         }
@@ -417,10 +440,7 @@ impl Widget {
         let deadline = Instant::now() + Duration::from_millis(u64::from(effective_timeout));
         loop {
             let Some(guard) = self.queue.prepare_read() else {
-                let dispatched = self
-                    .queue
-                    .dispatch_pending(&mut self.state)
-                    .map_err(|error| format!("cannot dispatch Wayland events: {error}"))?;
+                let dispatched = self.dispatch_pending()?;
                 if dispatched > 0 || self.state.shutdown || !self.state.touches.is_empty() {
                     return self.dispatch_queued_inputs(controls);
                 }
@@ -464,7 +484,7 @@ impl Widget {
                     return Ok(self.input_dispatch(controls, true, true));
                 }
             }
-            let touch_lost = match self.queue.dispatch_pending(&mut self.state) {
+            let touch_lost = match self.dispatch_pending() {
                 Ok(_) => false,
                 Err(error) => {
                     eprintln!("retrodeck: cannot dispatch Wayland events: {error}");
@@ -509,51 +529,42 @@ impl Widget {
         }
     }
 
-    fn ensure_slots(&mut self) -> Result<(), String> {
-        let width = self.state.width;
-        let height = self.state.height;
+    fn available_slot(&mut self) -> Result<Option<usize>, String> {
+        let (width, height) = (self.state.width, self.state.height);
         let size = frame_size(width, height)?;
-        if self
-            .state
-            .slots
-            .first()
-            .is_some_and(|slot| slot.mapping.size == size)
-        {
-            return Ok(());
+        self.state.slots.retain(|slot| {
+            if !slot.busy && slot.mapping.size != size {
+                slot.buffer.destroy();
+                false
+            } else {
+                true
+            }
+        });
+        if let Some(index) = self.state.slots.iter().position(|slot| !slot.busy) {
+            return Ok(Some(index));
         }
-        if self.state.slots.iter().any(|slot| slot.busy) {
-            return Err("Wayland buffer size changed while buffers are in use".to_owned());
+        let limit = if self.state.focused() {
+            BUFFER_COUNT
+        } else {
+            1
+        };
+        if self.state.slots.len() >= limit {
+            return Ok(None);
         }
-        for slot in self.state.slots.drain(..) {
-            slot.buffer.destroy();
-        }
-
         let shm = self
             .state
             .shm
-            .clone()
+            .as_ref()
             .expect("checked while opening widget");
-        let qh = self.queue.handle();
-        let mut slots: Vec<BufferSlot> = Vec::with_capacity(BUFFER_COUNT);
-        for index in 0..BUFFER_COUNT {
-            let (mapping, buffer) = match create_buffer(&shm, &qh, width, height, index) {
-                Ok(result) => result,
-                Err(error) => {
-                    for slot in slots {
-                        slot.buffer.destroy();
-                    }
-                    return Err(error);
-                }
-            };
-            slots.push(BufferSlot {
-                mapping,
-                buffer,
-                busy: false,
-                game_layout: None,
-            });
-        }
-        self.state.slots = slots;
-        Ok(())
+        let (mapping, buffer) = create_buffer(shm, &self.queue.handle(), width, height)?;
+        let index = self.state.slots.len();
+        self.state.slots.push(BufferSlot {
+            mapping,
+            buffer,
+            busy: false,
+            game_layout: None,
+        });
+        Ok(Some(index))
     }
 
     #[cfg(test)]
@@ -562,21 +573,13 @@ impl Widget {
     }
 
     fn present_rgba(&mut self, rgba: &[u8]) -> Result<(), String> {
-        self.present_rgba_if(rgba, |state| state.renderable())
-    }
-
-    fn present_rgba_if(
-        &mut self,
-        rgba: &[u8],
-        can_present: impl FnOnce(&State) -> bool,
-    ) -> Result<(), String> {
         if self.state.width != canvas::WIDTH
             || self.state.height != canvas::HEIGHT
             || rgba.len() != canvas::WIDTH as usize * canvas::HEIGHT as usize * 4
         {
             return Err("Wayland surface does not match the native canvas".to_owned());
         }
-        self.present_if(can_present, |pixels| copy_rgba_to_xrgb(rgba, pixels))
+        self.present_frame(|pixels| copy_rgba_to_xrgb(rgba, pixels))
     }
 
     fn present_rgb565(&mut self, rgb565: &[u16]) -> Result<(), String> {
@@ -590,34 +593,22 @@ impl Widget {
     }
 
     fn present_frame(&mut self, draw: impl FnOnce(&mut [u32])) -> Result<(), String> {
-        self.present_if(|state| state.renderable(), draw)
-    }
-
-    fn present_if(
-        &mut self,
-        can_present: impl FnOnce(&State) -> bool,
-        draw: impl FnOnce(&mut [u32]),
-    ) -> Result<(), String> {
-        self.present_slot_if(can_present, |slot| {
+        self.present_slot(|slot| {
             slot.game_layout = None;
             draw(slot.mapping.pixels());
         })
     }
 
-    fn present_slot_if(
-        &mut self,
-        can_present: impl FnOnce(&State) -> bool,
-        draw: impl FnOnce(&mut BufferSlot),
-    ) -> Result<(), String> {
+    fn present_slot(&mut self, draw: impl FnOnce(&mut BufferSlot)) -> Result<(), String> {
         if !self.state.configured {
             return Err("Wayland surface is not configured".to_owned());
         }
         let _ = self.dispatch(0)?;
-        if !can_present(&self.state) || self.state.shutdown {
+        if !self.state.renderable() {
             return Ok(());
         }
-        self.ensure_slots()?;
-        let Some(index) = self.state.slots.iter().position(|slot| !slot.busy) else {
+        let Some(index) = self.available_slot()? else {
+            self.state.retry_frame = true;
             return Ok(());
         };
         let surface = self
@@ -635,7 +626,8 @@ impl Widget {
             self.state.slots[index].busy = false;
             return Err(error);
         }
-        self.state.frame_pending = false;
+        self.state.last_buffer = Some(self.state.slots[index].buffer.clone());
+        self.state.retry_frame = false;
         Ok(())
     }
 }
@@ -667,18 +659,15 @@ pub fn present_game_xrgb(
             source: (source_width, source_height),
             exit_hint,
         };
-        widget.present_slot_if(
-            |state| state.focused,
-            |slot| {
-                let pixels = slot.mapping.pixels();
-                // Repaint the letterbox only when this buffer's layout changes.
-                if slot.game_layout != Some(layout) {
-                    fill_gameplay_background(pixels, exit_hint);
-                    slot.game_layout = Some(layout);
-                }
-                scale_game_frame(frame, source_width, source_height, pixels, width, height);
-            },
-        )
+        widget.present_slot(|slot| {
+            let pixels = slot.mapping.pixels();
+            // Repaint the letterbox only when this buffer's layout changes.
+            if slot.game_layout != Some(layout) {
+                fill_gameplay_background(pixels, exit_hint);
+                slot.game_layout = Some(layout);
+            }
+            scale_game_frame(frame, source_width, source_height, pixels, width, height);
+        })
     })
 }
 
@@ -764,10 +753,6 @@ pub fn present_rgba(rgba: &[u8]) -> Result<(), String> {
     with_widget(|widget| widget.present_rgba(rgba))
 }
 
-pub fn present_game_rgba(rgba: &[u8]) -> Result<(), String> {
-    with_widget(|widget| widget.present_rgba_if(rgba, |state| state.focused))
-}
-
 pub fn present_rgb565(rgb565: &[u16]) -> Result<(), String> {
     with_widget(|widget| widget.present_rgb565(rgb565))
 }
@@ -790,12 +775,39 @@ pub fn size() -> Option<(u32, u32)> {
     })
 }
 
+pub fn frame_renderable() -> bool {
+    WIDGET.with(|current| {
+        current
+            .borrow()
+            .as_ref()
+            .is_some_and(|widget| widget.state.renderable())
+    })
+}
+
+pub(crate) fn frame_active() -> bool {
+    WIDGET.with(|current| {
+        current
+            .borrow()
+            .as_ref()
+            .is_some_and(|widget| !widget.state.shutdown && widget.state.focused())
+    })
+}
+
+pub fn needs_preview() -> bool {
+    WIDGET.with(|current| {
+        current
+            .borrow()
+            .as_ref()
+            .is_some_and(|widget| widget.state.needs_preview())
+    })
+}
+
 /// Only Visible can advance emulation. Count losses even if the widget
 /// returned to Visible in the same dispatch batch.
 pub(crate) fn game_focus() -> (bool, u64) {
     WIDGET.with(|current| {
         current.borrow().as_ref().map_or((false, 0), |widget| {
-            (widget.state.focused, widget.state.focus_loss_count)
+            (widget.state.focused(), widget.state.focus_loss_count)
         })
     })
 }
@@ -848,7 +860,6 @@ fn create_buffer(
     qh: &QueueHandle<State>,
     width: u32,
     height: u32,
-    data: usize,
 ) -> Result<(Mapping, wl_buffer::WlBuffer), String> {
     let size = frame_size(width, height)?;
     let (mapping, fd) = Mapping::new(size)?;
@@ -860,7 +871,7 @@ fn create_buffer(
         (width * 4) as i32,
         wl_shm::Format::Xrgb8888,
         qh,
-        data,
+        (),
     );
     pool.destroy();
     Ok((mapping, buffer))
@@ -946,19 +957,21 @@ delegate_noop!(State: ignore wl_shm::WlShm);
 delegate_noop!(State: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(State: ignore deck_widget_manager_v3::DeckWidgetManagerV3);
 
-impl Dispatch<wl_buffer::WlBuffer, usize> for State {
+impl Dispatch<wl_buffer::WlBuffer, ()> for State {
     fn event(
         state: &mut Self,
-        _: &wl_buffer::WlBuffer,
+        buffer: &wl_buffer::WlBuffer,
         event: wl_buffer::Event,
-        index: &usize,
+        _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
         if let wl_buffer::Event::Release = event {
-            if let Some(slot) = state.slots.get_mut(*index) {
+            if let Some(slot) = state.slots.iter_mut().find(|slot| &slot.buffer == buffer) {
                 slot.busy = false;
             }
+            state.trim_buffers();
+            state.refresh_requested |= state.retry_frame || state.needs_preview();
         }
     }
 }
@@ -1086,14 +1099,21 @@ mod tests {
         state.widget_event(Event::Lifecycle {
             state: WEnum::Value(LifecycleState::Dormant),
         });
-        assert!(!state.visible);
+        assert!(!state.renderable());
         state.widget_event(Event::Lifecycle {
             state: WEnum::Value(LifecycleState::Prepared),
         });
-        assert!(state.visible && state.refresh_requested);
+        assert!(state.needs_preview() && state.refresh_requested);
         state.refresh_requested = false;
         state.widget_event(Event::TransitionIncoming);
         assert!(state.refresh_requested);
+        for lifecycle in [LifecycleState::Entering, LifecycleState::Leaving] {
+            state.widget_event(Event::Lifecycle {
+                state: WEnum::Value(lifecycle),
+            });
+            state.widget_event(Event::TransitionIncoming);
+            assert!(!state.renderable() && !state.refresh_requested);
+        }
         state.widget_event(Event::Shutdown);
         assert!(state.shutdown);
     }

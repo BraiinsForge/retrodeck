@@ -59,6 +59,7 @@ pub struct Runtime {
     input_until: u64,
     default_volume: u8,
     layout: Option<menu::MenuLayout>,
+    frame_dirty: bool,
     renderer: menu::MenuRenderer,
     running: bool,
     rescan: bool,
@@ -150,6 +151,7 @@ impl Runtime {
             input_until: 0,
             default_volume,
             layout: None,
+            frame_dirty: true,
             renderer,
             running: false,
             rescan: false,
@@ -188,8 +190,7 @@ impl Runtime {
         app.last_scan = Some(self.now);
         app.network = network::read_network_status(&self.paths.wifi_status);
         app.network_refreshed_at = self.now;
-        self.render(app)?;
-        self.present()?;
+        self.present(app)?;
         self.running = true;
         Ok(())
     }
@@ -228,8 +229,24 @@ impl Runtime {
         }
         Ok(())
     }
-    fn present(&self) -> Result<(), String> {
-        canvas::with_pixels(wayland::present_rgba)
+    fn present(&mut self, app: &mut App) -> Result<(), String> {
+        if !wayland::frame_renderable() {
+            return Ok(());
+        }
+        if self.frame_dirty {
+            self.render(app)?;
+            self.frame_dirty = false;
+        }
+        let result = canvas::with_pixels(wayland::present_rgba);
+        self.trim_canvas();
+        result
+    }
+
+    fn trim_canvas(&mut self) {
+        if !wayland::frame_active() {
+            canvas::discard_pixels();
+            self.frame_dirty = true;
+        }
     }
     fn cue(&mut self, cue: Cue, volume: u8) -> bool {
         if volume == 0 {
@@ -277,6 +294,7 @@ impl Runtime {
         if self.presentation_owned {
             self.presentation_owned = false;
             wayland::close();
+            self.trim_canvas();
         }
         self.layout = None;
         self.running = false;
@@ -295,11 +313,11 @@ impl Runtime {
     fn effect(&mut self, effect: &Effect, app: &mut App) -> Result<Option<Event>, String> {
         Ok(match effect {
             Effect::Render => {
-                self.render(app)?;
+                self.frame_dirty = true;
                 None
             }
             Effect::Present => {
-                self.present()?;
+                self.present(app)?;
                 None
             }
             Effect::Cue(cue) => {
@@ -385,6 +403,8 @@ impl Runtime {
                 };
                 let plan = &active.plan;
                 let touch_disconnected = !plan.touch_supervision;
+                canvas::discard_pixels();
+                self.frame_dirty = true;
                 let arguments: Vec<_> = plan.arguments.iter().map(OsString::from).collect();
                 let environment: Vec<_> = plan
                     .environment
@@ -458,6 +478,7 @@ impl Runtime {
             &mut outcome,
         )?;
         let poll = polling::dispatch(app.poll_timeout(now_ms()))?;
+        self.trim_canvas();
         self.now = now_ms();
         let reports: Vec<_> = (0..poll.touch_count)
             .map(|_| {
@@ -477,7 +498,7 @@ impl Runtime {
             ));
         }
         if poll.refresh {
-            self.present()?;
+            self.present(app)?;
         }
         self.rescan |= poll.rescan;
         self.step(app, Event::Tick(self.now), &mut outcome)?;
@@ -493,7 +514,7 @@ impl Runtime {
                 },
                 &mut outcome,
             )?;
-            if !poll.touch_lost && !outcome.discard_touch {
+            if !poll.touch_lost && !outcome.discard_touch && wayland::frame_active() {
                 for report in reports {
                     self.step(
                         app,

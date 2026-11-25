@@ -600,12 +600,16 @@ pub fn run(directory: &Path) -> Result<(), String> {
     while !process::shutdown_requested() {
         let now = polling::monotonic_nanoseconds();
         let decoded = session.generate(&mut state, now);
-        if session.dirty {
+        if wayland::frame_renderable() && (session.dirty || wayland::needs_preview()) {
             render::full(&state, session.volume);
             session.present()?;
             session.dirty = false;
             session.next_render = now.saturating_add(RENDER_NS);
-        } else if decoded && state.metadata.is_some() && now >= session.next_render {
+        } else if wayland::frame_active()
+            && decoded
+            && state.metadata.is_some()
+            && now >= session.next_render
+        {
             render::playback(&state);
             session.present()?;
             session.next_render = now.saturating_add(RENDER_NS);
@@ -616,6 +620,10 @@ pub fn run(directory: &Path) -> Result<(), String> {
             8
         };
         let poll = polling::dispatch(timeout)?;
+        if !wayland::frame_active() {
+            canvas::discard_pixels();
+            session.dirty = true;
+        }
         if poll.touch_lost {
             return Err("Chiptune Wayland connection lost".to_owned());
         }

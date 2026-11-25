@@ -7,8 +7,15 @@ use std::time::{Duration, Instant};
 const LOGICAL_WIDTH: usize = 1280;
 const LOGICAL_HEIGHT: usize = 480;
 enum Target {
-    Widget { converted: Vec<u32> },
-    Headless { frame: Vec<u16>, hash: u64 },
+    Widget {
+        converted: Vec<u32>,
+        width: usize,
+        height: usize,
+    },
+    Headless {
+        frame: Vec<u16>,
+        hash: u64,
+    },
 }
 
 struct Video {
@@ -69,6 +76,8 @@ pub fn open(headless: bool) -> Result<(), String> {
         crate::wayland::open_game_widget()?;
         Target::Widget {
             converted: Vec::new(),
+            width: 0,
+            height: 0,
         }
     };
     *VIDEO.lock().expect("video lock") = Some(Video {
@@ -143,7 +152,13 @@ pub unsafe fn present(
             }
             Ok(())
         }
-        Target::Widget { converted } => {
+        Target::Widget {
+            converted,
+            width: last_width,
+            height: last_height,
+        } => {
+            *last_width = width;
+            *last_height = height;
             convert_to_xrgb(data, width, height, pitch, rgb565, converted);
             crate::wayland::present_game_xrgb(converted, width, height)
         }
@@ -177,10 +192,18 @@ pub fn before_frame(on_resume: impl FnOnce(Duration)) -> Result<bool, String> {
     let Some(video) = guard.as_mut() else {
         return Ok(true);
     };
-    if !matches!(&video.target, Target::Widget { .. }) {
+    let Target::Widget {
+        converted,
+        width,
+        height,
+    } = &video.target
+    else {
         return Ok(true);
-    }
-    match video.focus.wait()? {
+    };
+    match video
+        .focus
+        .wait(|| crate::wayland::present_game_xrgb(converted, *width, *height))?
+    {
         Focus::Shutdown => return Ok(false),
         Focus::Resumed(paused) => {
             video.exit_hold_started = None;
@@ -223,13 +246,17 @@ pub struct WidgetFocus {
 }
 
 impl WidgetFocus {
-    pub fn wait(&mut self) -> Result<Focus, String> {
+    pub fn wait(
+        &mut self,
+        mut preview: impl FnMut() -> Result<(), String>,
+    ) -> Result<Focus, String> {
         let started = Instant::now();
         crate::wayland::dispatch(0)?;
         let (initially_focused, losses) = crate::wayland::game_focus();
         let paused = !initially_focused || self.focus_loss_count != losses;
         let resumed = !self.started || paused;
         if paused {
+            crate::canvas::discard_pixels();
             crate::game_audio::discard_pending();
             crate::wayland::discard_game_touches();
         }
@@ -249,6 +276,10 @@ impl WidgetFocus {
                 } else {
                     Focus::Continuous
                 });
+            }
+            if crate::wayland::needs_preview() {
+                preview()?;
+                crate::canvas::discard_pixels();
             }
             crate::wayland::dispatch(100)?;
         }
