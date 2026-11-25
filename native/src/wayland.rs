@@ -117,6 +117,13 @@ struct GameLayout {
     exit_hint: bool,
 }
 
+/// Surface-local coordinates; our SHM buffers use unit scale and no transform.
+struct DamageRect {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+}
 struct BufferSlot {
     mapping: Mapping,
     buffer: wl_buffer::WlBuffer,
@@ -596,10 +603,14 @@ impl Widget {
         self.present_slot(|slot| {
             slot.game_layout = None;
             draw(slot.mapping.pixels());
+            None
         })
     }
 
-    fn present_slot(&mut self, draw: impl FnOnce(&mut BufferSlot)) -> Result<(), String> {
+    fn present_slot(
+        &mut self,
+        draw: impl FnOnce(&mut BufferSlot) -> Option<DamageRect>,
+    ) -> Result<(), String> {
         if !self.state.configured {
             return Err("Wayland surface is not configured".to_owned());
         }
@@ -616,11 +627,26 @@ impl Widget {
             .surface
             .as_ref()
             .expect("created while opening widget");
+        // Damage is relative to the last surface commit, not just this SHM slot.
+        let previous_layout = self.state.last_buffer.as_ref().and_then(|last| {
+            self.state
+                .slots
+                .iter()
+                .find(|slot| &slot.buffer == last)?
+                .game_layout
+        });
         let slot = &mut self.state.slots[index];
-        draw(slot);
+        let damage = draw(slot)
+            .filter(|_| slot.game_layout == previous_layout)
+            .unwrap_or(DamageRect {
+                x: 0,
+                y: 0,
+                width: self.state.width as i32,
+                height: self.state.height as i32,
+            });
         slot.busy = true;
         surface.attach(Some(&slot.buffer), 0, 0);
-        surface.damage(0, 0, self.state.width as i32, self.state.height as i32);
+        surface.damage(damage.x, damage.y, damage.width, damage.height);
         surface.commit();
         if let Err(error) = self.flush("cannot flush Wayland frame") {
             self.state.slots[index].busy = false;
@@ -662,11 +688,14 @@ pub fn present_game_xrgb(
         widget.present_slot(|slot| {
             let pixels = slot.mapping.pixels();
             // Repaint the letterbox only when this buffer's layout changes.
-            if slot.game_layout != Some(layout) {
+            let repaint_background = slot.game_layout != Some(layout);
+            if repaint_background {
                 fill_gameplay_background(pixels, exit_hint);
                 slot.game_layout = Some(layout);
             }
-            scale_game_frame(frame, source_width, source_height, pixels, width, height);
+            let viewport =
+                scale_game_frame(frame, source_width, source_height, pixels, width, height);
+            viewport.filter(|_| !repaint_background)
         })
     })
 }
@@ -678,7 +707,7 @@ fn scale_game_frame(
     pixels: &mut [u32],
     target_width: usize,
     target_height: usize,
-) {
+) -> Option<DamageRect> {
     if pixels.len() < target_width * target_height
         || frame.len() < source_width * source_height
         || source_width == 0
@@ -686,7 +715,7 @@ fn scale_game_frame(
         || target_width <= GAME_INSET * 2
         || target_height <= GAME_INSET * 2
     {
-        return;
+        return None;
     }
     let scale = ((target_width - GAME_INSET * 2) / source_width)
         .min((target_height - GAME_INSET * 2) / source_height)
@@ -694,7 +723,7 @@ fn scale_game_frame(
     let width = source_width * scale;
     let height = source_height * scale;
     if width > target_width || height > target_height {
-        return;
+        return None;
     }
     let offset_x = (target_width - width) / 2;
     let offset_y = (target_height - height) / 2;
@@ -724,6 +753,12 @@ fn scale_game_frame(
             pixels.copy_within(first_row..first_row + width, row);
         }
     }
+    Some(DamageRect {
+        x: offset_x as i32,
+        y: offset_y as i32,
+        width: width as i32,
+        height: height as i32,
+    })
 }
 
 fn open_widget_for(display: Option<&Path>) -> Result<(), String> {

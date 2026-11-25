@@ -36,6 +36,7 @@ struct Frame {
     pixels: Vec<u8>,
     width: i32,
     height: i32,
+    damage: Vec<(i32, i32, i32, i32)>,
 }
 struct Pool {
     file: Arc<std::fs::File>,
@@ -49,7 +50,10 @@ struct Buffer {
     height: i32,
 }
 #[derive(Default)]
-struct Surface(Mutex<Option<wl_buffer::WlBuffer>>);
+struct Surface {
+    buffer: Mutex<Option<wl_buffer::WlBuffer>>,
+    damage: Mutex<Vec<(i32, i32, i32, i32)>>,
+}
 struct Server {
     active: Option<(ClientId, widget_surface::DeckWidgetSurfaceV2)>,
     frames: mpsc::Sender<Frame>,
@@ -278,9 +282,18 @@ impl Dispatch<wl_surface::WlSurface, Surface> for Server {
         init: &mut DataInit<'_, Self>,
     ) {
         match request {
-            wl_surface::Request::Attach { buffer, .. } => *data.0.lock().unwrap() = buffer,
+            wl_surface::Request::Attach { buffer, .. } => *data.buffer.lock().unwrap() = buffer,
+            wl_surface::Request::Damage {
+                x,
+                y,
+                width,
+                height,
+            } => {
+                data.damage.lock().unwrap().push((x, y, width, height));
+            }
             wl_surface::Request::Commit => {
-                if let Some(buffer) = data.0.lock().unwrap().take() {
+                let damage = std::mem::take(&mut *data.damage.lock().unwrap());
+                if let Some(buffer) = data.buffer.lock().unwrap().take() {
                     let data = buffer.data::<Buffer>().unwrap();
                     let mut pixels = vec![0; data.length];
                     data.file.read_exact_at(&mut pixels, data.offset).unwrap();
@@ -290,6 +303,7 @@ impl Dispatch<wl_surface::WlSurface, Surface> for Server {
                             pixels,
                             width: data.width,
                             height: data.height,
+                            damage,
                         })
                         .unwrap();
                     if state.hold_frames {
@@ -305,6 +319,32 @@ impl Dispatch<wl_surface::WlSurface, Surface> for Server {
             _ => {}
         }
     }
+}
+
+#[test]
+fn game_damage_covers_the_scaled_viewport_and_invalidated_letterbox() {
+    let fixture = Fixture::new();
+    let widget = fixture.open();
+    WIDGET.with(|slot| *slot.borrow_mut() = Some(widget));
+    let full = (0, 0, 1280, 480);
+    for (width, height, expected) in [
+        (160, 144, full),
+        (160, 144, (400, 24, 480, 432)),
+        (256, 224, full),
+        (256, 224, (384, 16, 512, 448)),
+    ] {
+        present_game_xrgb(&vec![0xff12_3456; width * height], width, height).unwrap();
+        let frame = fixture.frames.recv_timeout(WAIT).unwrap();
+        assert_eq!(frame.damage, [expected]);
+        with_widget(|w| {
+            w.queue
+                .roundtrip(&mut w.state)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        })
+        .unwrap();
+    }
+    close();
 }
 
 // Commands and barriers avoid timing assumptions and process-wide environment
